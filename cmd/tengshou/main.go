@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/LuSrackhall/tengshou/internal/app"
+	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/httpapi"
 	"github.com/LuSrackhall/tengshou/internal/version"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -92,11 +93,12 @@ func listenWithFallback(a *app.App) (*httpapi.Server, net.Listener, error) {
 	for port := cfg.HTTP.Port; port < cfg.HTTP.Port+10 && port <= 65535; port++ {
 		cfg.HTTP.Port = port
 		server := httpapi.New(httpapi.Options{
-			Reader:  a.Reader,
-			Service: a.Service,
-			Logger:  a.Logger,
-			Config:  cfg,
-			Version: version.String(),
+			Reader:   a.Reader,
+			Service:  a.Service,
+			Logger:   a.Logger,
+			Config:   cfg,
+			Settings: config.NewSettings(a.Paths, cfg),
+			Version:  version.String(),
 		})
 		ln, err := server.Listen()
 		if err == nil {

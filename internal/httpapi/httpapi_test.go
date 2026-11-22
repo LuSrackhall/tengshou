@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LuSrackhall/tengshou/internal/backup"
 	"github.com/LuSrackhall/tengshou/internal/config"
@@ -24,6 +25,7 @@ const token = "test-token"
 
 type fixture struct {
 	server     *httptest.Server
+	apiServer  *httpapi.Server
 	handler    http.Handler
 	partyID    string
 	partyBID   string
@@ -35,9 +37,11 @@ type fixture struct {
 }
 
 type fixtureOptions struct {
-	allowLAN bool
-	lanHosts []string
-	sign     *sign.Manager
+	allowLAN       bool
+	lanHosts       []string
+	sign           *sign.Manager
+	eventPoll      time.Duration
+	eventHeartbeat time.Duration
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -99,23 +103,28 @@ func newFixtureWithOptions(t *testing.T, opts fixtureOptions) *fixture {
 	svc := service.New(st, reader, "tester")
 	dataDir := t.TempDir()
 	svc.SetDataDir(dataDir)
+	var settings *config.Settings
 	if paths, err := config.ResolvePaths(dataDir); err == nil {
 		svc.SetBackupManager(backup.New(paths, "test",
 			func(ctx context.Context, dest string) error { return st.Snapshot(dest) },
 			func(ctx context.Context) (int, error) { return st.SchemaVersion() }))
+		settings = config.NewSettings(paths, cfg)
 	}
 	server := httpapi.New(httpapi.Options{
-		Reader:   reader,
-		Service:  svc,
-		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Config:   cfg,
-		Version:  "test",
-		Sign:     opts.sign,
-		LANHosts: opts.lanHosts,
+		Reader:                 reader,
+		Service:                svc,
+		Logger:                 slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config:                 cfg,
+		Settings:               settings,
+		Version:                "test",
+		Sign:                   opts.sign,
+		LANHosts:               opts.lanHosts,
+		EventPollInterval:      opts.eventPoll,
+		EventHeartbeatInterval: opts.eventHeartbeat,
 	})
 	ts := httptest.NewServer(server.Handler())
 	t.Cleanup(ts.Close)
-	return &fixture{server: ts, handler: server.Handler(), partyID: partyA.ID,
+	return &fixture{server: ts, apiServer: server, handler: server.Handler(), partyID: partyA.ID,
 		partyBID: partyB.ID, contractID: contract.ID, dataDir: dataDir, service: svc,
 		store: st, reader: reader}
 }

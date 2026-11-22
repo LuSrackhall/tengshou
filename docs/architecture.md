@@ -137,6 +137,11 @@
 - **B6 MCP 写工具**复用 `/app/api/v1`：带 `X-Tengshou-MCP: 1` 的写请求在
   `mcp.write_enabled=false` 时返回 403，并以 actor=tengshou-mcp 记入变更记录；
   连接器只接受回环地址，自身不监听端口。详见 [mcp.md](mcp.md)。
+- **B18 实时同步**：`GET /app/api/v1/events`（SSE）以 change_log 为游标推送
+  外部写入，界面按实体增量刷新；SSE 不可用时前端降级为 3 秒轮询。MCP 写开关
+  由 `config.Settings` 运行时持有并持久化到 `config.json`，切换即时生效；
+  合同 / 档案详情与变更记录页展示谁改了什么，并区分人工与 Agent 来源。详见
+  [b18-realtime-audit.md](b18-realtime-audit.md)。
 - 响应带 `nosniff`、`no-referrer`、`X-Frame-Options: DENY`、页面 CSP。
 - HTTP 服务设置读写 / 空闲超时与最大请求头，避免慢连接占用。
 

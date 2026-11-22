@@ -192,6 +192,29 @@ func (s *Service) logChange(ctx context.Context, entity, entityID, action, summa
 	_ = s.st.AppendChangeLog(ctx, entry)
 }
 
+// RecordMCPWriteEnabled appends an audit entry for a change of the MCP write
+// switch. Settings changes reuse the append-only change log so the audit view
+// shows who opened or closed agent writes, and when.
+func (s *Service) RecordMCPWriteEnabled(ctx context.Context, oldEnabled, newEnabled bool) {
+	state := func(enabled bool) string {
+		if enabled {
+			return "开启"
+		}
+		return "关闭"
+	}
+	summary := "关闭 MCP 写工具：agent 只能读取，写工具会返回 mcp_write_disabled"
+	if newEnabled {
+		summary = "开启 MCP 写工具：agent 可新建字段、档案与合同草稿（写入记为 tengshou-mcp）"
+	}
+	s.logChange(ctx, model.ChangeEntitySettings, "mcp", model.ChangeActionUpdate, summary,
+		[]model.FieldChange{{
+			Field: "mcp.write_enabled",
+			Label: "MCP 写工具",
+			Old:   state(oldEnabled),
+			New:   state(newEnabled),
+		}})
+}
+
 var fieldKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 
 // userFieldTypes are the types a runtime-created field may use. party/status

@@ -21,8 +21,10 @@
     <button type="button" data-tab="fields">字段</button>
     <button type="button" data-tab="changelog">变更记录</button>
     <button type="button" data-tab="data">数据安全</button>
+    <button type="button" data-tab="settings">设置</button>
   </nav>
   <div class="meta" id="meta"></div>
+  <span id="liveStatus" class="live-status" title="界面与本地服务的数据同步状态">同步中</span>
 </header>
 
 <main>
@@ -113,14 +115,18 @@
         <option value="template">模板</option>
         <option value="party">相对方</option>
         <option value="field">字段</option>
+        <option value="settings">设置</option>
+      </select>
+      <select id="changeActorFilter" aria-label="操作来源">
+        <option value="">全部来源</option>
+        <option value="human">人工</option>
+        <option value="agent">Agent（MCP）</option>
       </select>
       <span class="spacer"></span>
       <button type="button" id="refreshChangelogBtn">刷新</button>
     </div>
-    <p class="hint">记录谁在何时改了什么。操作者取自本机系统用户，可在 config.json 的 operator 中指定。</p>
-    <div id="changelogSummary" class="summary"></div>
-    <div id="changelogList" class="changelog"></div>
-  </section>
+    <p class="hint">记录谁在何时改了什么。操作者取自本机系统用户，可在 config.json 的 operator 中指定；通过 MCP 连接器的写入标记为「Agent（MCP）」。外部写入会在数秒内自动反映到本页与各列表。</p>
+    <div id="recentActivity" class="recent-activity"></div>
     <div id="changelogSummary" class="summary"></div>
     <div id="changelogList" class="changelog"></div>
   </section>
@@ -134,6 +140,16 @@
     <p class="hint">所有数据都在本机数据目录：数据库、签名与公章图片、模板文件、已生成的 PDF 和配置。备份包包含上述全部内容（不含日志），换电脑时可在新机器上恢复。备份包未加密，请像保管合同原件一样保管它。</p>
     <div id="backupStatus" class="summary"></div>
     <div id="integrityReport"></div>
+  </section>
+
+  <section id="view-settings" class="view" aria-label="设置">
+    <div class="toolbar">
+      <span id="mcpStatusSummary" class="summary-inline"></span>
+      <span class="spacer"></span>
+      <button type="button" id="refreshMCPStatusBtn">刷新状态</button>
+    </div>
+    <p class="hint">MCP 连接器让本机 AI agent（Claude Code / Claude Desktop）读写腾手数据。连接器以 stdio 运行、只走本机回环，本面板不会启动或停止它。</p>
+    <div id="mcpPanel" class="mcp-panel"><p class="hint">正在读取 MCP 状态…</p></div>
   </section>
 </main>
 

@@ -232,7 +232,27 @@ func knownTool(name string) bool {
 	return false
 }
 
+// isWriteTool reports whether name is one of the create tools. Write tools are
+// exactly the definitions annotated readOnlyHint=false.
+func isWriteTool(name string) bool {
+	for _, tool := range toolDefinitions() {
+		if tool.Name != name {
+			continue
+		}
+		readOnly, _ := tool.Annotations["readOnlyHint"].(bool)
+		return !readOnly
+	}
+	return false
+}
+
 func (s *Server) executeTool(ctx context.Context, name string, args json.RawMessage) toolResult {
+	// Fail fast when the desktop app has closed the write switch. The HTTP
+	// guard also enforces this (and stays authoritative); checking here gives
+	// the agent a clear error before any network round-trip.
+	if isWriteTool(name) && s.writeEnabled != nil && !s.writeEnabled() {
+		return errorResult(fmt.Errorf(
+			"mcp_write_disabled：MCP 写工具已关闭（mcp.write_enabled=false）；可在腾手桌面应用「设置」页开启"))
+	}
 	var (
 		raw json.RawMessage
 		err error

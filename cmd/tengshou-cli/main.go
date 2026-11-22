@@ -204,11 +204,12 @@ func runServe(dataDir, fontPath string, fontIndex, port int, loopback bool) erro
 		cfg.HTTP.Port = port
 	}
 	server := httpapi.New(httpapi.Options{
-		Reader:  a.Reader,
-		Service: a.Service,
-		Logger:  a.Logger,
-		Config:  cfg,
-		Version: version.String(),
+		Reader:   a.Reader,
+		Service:  a.Service,
+		Logger:   a.Logger,
+		Config:   cfg,
+		Settings: config.NewSettings(a.Paths, cfg),
+		Version:  version.String(),
 	})
 	ln, err := server.Listen()
 	if err != nil {
@@ -377,7 +378,14 @@ func runMCP(args []string) error {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	logger.Info("腾手 MCP 服务已启动（stdio）", "api", strings.Join(bases, "、"), "data_dir", *dataDir)
-	server := mcp.New(mcp.Options{API: api, Version: version.String(), Logger: logger})
+	opts := mcp.Options{API: api, Version: version.String(), Logger: logger}
+	// The connector re-reads config.json before each write tool call, so
+	// switching MCP writes off in the desktop app applies without restarting
+	// this process. The HTTP guard remains the authoritative gate.
+	if paths, err := config.ResolvePaths(*dataDir); err == nil {
+		opts.WriteEnabled = config.MCPWriteGate(paths)
+	}
+	server := mcp.New(opts)
 	return server.Serve(context.Background(), os.Stdin, os.Stdout)
 }
 

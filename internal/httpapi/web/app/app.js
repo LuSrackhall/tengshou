@@ -24,6 +24,10 @@ const state = {
   showArchivedFields: false,
   changelog: [],
   tab: "contracts",
+  /* 实时同步游标：最近一条变更记录的 id（服务端用它补发之后的事件）。 */
+  lastEventId: "",
+  /* 当前打开详情弹窗的审计目标，用于外部写入时只刷新审计区块。 */
+  auditTarget: null,
 };
 
 /* PDF.js renders imported template PDFs. The worker is vendored locally so
@@ -39,12 +43,15 @@ const TYPE_LABELS = {
 
 const ENTITY_LABELS = {
   contract: "合同", party: "相对方", field: "字段", seal: "公章", template: "模板",
-  signature: "签名", backup: "备份",
+  signature: "签名", backup: "备份", settings: "设置",
 };
 const ACTION_LABELS = {
   create: "新建", update: "修改", delete: "删除", archive: "归档", import: "导入",
   export: "导出", restore: "恢复", generate: "生成",
 };
+/* MCP-originated writes carry this actor (service.MCPActor). */
+const MCP_ACTOR = "tengshou-mcp";
+
 
 /* ---------- 基础工具 ---------- */
 
@@ -127,6 +134,7 @@ function fmtDate(iso) {
 function closeModal() {
   stopSignPolling();
   destroyTemplateEditor();
+  state.auditTarget = null;
   if (currentSignSessionId) {
     const id = currentSignSessionId;
     currentSignSessionId = null;
@@ -246,11 +254,21 @@ async function loadContracts() {
 
 async function loadChangelog() {
   const entity = $("#changeEntityFilter").value;
+  const source = $("#changeActorFilter") ? $("#changeActorFilter").value : "";
   const params = new URLSearchParams({ limit: "100" });
   if (entity) params.set("entity", entity);
+  if (source) params.set("source", source);
   const data = await api("/app/api/v1/changelog?" + params.toString());
   state.changelog = data.items || [];
   renderChangelog(data.total || 0);
+  loadRecentActivity().catch(() => {});
+}
+
+async function loadRecentActivity() {
+  const box = $("#recentActivity");
+  if (!box) return;
+  const data = await api("/app/api/v1/changelog?limit=8");
+  renderRecentActivity(data.items || []);
 }
 
 function applyExportLink() {
@@ -520,7 +538,12 @@ async function openContractForm(contract) {
     <datalist id="partyNameList">
       ${state.parties.map((p) => `<option value="${esc(p.name)}"></option>`).join("")}
     </datalist>
-    <div class="form-grid">${form}</div>`;
+    <div class="form-grid">${form}</div>
+    ${contract ? `<div id="contractHistory" class="audit-host"></div>` : ""}`;
+  if (contract) {
+    state.auditTarget = { entity: "contract", id: contract.id, selector: "#contractHistory" };
+    loadAuditHistory("contract", contract.id, "#contractHistory");
+  }
   footerButton(modal, "取消", "", closeModal);
   if (contract) {
     footerButton(modal, "删除", "danger", () => deleteContract(contract, modal));
@@ -2086,7 +2109,12 @@ function openPartyForm(party) {
   const modal = openModal(party ? `编辑相对方 · ${party.name}` : "新建相对方");
   const form = fields.map((f) =>
     fieldControlHTML("party", f, partyControlValue(f, party), {})).join("");
-  modal.body.innerHTML = `<div id="partyErrors"></div><div class="form-grid">${form}</div>`;
+  modal.body.innerHTML = `<div id="partyErrors"></div><div class="form-grid">${form}</div>
+    ${party ? `<div id="partyHistory" class="audit-host"></div>` : ""}`;
+  if (party) {
+    state.auditTarget = { entity: "party", id: party.id, selector: "#partyHistory" };
+    loadAuditHistory("party", party.id, "#partyHistory");
+  }
   footerButton(modal, "取消", "", closeModal);
   if (party) footerButton(modal, "删除", "danger", () => deleteParty(party, modal));
   const save = footerButton(modal, "保存", "primary", async () => {
@@ -2294,6 +2322,24 @@ async function archiveField(field) {
 
 /* ---------- 变更记录 ---------- */
 
+function isAgentEntry(entry) { return entry.actor === MCP_ACTOR; }
+function actorLabel(entry) { return isAgentEntry(entry) ? "Agent（MCP）" : "人工"; }
+
+function actorBadgeHTML(entry) {
+  const agent = isAgentEntry(entry);
+  return `<span class="badge source ${agent ? "agent" : "human"}" title="actor：${esc(entry.actor || "")}">${actorLabel(entry)}</span>`;
+}
+
+function changeDiffsHTML(entry) {
+  const diffs = (entry.changes || []).map((c) => {
+    const oldText = c.old === "" ? "（空）" : c.old;
+    const newText = c.new === "" ? "（空）" : c.new;
+    return `<li>${esc(c.label || c.field)}：<span class="old">${esc(oldText)}</span>
+      <span class="arrow">→</span> <code>${esc(newText)}</code></li>`;
+  }).join("");
+  return diffs ? `<ul class="change-diffs">${diffs}</ul>` : "";
+}
+
 function renderChangelog(total) {
   $("#changelogSummary").textContent = `共 ${total} 条记录（显示最近 ${state.changelog.length} 条）`;
   const list = $("#changelogList");
@@ -2301,22 +2347,72 @@ function renderChangelog(total) {
     list.innerHTML = `<div class="empty">还没有变更记录。</div>`;
     return;
   }
-  list.innerHTML = state.changelog.map((entry) => {
-    const diffs = (entry.changes || []).map((c) => {
-      const oldText = c.old === "" ? "（空）" : c.old;
-      const newText = c.new === "" ? "（空）" : c.new;
-      return `<li>${esc(c.label || c.field)}：<span class="old">${esc(oldText)}</span>
-        <span class="arrow">→</span> <code>${esc(newText)}</code></li>`;
-    }).join("");
-    return `<div class="change-card">
+  list.innerHTML = state.changelog.map((entry) => `
+    <div class="change-card">
       <div class="change-head">
+        ${actorBadgeHTML(entry)}
         <span class="badge ${esc(entry.action)}">${esc(ACTION_LABELS[entry.action] || entry.action)}</span>
         <span class="summary">${esc(entry.summary)}</span>
         <span class="who">${esc(ENTITY_LABELS[entry.entity] || entry.entity)} · ${esc(entry.actor || "")} · ${esc(fmtDate(entry.created_at))}</span>
       </div>
-      ${diffs ? `<ul class="change-diffs">${diffs}</ul>` : ""}
-    </div>`;
-  }).join("");
+      ${changeDiffsHTML(entry)}
+    </div>`).join("");
+}
+
+function renderRecentActivity(items) {
+  const box = $("#recentActivity");
+  if (!box) return;
+  if (!items.length) {
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = `
+    <div class="recent-head">最近操作</div>
+    <ul class="recent-list">${items.map((entry) => `
+      <li>
+        <span class="recent-time">${esc(fmtDate(entry.created_at))}</span>
+        ${actorBadgeHTML(entry)}
+        <span class="badge ${esc(entry.action)}">${esc(ACTION_LABELS[entry.action] || entry.action)}</span>
+        <span class="recent-summary">${esc(entry.summary)}</span>
+      </li>`).join("")}
+    </ul>`;
+}
+
+/* ---------- 审计详情（合同 / 相对方弹窗内的变更记录） ---------- */
+
+function auditHistoryHTML(items) {
+  if (!items.length) {
+    return `<div class="audit-block"><div class="audit-head">变更记录</div>
+      <div class="empty">这条记录还没有变更历史。</div></div>`;
+  }
+  return `<div class="audit-block">
+    <div class="audit-head">变更记录 <span class="muted">（最近 ${items.length} 条）</span></div>
+    <ul class="audit-list">${items.map((entry) => `
+      <li>
+        <div class="audit-line">
+          <span class="recent-time">${esc(fmtDate(entry.created_at))}</span>
+          ${actorBadgeHTML(entry)}
+          <span class="badge ${esc(entry.action)}">${esc(ACTION_LABELS[entry.action] || entry.action)}</span>
+          <span class="audit-summary">${esc(entry.summary)}</span>
+        </div>
+        ${changeDiffsHTML(entry)}
+      </li>`).join("")}
+    </ul></div>`;
+}
+
+async function loadAuditHistory(entity, id, selector) {
+  const host = $(selector);
+  if (!host || !id) return;
+  const params = new URLSearchParams({ entity, entity_id: id, limit: "20" });
+  try {
+    const data = await api("/app/api/v1/changelog?" + params.toString());
+    if (!host.isConnected) return; // this modal was closed or replaced meanwhile
+    host.innerHTML = auditHistoryHTML(data.items || []);
+  } catch (err) {
+    if (host.isConnected) {
+      host.innerHTML = `<div class="audit-block error">变更记录加载失败：${esc(err.message)}</div>`;
+    }
+  }
 }
 
 /* ---------- Excel 导入 ---------- */
@@ -2698,6 +2794,302 @@ async function exportSignature(id) {
   }
 }
 
+/* ---------- 设置：MCP 状态与读写开关 ---------- */
+
+async function loadMCPStatus() {
+  const panel = $("#mcpPanel");
+  if (!panel) return null;
+  try {
+    const status = await api("/app/api/v1/mcp/status");
+    renderMCPPanel(status);
+    return status;
+  } catch (err) {
+    panel.innerHTML = `<div class="form-errors">MCP 状态读取失败：${esc(err.message)}</div>`;
+    const summary = $("#mcpStatusSummary");
+    if (summary) summary.textContent = "MCP 状态不可用";
+    return null;
+  }
+}
+
+function renderMCPPanel(status) {
+  const panel = $("#mcpPanel");
+  if (!panel) return;
+  const enabled = !!status.write_enabled;
+  const total = status.agent_actions_total || 0;
+  const recent = status.agent_actions_recent || 0;
+  const last = status.last_agent_action;
+  const lastHTML = last
+    ? `${esc(last.summary)} <span class="muted">（${esc(fmtDate(last.created_at))}）</span>`
+    : "还没有 agent 写入记录";
+  const summary = $("#mcpStatusSummary");
+  if (summary) {
+    summary.innerHTML = `<span class="badge active">服务运行中</span>
+      <span>读工具 ${status.read_tools || 0} 个</span>
+      <span>写工具 ${status.write_tools || 0} 个</span>`;
+  }
+  panel.innerHTML = `
+    <div class="mcp-grid">
+      <div class="mcp-card">
+        <h3>连接器状态</h3>
+        <dl>
+          <dt>服务</dt><dd><span class="badge active">运行中</span></dd>
+          <dt>传输</dt><dd>stdio · 仅本机回环 · 不打开数据库</dd>
+          <dt>读工具</dt><dd>${status.read_tools || 0} 个 <span class="muted">始终可用</span></dd>
+          <dt>写工具</dt><dd>${status.write_tools || 0} 个 <span class="muted">新建字段 / 档案 / 合同草稿，全部记入变更记录</span></dd>
+          <dt>Agent 操作</dt><dd>累计 ${total} 次，近 24 小时 ${recent} 次</dd>
+          <dt>最近一次</dt><dd>${lastHTML}</dd>
+          <dt>数据目录</dt><dd><code>${esc(status.data_dir || "")}</code></dd>
+        </dl>
+      </div>
+      <div class="mcp-card">
+        <h3>读写开关</h3>
+        <div class="switch-row">
+          <label class="switch"><input type="checkbox" checked disabled>
+            <span>读工具（默认开启）</span></label>
+        </div>
+        <div class="switch-row">
+          <label class="switch"><input type="checkbox" id="mcpWriteToggle" ${enabled ? "checked" : ""}>
+            <span>写工具（${enabled ? "已开启" : "已关闭"}）</span></label>
+        </div>
+        <p class="hint">关闭后：agent 仍可读取；写工具返回 <code>mcp_write_disabled</code>，桌面界面的写入不受影响。改动即时生效，并写入变更记录。</p>
+        <p class="hint">配置文件：<code>${esc(status.config_file || "config.json")}</code>（键 <code>${esc(status.settings_key || "mcp.write_enabled")}</code>）。</p>
+      </div>
+      <div class="mcp-card full">
+        <h3>连接说明</h3>
+        <p>${esc(status.connection_help || "")}</p>
+        <p class="hint">注册命令（填到 Claude Code / Claude Desktop 的 MCP 配置中）：</p>
+        <pre class="mono mcp-command">${esc(status.command || "tengshou-cli mcp")}</pre>
+        <p class="hint">本面板只展示状态与开关，不启动或停止 MCP 进程。</p>
+      </div>
+    </div>`;
+  const toggle = $("#mcpWriteToggle", panel);
+  if (toggle) toggle.addEventListener("change", () => setMCPWriteEnabled(toggle.checked, toggle));
+}
+
+async function setMCPWriteEnabled(enabled, toggle) {
+  if (toggle) toggle.disabled = true;
+  if (!enabled && !window.confirm("关闭 MCP 写工具后，agent 只能读取数据（写工具会报错）。确认关闭？")) {
+    if (toggle) { toggle.checked = true; toggle.disabled = false; }
+    return;
+  }
+  try {
+    await api("/app/api/v1/settings/mcp", { method: "POST", body: { write_enabled: enabled } });
+    toast(enabled ? "已开启 MCP 写工具（即时生效）" : "已关闭 MCP 写工具（即时生效）");
+    await loadMCPStatus();
+  } catch (err) {
+    if (toggle) { toggle.checked = !enabled; toggle.disabled = false; }
+    toast(err.message, true);
+  }
+}
+
+/* ---------- 实时同步（SSE + 轮询降级） ----------
+   MCP / agent 从外部写数据时，界面无需重启或整页刷新：单例 EventSource
+   接收 change_log 事件，按实体增量刷新当前视图；桌面壳或代理阻断 SSE 时
+   自动降级为 3 秒轮询（页面隐藏时暂停）。 */
+
+let eventSource = null;
+let eventPollTimer = null;
+let eventRefreshTimer = null;
+let eventRetryTimer = null;
+let realtimeMode = "connecting";
+const pendingEntities = new Set();
+const seenEventIds = new Set();
+let pendingAgentActivity = false;
+
+function setLiveStatus(mode, detail) {
+  realtimeMode = mode;
+  const el = $("#liveStatus");
+  if (!el) return;
+  el.classList.remove("sse", "poll", "connecting", "offline");
+  el.classList.add(mode);
+  if (mode === "sse") {
+    el.textContent = "实时同步";
+    el.title = "已连接本地变更事件流，外部写入会立即显示";
+  } else if (mode === "poll") {
+    el.textContent = "轮询同步";
+    el.title = "事件流不可用，已降级为 3 秒轮询；外部写入会在数秒内显示";
+  } else if (mode === "offline") {
+    el.textContent = "同步中断";
+    el.title = "暂时无法接收变更事件，正在重试";
+  } else {
+    el.textContent = "同步中…";
+    el.title = "正在连接本地变更事件流";
+  }
+  if (detail) el.title = detail;
+}
+
+function eventStreamURL() {
+  const params = new URLSearchParams();
+  if (state.lastEventId) params.set("after", state.lastEventId);
+  const qs = params.toString();
+  return "/app/api/v1/events" + (qs ? "?" + qs : "");
+}
+
+function startRealtime() {
+  connectEventStream();
+}
+
+function connectEventStream() {
+  if (eventRetryTimer) {
+    clearTimeout(eventRetryTimer);
+    eventRetryTimer = null;
+  }
+  if (typeof EventSource === "undefined") {
+    startEventPolling();
+    return;
+  }
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+  let source;
+  try {
+    source = new EventSource(eventStreamURL());
+  } catch (_) {
+    startEventPolling();
+    return;
+  }
+  eventSource = source;
+  source.onopen = () => {
+    if (eventSource !== source) return;
+    stopEventPolling();
+    setLiveStatus("sse");
+    // Catch up on anything written between the last page load and the stream
+    // starting (or while the stream was disconnected).
+    requestCatchUpRefresh();
+  };
+  source.onmessage = (event) => {
+    if (eventSource !== source || !event.data) return;
+    let payload = null;
+    try {
+      payload = JSON.parse(event.data);
+    } catch (_) {
+      return;
+    }
+    if (payload && !payload.id && event.lastEventId) payload.id = event.lastEventId;
+    handleChangeEvent(payload);
+  };
+  source.onerror = () => {
+    if (eventSource !== source) return;
+    // EventSource retries on its own while CONNECTING. Polling runs alongside
+    // so updates keep flowing when SSE is blocked by the desktop WebView.
+    if (realtimeMode !== "poll") setLiveStatus("poll");
+    startEventPolling();
+    if (source.readyState === 2 /* CLOSED */) {
+      eventSource = null;
+      eventRetryTimer = setTimeout(connectEventStream, 10000);
+    }
+  };
+}
+
+async function pollEventsOnce() {
+  if (document.hidden) return;
+  try {
+    const params = new URLSearchParams({ limit: "200" });
+    if (state.lastEventId) params.set("after", state.lastEventId);
+    const data = await api("/app/api/v1/changelog?" + params.toString());
+    for (const item of data.items || []) handleChangeEvent(item);
+  } catch (_) {
+    /* transient: the next tick retries */
+  }
+}
+
+function startEventPolling() {
+  if (eventPollTimer) return;
+  pollEventsOnce();
+  eventPollTimer = setInterval(pollEventsOnce, 3000);
+}
+
+function stopEventPolling() {
+  if (eventPollTimer) {
+    clearInterval(eventPollTimer);
+    eventPollTimer = null;
+  }
+}
+
+function scheduleRealtimeRefresh(delay) {
+  if (eventRefreshTimer) clearTimeout(eventRefreshTimer);
+  eventRefreshTimer = setTimeout(() => {
+    eventRefreshTimer = null;
+    flushRealtimeRefresh();
+  }, delay == null ? 350 : delay);
+}
+
+function requestCatchUpRefresh() {
+  for (const entity of ["field", "contract", "party", "seal", "template"]) {
+    pendingEntities.add(entity);
+  }
+  if (state.tab === "settings") pendingEntities.add("settings");
+  scheduleRealtimeRefresh(150);
+}
+
+function handleChangeEvent(item) {
+  if (!item || !item.id || seenEventIds.has(item.id)) return;
+  seenEventIds.add(item.id);
+  if (seenEventIds.size > 500) {
+    seenEventIds.delete(seenEventIds.values().next().value);
+  }
+  state.lastEventId = item.id;
+  pendingEntities.add(item.entity || "");
+  if (isAgentEntry(item)) pendingAgentActivity = true;
+  if (state.auditTarget &&
+      item.entity === state.auditTarget.entity &&
+      item.entity_id === state.auditTarget.id) {
+    loadAuditHistory(state.auditTarget.entity, state.auditTarget.id, state.auditTarget.selector);
+    if (isAgentEntry(item)) {
+      toast("Agent（MCP）修改了当前打开的记录，变更记录已刷新；请核对后再保存");
+    }
+  }
+  scheduleRealtimeRefresh(350);
+}
+
+async function flushRealtimeRefresh() {
+  const entities = new Set(pendingEntities);
+  pendingEntities.clear();
+  const agentActivity = pendingAgentActivity;
+  pendingAgentActivity = false;
+  if (!entities.size) return;
+  const needFields = entities.has("field");
+  const needBootstrap = entities.has("contract") || needFields;
+  const jobs = [];
+  if (entities.has("contract") || needFields) jobs.push(loadContracts());
+  if (entities.has("party") || needFields) jobs.push(loadParties());
+  if (needFields) jobs.push(loadFields());
+  if (entities.has("seal")) jobs.push(loadSeals());
+  if (entities.has("template")) jobs.push(loadTemplates());
+  try {
+    await Promise.all(jobs);
+  } catch (_) {
+    /* transient: leave the previous data on screen */
+  }
+  if (needBootstrap) {
+    const bootstrap = await api("/app/api/v1/bootstrap").catch(() => null);
+    if (bootstrap) {
+      state.bootstrap = bootstrap;
+      state.years = bootstrap.years || [];
+      renderYearSelect();
+      renderMeta();
+    }
+  }
+  if (entities.has("contract") || needFields) renderContracts();
+  if (entities.has("party") || needFields) renderParties();
+  if (needFields) renderFields();
+  if (entities.has("seal")) renderSeals();
+  if (entities.has("template")) renderTemplates();
+  if (state.tab === "changelog") {
+    loadChangelog().catch(() => {});
+  } else {
+    loadRecentActivity().catch(() => {});
+  }
+  if (state.tab === "settings" && (entities.has("settings") || agentActivity)) {
+    loadMCPStatus().catch(() => {});
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) pollEventsOnce();
+});
+
 /* ---------- 页面切换 ---------- */
 
 function switchTab(tab) {
@@ -2708,6 +3100,7 @@ function switchTab(tab) {
   if (tab === "seals") loadSeals().then(renderSeals).catch((err) => toast(err.message, true));
   if (tab === "templates") loadTemplates().then(renderTemplates).catch((err) => toast(err.message, true));
   if (tab === "data") loadBackupStatus().catch((err) => toast(err.message, true));
+  if (tab === "settings") loadMCPStatus().catch((err) => toast(err.message, true));
 }
 
 async function refreshAfterWrite() {
@@ -2839,8 +3232,14 @@ function bindEvents() {
   $("#changeEntityFilter").addEventListener("change", () => {
     loadChangelog().catch((err) => toast(err.message, true));
   });
+  $("#changeActorFilter").addEventListener("change", () => {
+    loadChangelog().catch((err) => toast(err.message, true));
+  });
   $("#refreshChangelogBtn").addEventListener("click", () => {
     loadChangelog().catch((err) => toast(err.message, true));
+  });
+  $("#refreshMCPStatusBtn").addEventListener("click", () => {
+    loadMCPStatus().catch((err) => toast(err.message, true));
   });
 }
 
@@ -2860,6 +3259,9 @@ async function boot() {
     const summary = $("#contractSummary");
     if (summary) summary.textContent = "加载失败：" + err.message;
   }
+  // Start the change feed even when the initial load failed: it is what
+  // surfaces data written by agents while the page is open.
+  startRealtime();
 }
 
 document.addEventListener("DOMContentLoaded", boot);

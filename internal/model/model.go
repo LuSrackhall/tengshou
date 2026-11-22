@@ -78,6 +78,7 @@ const (
 	ChangeEntityTemplate  = "template"
 	ChangeEntitySignature = "signature"
 	ChangeEntityBackup    = "backup"
+	ChangeEntitySettings  = "settings"
 	ChangeActionCreate    = "create"
 	ChangeActionUpdate    = "update"
 	ChangeActionDelete    = "delete"

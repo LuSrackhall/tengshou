@@ -71,7 +71,7 @@ func TestOnboardingCopyPresent(t *testing.T) {
 		{"web/app/index.html", "我有一份上级模板"},
 		{"web/app/index.html", "样例数据，不写入台账"},
 		{"web/app/index.html", "本机自检"},
-		{"../../frontend/src/components/templates/useTemplateEditor.ts", "样例数据未写入台账"},
+		{"../../frontend/src/components/templates/useTemplatePreviewGenerate.ts", "样例数据未写入台账"},
 		{"../../docs/b8-onboarding.md", "试用数据与真实数据的边界"},
 		{"../../docs/b8-onboarding.md", "不预置地方模板"},
 		{"../../README.md", "第一次使用"},

@@ -44,6 +44,7 @@ const {
   result,
   previewOverlay,
   previewOverlayKey,
+  registerPlacementElement,
   selectPlacement,
   patchPlacement,
   removePlacement,
@@ -106,6 +107,7 @@ const {
                     :selected-id="selectedId"
                     :fields="fields"
                     :seals="seals"
+                    :register-placement-element="registerPlacementElement"
                     @select="selectPlacement($event)"
                     @change="patchPlacement"
                     @remove="removePlacement"

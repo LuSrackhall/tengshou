@@ -28,6 +28,11 @@ const props = defineProps<{
   selectedId: string | null;
   fields: FieldsByEntityResponse;
   seals: Seal[];
+  /** 把标定框的真实 DOM 元素登记给编辑器（选中列表项时滚动定位用）。 */
+  registerPlacementElement?: (
+    id: string,
+    element: HTMLElement | null,
+  ) => void;
 }>();
 
 const emit = defineEmits<{
@@ -105,6 +110,9 @@ onBeforeUnmount(() => {
         :page-height="pageSize.height"
         :selected="selectedId === placement.id"
         :label="bindingLabel(placement, fields, seals)"
+        :register-element="
+          (element) => registerPlacementElement?.(placement.id, element)
+        "
         @select="emit('select', placement.id)"
         @change="(patch) => emit('change', placement.id, patch)"
         @remove="emit('remove', placement.id)"

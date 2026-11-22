@@ -66,7 +66,11 @@ export function createPlacement(
   return { placement };
 }
 
-/** 保存载荷：保留全部坐标与绑定字段，空字符串 / 缺省值的序列化与迁移前一致。 */
+/**
+ * 保存载荷：保留全部坐标与绑定字段；party / seal_mode 为空时省略而非显式
+ * 空串，经后端 omitempty 与按类型归一化（internal/model/model.go、
+ * internal/service/templates.go）后与迁移前的序列化语义等价。
+ */
 export function mappingPlacements(placements: Placement[]): Placement[] {
   return placements.map((placement) => ({
     id: placement.id,

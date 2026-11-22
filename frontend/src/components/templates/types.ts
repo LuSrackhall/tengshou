@@ -32,6 +32,14 @@ export interface PreviewDownload {
   sample: boolean;
 }
 
+/** 预览层（样例预览 / 合同预览 / 生成结果）的展示状态。 */
+export interface PreviewOverlayState {
+  bytes: Uint8Array;
+  warnings: OverlayWarning[];
+  title: string;
+  download: PreviewDownload | null;
+}
+
 /** 生成成功的展示信息。 */
 export interface GeneratedResult {
   document: OutputDocument;

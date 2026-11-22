@@ -66,12 +66,17 @@ X-Api-Token: <token>
 | GET | `/api/v1/templates?q=&limit=&offset=` | 模板版本列表（不含 HTML 正文；PDF 模板含 kind / 页数 / 位置映射元数据） |
 | GET | `/api/v1/templates/{id}` | 模板详情（HTML 模板含正文；PDF 模板含 placements 标定位置） |
 | GET | `/api/v1/signature-assets?q=&contract_id=&limit=&offset=` | 签名图片元数据（含合同、内容版本关联；不含图片内容） |
-| GET | `/api/v1/documents?contract_id=&limit=&offset=` | 已生成 PDF 记录 |
+| GET | `/api/v1/documents?contract_id=&template_id=&batch_id=&status=&limit=&offset=` | PDF 生成记录（成功与失败；含操作人、内容版本、签名快照、类型与批次） |
 
 PDF 模板（`kind=pdf`）由用户 Word 文档转换而来。`placements` 中的坐标是 PDF 点、
 页面左上角原点（已应用页面旋转），字段绑定键形如 `contract.contract_no`、
 `contract.data.<键>`、`party_b.name`。每个版本一行，合同通过 `template_id` 引用
-具体版本；生成接口在本机应用写入面，详见 [b3-templates.md](b3-templates.md)。
+具体版本；生成接口在本机应用写入面，详见 [b3-templates.md](b3-templates.md) 与
+[b4-generation.md](b4-generation.md)。
+
+`documents` 同时包含成功与失败尝试：`status=success|failed`、`kind=initial|regenerate`、
+`content_sha256`（生成时的合同内容版本）、`signatures`（套印签名快照）、`operator`、
+`batch_id`、`source_document_id` 与 `error_message`。失败记录没有文件，下载返回 404。
 
 ### 示例
 

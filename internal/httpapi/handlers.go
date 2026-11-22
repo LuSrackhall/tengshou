@@ -211,9 +211,16 @@ func (s *Server) handleListSignatures(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListDocuments(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
 	f := filter(r)
-	if id := strings.TrimSpace(r.URL.Query().Get("contract_id")); id != "" {
-		f.Query = id
+	f.ContractID = strings.TrimSpace(q.Get("contract_id"))
+	f.TemplateID = strings.TrimSpace(q.Get("template_id"))
+	f.BatchID = strings.TrimSpace(q.Get("batch_id"))
+	if status := strings.TrimSpace(q.Get("status")); status == model.DocumentStatusSuccess ||
+		status == model.DocumentStatusFailed {
+		f.Status = status
+	} else {
+		f.Status = ""
 	}
 	items, err := s.opts.Reader.ListDocuments(r.Context(), f)
 	if err != nil {

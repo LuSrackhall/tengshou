@@ -262,8 +262,12 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /app/api/v1/templates/{id}/pdf", s.handleAppTemplatePDF)
 	m.HandleFunc("GET /app/api/v1/templates/{id}/source", s.handleAppTemplateSource)
 	m.HandleFunc("POST /app/api/v1/templates/{id}/preview", s.handleAppPreviewTemplate)
+	m.HandleFunc("POST /app/api/v1/templates/{id}/preflight", s.handleAppPreflightGeneration)
 	m.HandleFunc("POST /app/api/v1/templates/{id}/generate", s.handleAppGenerateContract)
+	m.HandleFunc("POST /app/api/v1/templates/{id}/batch/preview", s.handleAppBatchPreviewGeneration)
+	m.HandleFunc("POST /app/api/v1/templates/{id}/batch/generate", s.handleAppBatchGenerate)
 	m.HandleFunc("GET /app/api/v1/converters", s.handleAppConverters)
+	m.HandleFunc("GET /app/api/v1/documents", s.handleAppListDocuments)
 	m.HandleFunc("GET /app/api/v1/documents/{id}/file", s.handleAppDocumentFile)
 
 	// B9 data security: complete backup export, staged restore, consistency

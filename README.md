@@ -3,13 +3,18 @@
 让村里的签合同变成录台账：合同数据录一次，程序产出合同 PDF 与自有台账；
 外部表格格式通过只读数据接口交给用户侧 AI agent 处理，核心不做平台适配。
 
-当前仓库处于 **B6 MCP 数据连接器（读 + 写）**：用户侧 agent 可经本机 stdio
-MCP 查询合同、相对方、动态字段、签名状态与模板版本，并新建字段、档案与合同
-草稿；连接器只走回环 HTTP，不直接打开数据库。B13 公章图片管理（导入、关联与
-模板落位）与 B5 局域网签名同在上述能力之内。
+当前仓库处于 **B3 模板管理**：导入用户自己的 Word 合同模板，转换为 PDF
+后以所见即所得页面展示，在页面上拖框标定字段、签名与公章位置，按版本保存，
+再用真实合同数据预览并套印生成最终 PDF。B2 动态字段、B5 局域网签名、B13 公章
+图片、B6 MCP 数据连接器均在同一条数据链路上。
 
-## 当前能力（B2 + B5 + B13 + B6）
+## 当前能力（B2 + B3 + B5 + B13 + B6）
 
+- **模板管理（B3）**：导入 `.docx`（Windows 优先用本机 Word 导出，其他平台用
+  LibreOffice headless；也可直接导入已导出的 PDF）；界面用 PDF.js 显示转换后的
+  PDF 页面，拖框绑定合同/相对方字段、甲乙方签名与公章位置；每次保存生成新版本，
+  旧合同仍引用旧版本重出；用样例或真实合同预览后生成套印 PDF。细节见
+  [docs/b3-templates.md](docs/b3-templates.md)。
 - **合同台账**：本地 Web 界面（`/app/`）内置表格录入、年度切换与跨年查询、
   搜索、状态筛选；合同编号稳定唯一（`HT-YYYY-NNNN` 或自定义）且创建后不可修改。
 - **动态字段**：运行时新增/修改/归档字段（名称、类型、必填、默认值、是否出现在
@@ -34,7 +39,7 @@ MCP 查询合同、相对方、动态字段、签名状态与模板版本，并�
 - **内嵌 Go 本地服务**：默认监听 `0.0.0.0:8765`；局域网测试页公开，只读数据接口
   需令牌；应用写入接口只允许本机（回环）并校验请求头 / Origin；`/sign/*` 签名页
   只接受局域网来源。
-- **SQLite 持久化**：纯 Go 驱动，内置迁移（v5）；B1 旧库自动补合同编号与年度。
+- **SQLite 持久化**：纯 Go 驱动，内置迁移（v6）；B1 旧库自动补合同编号与年度。
 - **HTML → PDF**：模板 + 合同数据生成带页码的 A4 PDF（中文、分页、图片、签名）。
 - **只读数据接口**：`/api/v1/*`，供 B6 MCP 连接器与用户侧 agent 取数；
   新增 `/api/v1/fields` 暴露字段定义，签名资产可按合同查询。
@@ -108,7 +113,7 @@ go run ./cmd/tengshou-cli backup --data-dir ./data
   config.json     # 服务端口、API 令牌、字体、页边距、签名有效期
   tengshou.db     # SQLite 数据库（WAL）
   assets/         # 签名（signatures/）、公章（seals/）等模板资源
-  templates/      # 用户 HTML 模板
+  templates/      # 用户 HTML 模板；PDF 模板在 templates/pdf/<模板id>/
   outputs/        # 生成的 PDF
   backups/        # 数据库备份
   logs/           # JSON 日志（启动时按大小轮转）
@@ -166,7 +171,9 @@ internal/store/         SQLite、迁移、只读查询
 internal/httpapi/       本地 HTTP 服务、台账界面、签名页与应用接口
 internal/sign/          一次性签名会话与手写 PNG 归一化
 internal/seal/          公章图片校验、白底透明化与裁剪
-internal/service/       可写业务层：字段、档案、合同、签名、Excel、变更记录
+internal/service/       可写业务层：字段、档案、合同、签名、模板、Excel、变更记录
+internal/doctopdf/      Word → PDF 转换（Word COM / LibreOffice headless）
+internal/overlay/       PDF 套印引擎：定位文字、签名与公章并输出最终 PDF
 internal/mcp/           B6 MCP stdio 连接器与回环 HTTP 客户端
 internal/xlsx/          Excel 模板生成、台账导出与解析
 internal/pdfdoc/        HTML 解析 → 排版 → PDF
@@ -180,8 +187,11 @@ internal/model/         稳定数据结构（对外 JSON 契约）
 - 不代替上级办文 / 采购流程；公章只作为图片落到 PDF 指定位置，不承担其它用途。
 - 不内置外部台账模板引擎；外部格式经只读数据接口 / MCP 交给用户侧 agent，
   由 agent 自行填写。
-- 模板编辑器属 B3；B6 MCP 连接器已交付：只读数据 + 新建字段 / 档案 / 合同
-  草稿，不含删除、修改或批量破坏性写接口。
+- B3 模板做得是「Word 是唯一编辑入口 → PDF 高保真 → 位置映射」；不做 HTML
+  直接编辑、不做向导式生成、v0.1 不做动态循环表格。PDF 模板需要本机有 Word
+  （Windows）或 LibreOffice 才能从 .docx 转换，否则可导入已导出的 PDF。
+- B6 MCP 连接器已交付：只读数据 + 新建字段 / 档案 / 合同草稿，不含删除、修改
+  或批量破坏性写接口。
 - 手机扫码页 B5 只做手写签名；手机填表 / 信息采集由 D7 边界决定。
 - Excel 导入只接受 `.xlsx`，单次最多 10000 行。
 - Windows 安装包、代码签名与 Microsoft Store 上架属于 B10；B1 只保证

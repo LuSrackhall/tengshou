@@ -39,6 +39,11 @@
 └───────────────▲──────────────┘   └──────────────┬───────────┘
                 │                                  │
 ┌───────────────┴──────────────┐   ┌───────────────▼───────────┐
+│ internal/doctopdf             │   │ internal/overlay          │
+│  Word COM / LibreOffice → PDF │   │  套印层 → pdfcpu 合成     │
+└──────────────────────────────┘   └───────────────────────────┘
+
+┌──────────────────────────────┐   ┌───────────────────────────┐
 │ cmd/tengshou-cli             │   │ internal/demo             │
 │  demo / serve / render /     │   │  示例数据 + 签名 PNG      │
 │  backup / mcp                │   └───────────────────────────┘
@@ -59,7 +64,7 @@
 | `contracts` | 合同台账（`contract_no` 唯一不可变、`year`、类型、金额、双方、状态、日期、`data_json`） |
 | `field_definitions` | 可配置字段定义（实体、键、类型、必填、默认值、台账/模板开关、内置、归档、排序） |
 | `change_log` | 追加式变更记录（谁、何时、改了什么、字段级 diff） |
-| `templates` | HTML 模板，按 `(name, version)` 唯一，记录引用的变量 |
+| `templates` | 模板版本，按 `(name, version)` 唯一；`kind=html` 存 HTML，`kind=pdf` 存原始 Word/PDF 路径、转换 PDF、页数与位置映射（`mapping_json`） |
 | `signature_assets` | 签名图片元数据（路径、SHA-256、尺寸、采集时间、合同与内容版本关联） |
 | `output_documents` | 已生成 PDF（合同、模板版本、路径、摘要、页数） |
 | `schema_migrations` | 迁移记录 |
@@ -96,11 +101,25 @@
 ## 应用写入面与 Excel
 
 - `/app/` 是内嵌的单页台账界面：年度切换、合同/档案表单、字段管理、变更记录、
-  Excel 模板/导入/导出。纯原生 JS，无构建步骤，CSP 只允许自身脚本与样式。
+  Excel 模板/导入/导出、PDF 模板导入与拖框标定。纯原生 JS，无构建步骤；PDF.js
+  随包本地提供，CSP 只允许自身脚本、样式与同源 worker。
 - `/app/api/v1/*` 是唯一写入面：仅本机回环、写请求需 `X-Tengshou-App: 1`、
   校验同源/回环/桌面 WebView 的 Origin；所有写入经 `internal/service`。
 - Excel 模板与台账列由当前字段定义生成；导入支持列名映射、预览、错误行报告、
   同编号合并更新（空白单元格保持原值）。导出→改→导回与 B14 共用合并语义。
+
+## PDF 模板与套印（B3）
+
+1. 导入 `.docx`：Windows 优先用 Word COM（PowerShell 调用 Word.Application）导出
+   PDF，其他情况用 LibreOffice headless；也可直接导入用户已导出的 PDF。
+2. `internal/overlay` 用 tdewolff/canvas 生成与模板页等尺寸的透明套印层：按标定
+   位置绘制中文文字（自动换行/缩字号）、签名与公章 PNG。
+3. pdfcpu v0.11.0 以多页 PDF 水印方式把套印层逐页贴到模板 PDF（Scale=1、
+   左下角对齐、无旋转），保持原 PDF 的矢量内容与分页。
+4. 预览与生成都走同一套渲染；生成前必须持有针对该合同内容与模板版本的预览摘要。
+5. 模板每个版本一行，合同 `template_id` 固定具体版本，旧合同按旧版本重出。
+
+细节（坐标、绑定键、版本、接口与警告）见 [b3-templates.md](b3-templates.md)。
 
 ## 本地服务与安全
 
@@ -148,7 +167,7 @@
 | 后续 bead | 在本层的落点 |
 | --- | --- |
 | B2 数据底座 / 动态字段 | 已交付：`field_definitions` + `/app/` + service + xlsx |
-| B3 模板管理 | `templates` 已有版本与变量提取；增加编辑 / 预览 / 发布 API（应用内） |
+| B3 模板管理 | 已交付：Word → PDF 转换、PDF.js 标定、pdfcpu 套印、版本与影响统计；见 [b3-templates.md](b3-templates.md) |
 | B5 局域网签名页 | 已交付：`internal/sign` + `/sign/<token>` + 一次性令牌；签名关联合同与内容版本，`signaturePath` 模板占位 |
 | B6 MCP 连接器 | 已交付：`tengshou-cli mcp` stdio 服务 + `internal/mcp`；读 `/api/v1`，写经 `/app/api/v1`，不直接开库；见 [mcp.md](mcp.md) |
 | B9 备份恢复 | `store.Backup` 已有；恢复 = 校验 + 原子替换 + 重启 |

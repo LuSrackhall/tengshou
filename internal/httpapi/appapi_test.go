@@ -71,6 +71,11 @@ func TestAppIndexAndAssets(t *testing.T) {
 	if !strings.Contains(string(body), "合同台账") || !strings.Contains(string(body), "/app/app.js") {
 		t.Fatalf("app index content = %s", body)
 	}
+	// 阶段 0：Vue 岛从 /app/dist/ 载入，页面必须同时保留旧 app.js。
+	if !strings.Contains(string(body), `id="vue-live-status"`) ||
+		!strings.Contains(string(body), "/app/dist/tengshou-ui.js") {
+		t.Fatalf("app index missing vue island wiring: %s", body)
+	}
 	csp := resp.Header.Get("Content-Security-Policy")
 	if !strings.Contains(csp, "script-src 'self'") {
 		t.Fatalf("app CSP = %q", csp)
@@ -82,6 +87,11 @@ func TestAppIndexAndAssets(t *testing.T) {
 	resp, body = f.get(t, "/app/app.css", false)
 	if resp.StatusCode != 200 || !strings.Contains(string(body), "--accent") {
 		t.Fatalf("app css status=%d", resp.StatusCode)
+	}
+	// 未构建的 clone 只有 dist/.keep；缺失的产物必须 404，而不是回落到 index。
+	resp, _ = f.get(t, "/app/dist/missing.js", false)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing dist asset status = %d", resp.StatusCode)
 	}
 }
 

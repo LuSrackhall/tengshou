@@ -6,10 +6,11 @@
 // 结构与 app.js renderContracts 的输出一致（toolbar / summary / data-table /
 // actions 类名不变），数据走 frontend/src/api 的 typed 端点。
 //
-// 跨域：扫码签名、批量生成对话框与 Excel 导入仍属 app.js，经 bridge/app.ts
-// 调用；「以此档案新建合同」「历史合同」等入口经 tengshou:open-contract-form
-// 事件打开本域表单。合同详情里的生成面板由本域 Vue 组件渲染；外部写入经
-// app.js 派发的 tengshou:data-changed 到达后重取。
+// 跨域：扫码签名与 Excel 导入仍属 app.js，经 bridge/app.ts 调用；「以此
+// 档案新建合同」「历史合同」等入口经 tengshou:open-contract-form 事件打开
+// 本域表单。合同详情里的生成面板与批量生成对话框由本域 Vue 组件渲染（模板页
+// 的「批量生成 / 整改重出」也经 tengshou:open-batch-generate 落到这里）；
+// 外部写入经 app.js 派发的 tengshou:data-changed 到达后重取。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   deleteContract as deleteContractRequest,
@@ -39,12 +40,15 @@ import {
   openSignatureDialog,
   refreshAfterWrite,
   subscribeDataChanged,
+  subscribeOpenBatchGenerate,
   subscribeOpenContractForm,
   toast,
+  type BatchGenerateOptions,
   type ContractFormOptions,
   type LedgerBridge,
   type PartyRef,
 } from "../../bridge/app";
+import BatchGenerateDialog from "./BatchGenerateDialog.vue";
 import ContractFormModal from "./ContractFormModal.vue";
 import { saveDownloadedFile } from "./download";
 import { contractFieldValue, statusLabel } from "./format";
@@ -83,14 +87,17 @@ const activeQuery = ref("");
 const loaded = ref(false);
 const selectedIds = ref<string[]>([]);
 const formRequest = ref<FormRequest | null>(null);
+const batchRequest = ref<{ key: number; options: BatchGenerateOptions } | null>(null);
 
 let yearInitialized = false;
 let formSeq = 0;
+let batchSeq = 0;
 let loadSeq = 0;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 let unsubData: (() => void) | null = null;
 let unsubOpenForm: (() => void) | null = null;
+let unsubBatch: (() => void) | null = null;
 
 const tableFields = computed(() => fields.value.filter((field) => field.in_ledger));
 
@@ -365,6 +372,19 @@ function batchGenerate(): void {
   });
 }
 
+/** 批量生成事件（本岛与模板页共用）：对话框由本岛渲染，无合同时按旧行为提示。 */
+function openBatchFromBridge(options: BatchGenerateOptions): void {
+  if (!options.contracts.length) {
+    toast("请选择要生成 PDF 的合同", true);
+    return;
+  }
+  batchRequest.value = { key: ++batchSeq, options };
+}
+
+function closeBatch(): void {
+  batchRequest.value = null;
+}
+
 async function downloadTemplate(): Promise<void> {
   try {
     const file = await downloadExcelTemplate();
@@ -406,6 +426,7 @@ onMounted(() => {
   unsubOpenForm = subscribeOpenContractForm((detail) => {
     openFromBridge(detail.contract, detail.options ?? {});
   });
+  unsubBatch = subscribeOpenBatchGenerate(openBatchFromBridge);
 });
 
 onBeforeUnmount(() => {
@@ -416,6 +437,8 @@ onBeforeUnmount(() => {
   unsubData = null;
   unsubOpenForm?.();
   unsubOpenForm = null;
+  unsubBatch?.();
+  unsubBatch = null;
   if (searchTimer !== undefined) {
     clearTimeout(searchTimer);
     searchTimer = undefined;
@@ -540,5 +563,14 @@ onBeforeUnmount(() => {
     @created="onCreated"
     @renew="onRenew"
     @open-contract="onOpenContract"
+  />
+  <BatchGenerateDialog
+    v-if="batchRequest"
+    :key="batchRequest.key"
+    :title="batchRequest.options.title"
+    :contracts="batchRequest.options.contracts"
+    :template-id="batchRequest.options.templateId"
+    :kind="batchRequest.options.kind"
+    @close="closeBatch"
   />
 </template>

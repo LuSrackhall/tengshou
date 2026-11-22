@@ -6,10 +6,11 @@
 // tengshou:open-contract-form，由台账岛打开表单；app.js 的引导步骤同样经该
 // 事件打开新建表单。
 //
-// 反向调用（Vue → app.js）：toast、整体刷新、扫码签名、批量生成、Excel 导入
-// 与合同详情里的签名摘要仍由 app.js 实现，统一经 window.__tengshouApp 调用；
-// 组件不直接读 window。合同详情里的生成面板已迁到 Vue
-// （components/contracts/ContractGenerationPanel.vue）。
+// 反向调用（Vue → app.js）：toast、整体刷新、扫码签名、Excel 导入与合同
+// 详情里的签名摘要仍由 app.js 实现，统一经 window.__tengshouApp 调用；组件
+// 不直接读 window。合同详情里的生成面板与批量生成对话框已迁到 Vue
+// （components/contracts/），批量生成由合同台账岛监听
+// tengshou:open-batch-generate 后打开。
 //
 // 实时刷新：app.js 收到 SSE / 轮询事件或本地写入完成后派发两个 window 事件：
 //   - tengshou:change       一条变更（detail 是 appEvent 的紧凑子集）
@@ -20,6 +21,7 @@ import type {
   ChangeEntity,
   Contract,
   ContractDetail,
+  DocumentKind,
 } from "../api/types";
 
 export interface PartyRef {
@@ -33,12 +35,13 @@ export interface ContractFormOptions {
   focusGenerate?: boolean;
 }
 
-/** 台账批量生成：合同列表来自 Vue 当前筛选结果（迁移前是 state.contracts）。 */
+/** 批量生成对话框：合同列表来自 Vue 当前筛选结果（迁移前是 state.contracts）。 */
 export interface BatchGenerateOptions {
   title?: string;
   contracts: Contract[];
   templateId?: string;
-  kind?: string;
+  /** regenerate 用于模板整改重出；空串表示由服务端判断。 */
+  kind?: DocumentKind | "";
 }
 
 export interface AppBridge {
@@ -46,8 +49,6 @@ export interface AppBridge {
   refreshAfterWrite(): Promise<void>;
   /** 扫码签名对话框仍由 app.js 渲染。 */
   openSignatureDialog(contract: Contract): void;
-  /** 批量生成对话框仍由 app.js 渲染；失败会自行 toast。 */
-  openBatchGenerateDialog(options: BatchGenerateOptions): Promise<unknown> | void;
   /** 触发 app.js 的隐藏文件输入，导入 Excel 对话框仍归 app.js。 */
   openExcelImport(): void;
   /**
@@ -74,6 +75,9 @@ declare global {
 export const DATA_CHANGED_EVENT = "tengshou:data-changed";
 export const CHANGE_EVENT = "tengshou:change";
 export const OPEN_CONTRACT_FORM_EVENT = "tengshou:open-contract-form";
+// 批量生成域（阶段 1 迁出 app.js）：台账与模板页都经该事件打开对话框，
+// 由合同台账岛渲染（模板页所在的 tab 不承载 overlay）。
+export const OPEN_BATCH_GENERATE_EVENT = "tengshou:open-batch-generate";
 // 模板域（阶段 1 迁出 app.js）：引导与引导自检仍由 app.js 渲染，需要打开
 // 模板标定编辑器或导入流程；模板岛监听这两个事件后接管。
 export const OPEN_TEMPLATE_EDITOR_EVENT = "tengshou:open-template-editor";
@@ -172,15 +176,44 @@ export function openSignatureDialog(contract: Contract): void {
   bridge.openSignatureDialog(contract);
 }
 
-/** 批量生成对话框（app.js）；失败统一经 toast 呈现。 */
+/** 打开批量生成对话框：由合同台账岛监听事件后渲染。 */
 export function openBatchGenerateDialog(options: BatchGenerateOptions): void {
-  const bridge = getAppBridge();
-  if (!bridge) {
-    return;
+  window.dispatchEvent(
+    new CustomEvent<BatchGenerateOptions>(OPEN_BATCH_GENERATE_EVENT, {
+      detail: options,
+    }),
+  );
+}
+
+function normalizeBatchGenerate(raw: unknown): BatchGenerateOptions | null {
+  if (!isRecord(raw) || !Array.isArray(raw.contracts)) {
+    return null;
   }
-  void Promise.resolve(bridge.openBatchGenerateDialog(options)).catch((error: unknown) => {
-    toast(errorMessage(error), true);
-  });
+  const contracts = raw.contracts
+    .filter(isRecord)
+    .map((item) => item as unknown as Contract);
+  const kind =
+    raw.kind === "initial" || raw.kind === "regenerate" ? raw.kind : undefined;
+  return {
+    contracts,
+    title: typeof raw.title === "string" ? raw.title : undefined,
+    templateId: typeof raw.templateId === "string" ? raw.templateId : undefined,
+    kind,
+  };
+}
+
+/** 订阅「打开批量生成」事件；返回取消订阅函数。 */
+export function subscribeOpenBatchGenerate(
+  handler: (options: BatchGenerateOptions) => void,
+): () => void {
+  const listener = (event: Event): void => {
+    const options = normalizeBatchGenerate((event as CustomEvent<unknown>).detail);
+    if (options) {
+      handler(options);
+    }
+  };
+  window.addEventListener(OPEN_BATCH_GENERATE_EVENT, listener);
+  return () => window.removeEventListener(OPEN_BATCH_GENERATE_EVENT, listener);
 }
 
 /** 触发 app.js 的 Excel 导入文件选择（对话框仍归 app.js）。 */

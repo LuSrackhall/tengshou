@@ -6,8 +6,9 @@
 //
 // 跨域：扫码签名与签名摘要仍由 app.js 渲染——本组件保留 #contractSignatures
 // 宿主，挂载后经 bridge/app.ts 的 mountContractSignatures 交给 app.js；扫码
-// 签名与批量生成同样经桥调用。「生成 PDF」面板已迁到 Vue
-// （ContractGenerationPanel），「已关联公章」摘要用公章域的 SealSummary 渲染。
+// 签名同样经桥调用。「生成 PDF」面板与批量生成对话框已迁到 Vue
+// （ContractGenerationPanel / BatchGenerateDialog），「已关联公章」摘要用
+// 公章域的 SealSummary 渲染。
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ApiError } from "../../api/client";
 import {

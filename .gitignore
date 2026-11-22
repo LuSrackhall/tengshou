@@ -1,0 +1,31 @@
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+*.gate.lock*
+
+# Gas City
+.beads/*
+!.beads/identity.toml
+
+# Gas City / Claude machine-local files
+.claude/
+
+# OS
+.DS_Store
+
+# Go
+*.exe
+*.test
+*.out
+
+# Wails / Node
+build/bin/
+node_modules/
+dist/
+
+# Secrets
+.env
+*.pem
+*.key

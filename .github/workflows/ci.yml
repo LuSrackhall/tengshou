@@ -32,6 +32,14 @@ jobs:
       - name: 单元与集成测试
         run: go test -count=1 ./internal/... ./cmd/tengshou-cli
 
+  frontend:
+    name: 前端工程约束
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 结构预算棘轮
+        run: bash scripts/check-frontend-structure.sh
+
   cli:
     name: 构建 CLI（${{ matrix.goos }}/${{ matrix.goarch }}）
     runs-on: ubuntu-latest

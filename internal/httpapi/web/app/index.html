@@ -30,30 +30,7 @@
 </header>
 
 <main>
-  <section id="view-contracts" class="view active" aria-label="合同台账">
-    <div class="toolbar">
-      <label class="inline">年度
-        <select id="yearSelect"></select>
-      </label>
-      <input id="contractSearch" type="search" placeholder="搜索编号 / 名称 / 相对方" autocomplete="off">
-      <select id="statusFilter" aria-label="合同状态">
-        <option value="">全部状态</option>
-        <option value="draft">草稿</option>
-        <option value="active">生效</option>
-        <option value="archived">归档</option>
-      </select>
-      <span class="spacer"></span>
-      <button type="button" id="newContractBtn" class="primary">新建合同</button>
-      <button type="button" id="batchGenerateBtn" disabled>批量生成 PDF</button>
-      <button type="button" id="downloadTemplateBtn">Excel 模板</button>
-      <button type="button" id="importBtn">导入 Excel</button>
-      <button type="button" id="exportLedgerBtn">导出台账</button>
-    </div>
-    <div id="contractSummary" class="summary"></div>
-    <div class="table-wrap">
-      <table id="contractTable" class="data-table"></table>
-    </div>
-  </section>
+  <section id="view-contracts" class="view active" aria-label="合同台账"></section>
 
   <section id="view-onboarding" class="view" aria-label="新手引导">
     <div class="onboard-hero">

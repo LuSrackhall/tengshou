@@ -7,26 +7,15 @@ const state = {
   onboarding: null,
   onboardingCheck: null,
   fields: { contract: [], party: [] },
-  contracts: [],
-  contractTotal: 0,
-  parties: [],
   seals: [],
   templates: [],
   templateTotal: 0,
   templateQ: "",
   converters: [],
-  years: [],
-  year: "",
-  contractQ: "",
-  status: "",
   changelog: [],
   tab: "contracts",
   /* 实时同步游标：最近一条变更记录的 id（服务端用它补发之后的事件）。 */
   lastEventId: "",
-  /* 当前打开详情弹窗的审计目标，用于外部写入时只刷新审计区块。 */
-  auditTarget: null,
-  /* 合同台账多选：批量生成 PDF 的目标。 */
-  selectedContracts: new Set(),
 };
 
 /* PDF.js renders imported template PDFs. The worker is vendored locally so
@@ -101,21 +90,6 @@ async function api(path, options) {
   return data;
 }
 
-function money(value) {
-  const n = Number(value || 0);
-  return "¥" + n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function statusLabel(s) { return s === "active" ? "生效" : s === "archived" ? "归档" : "草稿"; }
-function kindLabel(k) { return k === "organization" ? "单位" : "个人"; }
-
-function activeField(entity) { return state.fields[entity].filter((f) => !f.archived); }
-function fieldByKey(entity, key) { return state.fields[entity].find((f) => f.key === key); }
-function partyName(id) {
-  const p = state.parties.find((x) => x.id === id);
-  return p ? p.name : "";
-}
-
 function fmtDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -129,7 +103,6 @@ function closeModal() {
   stopSignPolling();
   destroyTemplateEditor();
   closePDFOverlay();
-  state.auditTarget = null;
   if (currentSignSessionId) {
     const id = currentSignSessionId;
     currentSignSessionId = null;
@@ -195,28 +168,16 @@ function fieldErrorsHTML(err) {
 async function loadBootstrap() {
   const data = await api("/app/api/v1/bootstrap");
   state.bootstrap = data;
-  state.years = data.years || [];
   if (data.onboarding) {
     state.onboarding = data.onboarding;
     renderOnboarding();
   }
-  const hasCurrent = state.years.some((y) => y.year === data.current_year);
-  state.year = hasCurrent ? String(data.current_year) : (state.years.length ? String(state.years[0].year) : "");
   renderMeta();
-  renderYearSelect();
 }
 
 async function loadFields() {
   const data = await api("/app/api/v1/fields?archived=1");
   state.fields = { contract: data.contract || [], party: data.party || [] };
-}
-
-// loadParties keeps state.parties fresh for the contract form's
-// counterparty datalist and ledger column. The 相对方档案 view itself is
-// rendered by the Vue island and fetches /parties on its own.
-async function loadParties() {
-  const data = await api("/app/api/v1/parties?limit=500");
-  state.parties = data.items || [];
 }
 
 // loadSeals 只为未迁移的模板标定（state.seals 供公章下拉与名称回显）取数；
@@ -243,17 +204,6 @@ async function loadConverters() {
   }
 }
 
-async function loadContracts() {
-  const params = new URLSearchParams({ limit: "500" });
-  if (state.year) params.set("year", state.year);
-  if (state.status) params.set("status", state.status);
-  if (state.contractQ) params.set("q", state.contractQ);
-  const data = await api("/app/api/v1/contracts?" + params.toString());
-  state.contracts = data.items || [];
-  state.contractTotal = data.total || 0;
-  applyExportLink();
-}
-
 async function loadChangelog() {
   const entity = $("#changeEntityFilter").value;
   const source = $("#changeActorFilter") ? $("#changeActorFilter").value : "";
@@ -273,50 +223,7 @@ async function loadRecentActivity() {
   renderRecentActivity(data.items || []);
 }
 
-function applyExportLink() {
-  const button = $("#exportLedgerBtn");
-  if (button) button.title = (state.year ? state.year + " 年度" : "全部年度") + "台账 Excel";
-}
-
-function exportLedgerPath() {
-  const params = new URLSearchParams();
-  if (state.year) params.set("year", state.year);
-  if (state.status) params.set("status", state.status);
-  if (state.contractQ) params.set("q", state.contractQ);
-  return "/app/api/v1/excel/ledger" + (params.toString() ? "?" + params.toString() : "");
-}
-
-async function downloadWorkbook(kind) {
-  const path = kind === "template" ? "/app/api/v1/excel/template" : exportLedgerPath();
-  try {
-    const res = await fetch(path, { headers: { "X-Tengshou-App": "1" } });
-    if (!res.ok) {
-      let message = `下载失败（${res.status}）`;
-      try {
-        const data = await res.json();
-        if (data && data.error && data.error.message) message = data.error.message;
-      } catch (_) { /* ignore */ }
-      throw new Error(message);
-    }
-    const blob = await res.blob();
-    let filename = kind === "template" ? "tengshou-entry-template.xlsx" : "tengshou-ledger.xlsx";
-    const disposition = res.headers.get("Content-Disposition") || "";
-    const match = /filename="([^"]+)"/.exec(disposition);
-    if (match) filename = match[1];
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
-/* ---------- 顶栏 / 年度 ---------- */
+/* ---------- 顶栏 ---------- */
 
 function renderMeta() {
   const meta = $("#meta");
@@ -330,451 +237,6 @@ function renderMeta() {
     <span>公章 ${stats.seals || 0} 枚</span>
     <span>字段 ${stats.fields || 0} 个</span>
     <span title="应用版本（数据格式 v${esc(String(state.bootstrap.schema_version || ""))}）">版本 ${esc(state.bootstrap.version || "未知")}</span>`;
-}
-
-function renderYearSelect() {
-  const select = $("#yearSelect");
-  const options = [`<option value="">全部年度（跨年查询）</option>`];
-  for (const yc of state.years) {
-    options.push(`<option value="${yc.year}">${yc.year} 年（${yc.count} 份）</option>`);
-  }
-  if (!state.years.length && state.bootstrap) {
-    options.push(`<option value="${state.bootstrap.current_year}">${state.bootstrap.current_year} 年</option>`);
-  }
-  select.innerHTML = options.join("");
-  select.value = state.year;
-}
-
-/* ---------- 合同台账 ---------- */
-
-function contractFieldValue(contract, field) {
-  switch (field.key) {
-    case "contract_no": return { text: contract.contract_no, mono: true };
-    case "year": return { text: String(contract.year || "") };
-    case "title": return { text: contract.title, wrap: true };
-    case "type": return { text: contract.type || "—" };
-    case "party_b": return { text: partyName(contract.party_b_id) || "—" };
-    case "amount": return { text: money(contract.amount), money: true };
-    case "signed_on": return { text: contract.signed_on || "—" };
-    case "valid_from": return { text: contract.valid_from || "—" };
-    case "valid_to": return { text: contract.valid_to || "—" };
-    case "status": return { badge: contract.status, text: statusLabel(contract.status) };
-  }
-  const value = contract.data ? contract.data[field.key] : null;
-  return { text: formatDynamic(field, value) };
-}
-
-function formatDynamic(field, value) {
-  if (value == null || value === "") return "—";
-  switch (field.type) {
-    case "money": return money(value);
-    case "number": return Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 6 });
-    case "bool": return value === true ? "是" : value === false ? "否" : String(value);
-    default: return String(value);
-  }
-}
-
-function renderContracts() {
-  const table = $("#contractTable");
-  const fields = activeField("contract").filter((f) => f.in_ledger);
-  const yearLabel = state.year ? `${state.year} 年度` : "全部年度";
-  $("#contractSummary").textContent =
-    `${yearLabel} · 共 ${state.contractTotal} 份${state.status ? " · 状态：" + statusLabel(state.status) : ""}` +
-    (state.contractQ ? ` · 搜索「${state.contractQ}」` : "");
-  if (!fields.length) {
-    table.innerHTML = `<tbody><tr><td class="empty">没有可显示的台账字段，请先在「字段」页新增字段。</td></tr></tbody>`;
-    updateBatchSelectionUI();
-    return;
-  }
-  // Drop selections that are no longer visible (year/status filter changed).
-  const visible = state.contracts.map((c) => c.id);
-  const visibleSet = new Set(visible);
-  for (const id of Array.from(state.selectedContracts)) {
-    if (!visibleSet.has(id)) state.selectedContracts.delete(id);
-  }
-  const head = `<th class="select-col"><input type="checkbox" id="contractSelectAll" title="全选当前台账合同" aria-label="全选当前台账合同"></th>` +
-    fields.map((f) => `<th>${esc(f.label)}</th>`).join("");
-  const rows = state.contracts.map((contract) => {
-    const cells = fields.map((f) => {
-      const v = contractFieldValue(contract, f);
-      if (v.badge) return `<td><span class="badge ${esc(v.badge)}">${esc(v.text)}</span></td>`;
-      const cls = [v.mono ? "mono" : "", v.money ? "money" : "", v.wrap ? "wrap" : ""].filter(Boolean).join(" ");
-      return `<td class="${cls}">${esc(v.text)}</td>`;
-    }).join("");
-    const checked = state.selectedContracts.has(contract.id) ? " checked" : "";
-    return `<tr data-id="${esc(contract.id)}">
-      <td class="select-col"><input type="checkbox" data-select="${esc(contract.id)}"${checked} aria-label="选择合同 ${esc(contract.contract_no)}"></td>
-      ${cells}
-      <td><div class="actions">
-        <button type="button" data-action="generate">生成 PDF</button>
-        <button type="button" data-action="sign">扫码签名</button>
-        <button type="button" data-action="edit">编辑</button>
-        <button type="button" class="danger" data-action="delete">删除</button>
-      </div></td>
-    </tr>`;
-  }).join("");
-  table.innerHTML = `<thead><tr>${head}<th>操作</th></tr></thead>
-    <tbody>${rows || `<tr><td class="empty" colspan="${fields.length + 2}">还没有合同。可以新建，或下载 Excel 模板填写后导入。</td></tr>`}</tbody>`;
-  $$("#contractTable tbody tr[data-id]").forEach((tr) => {
-    tr.addEventListener("click", (e) => {
-      const button = e.target.closest("button[data-action]");
-      const id = tr.dataset.id;
-      const contract = state.contracts.find((c) => c.id === id);
-      if (!contract) return;
-      if (button && button.dataset.action === "delete") {
-        e.stopPropagation();
-        deleteContract(contract);
-        return;
-      }
-      if (button && button.dataset.action === "sign") {
-        e.stopPropagation();
-        openSignatureDialog(contract);
-        return;
-      }
-      if (button && button.dataset.action === "generate") {
-        e.stopPropagation();
-        openContractForm(contract, { focusGenerate: true }).catch((err) => toast(err.message, true));
-        return;
-      }
-      openContractForm(contract);
-    });
-  });
-  $$("#contractTable tbody input[data-select]").forEach((input) => {
-    input.addEventListener("click", (e) => e.stopPropagation());
-    input.addEventListener("change", () => {
-      if (input.checked) state.selectedContracts.add(input.dataset.select);
-      else state.selectedContracts.delete(input.dataset.select);
-      updateBatchSelectionUI();
-    });
-  });
-  const selectAll = $("#contractSelectAll");
-  if (selectAll) {
-    selectAll.addEventListener("click", (e) => e.stopPropagation());
-    selectAll.addEventListener("change", () => {
-      for (const id of visible) {
-        if (selectAll.checked) state.selectedContracts.add(id);
-        else state.selectedContracts.delete(id);
-      }
-      renderContracts();
-    });
-  }
-  updateBatchSelectionUI();
-}
-
-function updateBatchSelectionUI() {
-  const button = $("#batchGenerateBtn");
-  if (button) {
-    const count = state.selectedContracts.size;
-    button.disabled = count === 0;
-    button.textContent = count ? `批量生成 PDF（${count}）` : "批量生成 PDF";
-  }
-  const selectAll = $("#contractSelectAll");
-  if (selectAll) {
-    const visible = state.contracts.map((c) => c.id);
-    const selected = visible.filter((id) => state.selectedContracts.has(id)).length;
-    selectAll.checked = visible.length > 0 && selected === visible.length;
-    selectAll.indeterminate = selected > 0 && selected < visible.length;
-  }
-}
-
-/* ---------- 合同表单 ---------- */
-
-function templateHint(f) {
-  if (!f.in_template || f.entity !== "contract") return "";
-  const core = {
-    contract_no: ".Contract.ContractNo", year: ".Contract.Year", title: ".Contract.Title",
-    type: ".Contract.Type", amount: ".Contract.Amount", signed_on: ".Contract.SignedOn",
-    valid_from: ".Contract.ValidFrom", valid_to: ".Contract.ValidTo", status: ".Contract.Status",
-  };
-  if (core[f.key]) return `模板：<code>{{${core[f.key]}}}</code>`;
-  if (f.key === "party_b") return "模板：<code>{{.PartyB.Name}}</code>";
-  return `模板：<code>{{.Data.${f.key}}}</code>`;
-}
-
-function fieldControlHTML(entity, f, value, opts) {
-  const id = `f_${entity}_${f.key}`;
-  const required = f.required ? `<span class="req">*</span>` : "";
-  const readonly = opts && opts.readonly ? " disabled" : "";
-  let control = "";
-  const type = f.type;
-  if (type === "longtext") {
-    control = `<textarea id="${id}"${readonly}>${esc(value == null ? "" : value)}</textarea>`;
-  } else if (type === "select" || type === "status") {
-    const options = [`<option value="">${f.required ? "请选择" : "（空）"}</option>`];
-    for (const opt of f.options || []) {
-      options.push(`<option value="${esc(opt)}"${String(value) === opt ? " selected" : ""}>${esc(opt)}</option>`);
-    }
-    control = `<select id="${id}"${readonly}>${options.join("")}</select>`;
-  } else if (type === "bool") {
-    const yes = value === true || value === "是";
-    const no = value === false || value === "否";
-    control = `<select id="${id}"${readonly}>
-      <option value="">（空）</option>
-      <option value="是"${yes ? " selected" : ""}>是</option>
-      <option value="否"${no ? " selected" : ""}>否</option>
-    </select>`;
-  } else if (type === "party") {
-    control = `<input id="${id}" type="text" value="${esc(value == null ? "" : value)}"
-      list="partyNameList" placeholder="输入或选择相对方名称"${readonly}>`;
-  } else {
-    let inputType = "text";
-    let step = "";
-    if (type === "number") { inputType = "number"; step = ` step="any"`; }
-    if (type === "money") { inputType = "number"; step = ` step="0.01" min="0"`; }
-    if (type === "date") inputType = "date";
-    control = `<input id="${id}" type="${inputType}"${step}
-      value="${esc(value == null ? "" : value)}"${readonly}>`;
-  }
-  const help = [f.note ? esc(f.note) : "", templateHint(f), f.built_in ? "" : `键：${esc(f.key)}`].filter(Boolean).join(" · ");
-  return `<div class="field ${type === "longtext" ? "full" : ""}" data-key="${esc(f.key)}">
-    <label for="${id}">${esc(f.label)}${required}</label>
-    ${control}
-    ${help ? `<span class="help">${help}</span>` : ""}
-  </div>`;
-}
-
-function contractControlValue(f, contract, partyBName) {
-  if (!contract) {
-    if (f.built_in) {
-      if (f.key === "year") return state.bootstrap ? state.bootstrap.current_year : "";
-      if (f.key === "status") return "草稿";
-      if (f.key === "party_b") return partyBName || "";
-      return f.default_value || "";
-    }
-    return f.default_value || "";
-  }
-  switch (f.key) {
-    case "contract_no": return contract.contract_no;
-    case "year": return contract.year;
-    case "title": return contract.title;
-    case "type": return contract.type || "";
-    case "party_b": return partyBName || "";
-    case "amount": return contract.amount || "";
-    case "signed_on": return contract.signed_on || "";
-    case "valid_from": return contract.valid_from || "";
-    case "valid_to": return contract.valid_to || "";
-    case "status": return statusLabel(contract.status);
-  }
-  return contract.data ? contract.data[f.key] : "";
-}
-
-async function openContractForm(contract, opts) {
-  const options = opts || {};
-  if (options.renew) {
-    if (!contract) return;
-    let draft;
-    try {
-      draft = await api(`/app/api/v1/contracts/${encodeURIComponent(contract.id)}/renewal-draft`);
-    } catch (err) {
-      toast(err.message, true);
-      return;
-    }
-    openContractCreateForm({ renewal: draft });
-    return;
-  }
-  if (!contract) {
-    openContractCreateForm({ partyB: options.partyB || null });
-    return;
-  }
-  let detail = null;
-  try {
-    detail = await api(`/app/api/v1/contracts/${encodeURIComponent(contract.id)}`);
-  } catch (err) {
-    toast(err.message, true);
-    return;
-  }
-  const partyBName = detail && detail.party_b ? detail.party_b.name : partyName(contract && contract.party_b_id);
-  const partyBID = detail && detail.party_b ? detail.party_b.id : (contract ? contract.party_b_id || "" : "");
-  const fields = activeField("contract");
-  const modal = openModal(`编辑合同 · ${contract.contract_no}`, { wide: true });
-  const form = fields.map((f) => fieldControlHTML("contract", f,
-    contractControlValue(f, contract, partyBName),
-    { readonly: f.key === "contract_no" })).join("");
-  modal.body.innerHTML = `
-    <div id="contractErrors"></div>
-    ${contract.source_contract_id ? `<div class="renewal-banner" id="renewalSource">正在加载续签来源…</div>` : ""}
-    ${contract ? `<div class="warning-list">合同编号创建后不可修改。修改会写入变更记录。</div>` : ""}
-    ${detail && detail.signatures && detail.signatures.length ? signaturesSummaryHTML(detail) : ""}
-    ${detail && detail.seals && detail.seals.length ? `<div id="contractSealSummary"></div>` : ""}
-    <datalist id="partyNameList">
-      ${state.parties.map((p) => `<option value="${esc(p.name)}"></option>`).join("")}
-    </datalist>
-    <div class="form-grid">${form}</div>
-    ${contract ? `<div id="contractGeneration" class="gen-panel"></div>` : ""}
-    ${contract ? `<div id="contractHistory" class="audit-host"></div>` : ""}`;
-  // 合同详情里的「已关联公章」摘要属于已迁移的公章域：宿主由上面的模板
-  // 占位渲染，内容交给 Vue（bridge/seal-summary.ts 注册的全局挂载函数）。
-  if (detail && detail.seals && detail.seals.length && window.__tengshouSealSummary) {
-    window.__tengshouSealSummary($("#contractSealSummary", modal.body), detail.seals);
-  }
-  if (contract) {
-    state.auditTarget = { entity: "contract", id: contract.id, selector: "#contractHistory" };
-    loadAuditHistory("contract", contract.id, "#contractHistory");
-    renderContractGeneration(modal, contract, detail);
-    if (contract.source_contract_id) loadRenewalSource(modal, contract);
-    if (options.focusGenerate) {
-      const panel = $("#contractGeneration", modal.body);
-      if (panel) panel.scrollIntoView({ block: "start", behavior: "smooth" });
-    }
-  }
-  footerButton(modal, "续签", "", () => {
-    closeModal();
-    openContractForm(contract, { renew: true }).catch((err) => toast(err.message, true));
-  });
-  footerButton(modal, "取消", "", closeModal);
-  footerButton(modal, "删除", "danger", () => deleteContract(contract, modal));
-  const save = footerButton(modal, "保存", "primary", async () => {
-    save.disabled = true;
-    $("#contractErrors", modal.body).innerHTML = "";
-    try {
-      const input = collectContractInput(fields, contract, partyBID, partyBName);
-      const res = await api(`/app/api/v1/contracts/${encodeURIComponent(contract.id)}`,
-        { method: "PUT", body: input });
-      closeModal();
-      toast("合同已保存");
-      if (res.warnings && res.warnings.length) {
-        setTimeout(() => toast(res.warnings.join("；")), 350);
-      }
-      await refreshAfterWrite();
-    } catch (err) {
-      save.disabled = false;
-      $("#contractErrors", modal.body).innerHTML = fieldErrorsHTML(err);
-      modal.body.scrollTop = 0;
-    }
-  });
-}
-
-// openContractCreateForm opens the new-contract form. Two B7 entry points
-// prefill it: a renewal draft (all contract values carried over, dates and
-// number cleared) and a counterparty archive (only the party is prefilled;
-// template and dynamic fields stay as the user chooses them).
-function openContractCreateForm(opts) {
-  const options = opts || {};
-  const draft = options.renewal || null;
-  const partyB = options.partyB || null;
-  let seed = null;
-  if (draft) {
-    const input = draft.input || {};
-    seed = {
-      contract_no: "", year: input.year, title: input.title, type: input.type,
-      party_a_id: input.party_a_id || "", party_b_id: input.party_b_id || "",
-      template_id: input.template_id || "", amount: input.amount || 0,
-      signed_on: "", valid_from: "", valid_to: "", status: "draft",
-      data: input.data || {},
-    };
-  }
-  const partyBID = seed ? seed.party_b_id : (partyB ? partyB.id : "");
-  const partyBName = seed
-    ? ((draft.input && draft.input.party_b) || partyName(seed.party_b_id))
-    : (partyB ? partyB.name : "");
-  const fields = activeField("contract");
-  const title = draft ? `新建合同 · 续签自 ${draft.source.contract_no}` : "新建合同";
-  const modal = openModal(title, { wide: true });
-  const form = fields.map((f) => fieldControlHTML("contract", f,
-    contractControlValue(f, seed, partyBName), {})).join("");
-  let banner = "";
-  if (draft) {
-    const reused = Array.isArray(draft.reused) ? draft.reused.length : 0;
-    banner = `<div class="renewal-banner">续签自 <strong>${esc(draft.source.contract_no)}「${esc(draft.source.title)}」</strong>：
-      已带出 ${reused} 项信息，均可修改。合同编号自动分配，签订 / 生效 / 到期日期与状态已重置；
-      签名与公章不会沿用，生成 PDF 前需按新内容重新采集。</div>`;
-  } else if (partyB) {
-    banner = `<div class="renewal-banner">以相对方档案「${esc(partyB.name)}」新建合同：
-      仅带出档案信息，不复制旧合同内容；模板与字段由你选择，保存后按正常流程采集签名。</div>`;
-  }
-  modal.body.innerHTML = `
-    <div id="contractErrors"></div>
-    ${banner}
-    <datalist id="partyNameList">
-      ${state.parties.map((p) => `<option value="${esc(p.name)}"></option>`).join("")}
-    </datalist>
-    <div class="form-grid">${form}</div>`;
-  footerButton(modal, "取消", "", closeModal);
-  const save = footerButton(modal, "保存", "primary", async () => {
-    save.disabled = true;
-    $("#contractErrors", modal.body).innerHTML = "";
-    try {
-      const input = collectContractInput(fields, seed, partyBID, partyBName);
-      if (draft) input.source_contract_id = draft.source.id;
-      const res = await api("/app/api/v1/contracts", { method: "POST", body: input });
-      closeModal();
-      toast(draft ? `合同已创建（续签自 ${draft.source.contract_no}）` : "合同已保存");
-      if (res.warnings && res.warnings.length) {
-        setTimeout(() => toast(res.warnings.join("；")), 350);
-      }
-      await refreshAfterWrite();
-      if (draft && res.item) {
-        openContractForm(res.item).catch((err) => toast(err.message, true));
-      }
-    } catch (err) {
-      save.disabled = false;
-      $("#contractErrors", modal.body).innerHTML = fieldErrorsHTML(err);
-      modal.body.scrollTop = 0;
-    }
-  });
-}
-
-// loadRenewalSource fills the provenance banner of an existing renewal and
-// lets the user jump to the source contract.
-async function loadRenewalSource(modal, contract) {
-  const host = $("#renewalSource", modal.body);
-  if (!host) return;
-  try {
-    const detail = await api(`/app/api/v1/contracts/${encodeURIComponent(contract.source_contract_id)}`);
-    const source = detail.contract;
-    host.innerHTML = `续签自 <strong>${esc(source.contract_no)}「${esc(source.title)}」</strong>
-      <button type="button" id="openSourceContract">查看来源合同</button>`;
-    const button = $("#openSourceContract", host);
-    if (button) {
-      button.addEventListener("click", (e) => {
-        e.stopPropagation();
-        closeModal();
-        openContractForm(source).catch((err) => toast(err.message, true));
-      });
-    }
-  } catch (_) {
-    host.textContent = "续签来源合同已不存在（来源编号仍保留在本合同记录中）。";
-  }
-}
-
-function collectContractInput(fields, contract, partyBID, partyBName) {
-  const input = { data: {}, party_a_id: contract ? contract.party_a_id || "" : "", template_id: contract ? contract.template_id || "" : "" };
-  for (const f of fields) {
-    const el = document.getElementById(`f_contract_${f.key}`);
-    const value = el ? el.value.trim() : "";
-    if (!f.built_in) {
-      input.data[f.key] = value;
-      continue;
-    }
-    switch (f.key) {
-      case "contract_no": input.contract_no = value; break;
-      case "year": input.year = Number(value) || 0; break;
-      case "title": input.title = value; break;
-      case "type": input.type = value; break;
-      case "party_b": input.party_b = value; break;
-      case "amount": input.amount = Number(value) || 0; break;
-      case "signed_on": input.signed_on = value; break;
-      case "valid_from": input.valid_from = value; break;
-      case "valid_to": input.valid_to = value; break;
-      case "status": input.status = value; break;
-    }
-  }
-  if (partyBID && input.party_b && input.party_b === partyBName) {
-    input.party_b_id = partyBID;
-  }
-  return input;
-}
-
-async function deleteContract(contract, modal) {
-  if (!window.confirm(`确定删除合同 ${contract.contract_no}「${contract.title}」吗？删除会记入变更记录。`)) return;
-  try {
-    await api(`/app/api/v1/contracts/${encodeURIComponent(contract.id)}`, { method: "DELETE" });
-    if (modal) closeModal();
-    toast("合同已删除");
-    await refreshAfterWrite();
-  } catch (err) {
-    toast(err.message, true);
-  }
 }
 
 /* ---------- 合同 PDF 生成、整改重出与批量生成（B4） ---------- */
@@ -1057,9 +519,10 @@ async function refreshContractGeneration(modal, contract, opts) {
   } catch (_) { /* transient: keep the previous history */ }
   if (options.refreshLists === false) return;
   try {
-    await Promise.all([loadContracts(), loadTemplates(), loadBootstrapAndMeta()]);
-    renderContracts();
+    await Promise.all([loadTemplates(), loadBootstrapAndMeta()]);
     renderTemplates();
+    // 合同台账已迁到 Vue：派发变更通知，由台账岛自行重取列表。
+    notifyDataChanged(["contract", "template"]);
   } catch (_) { /* transient */ }
 }
 
@@ -1310,9 +773,9 @@ async function runBatchGeneration(modal, batch) {
     renderBatchResults(modal, batch);
     $("#batchSummary", modal.body).textContent =
       `生成完成：成功 ${res.summary.success} 份 · 失败 ${res.summary.failed} 份`;
-    await Promise.all([loadContracts(), loadTemplates(), loadBootstrapAndMeta()]);
-    renderContracts();
+    await Promise.all([loadTemplates(), loadBootstrapAndMeta()]);
     renderTemplates();
+    notifyDataChanged(["contract", "template"]);
   } finally {
     batch.generateBtn.disabled = true;
   }
@@ -1384,9 +847,9 @@ async function retryBatchItem(modal, batch, contractID) {
   $("#batchSummary", modal.body).textContent =
     `生成完成：成功 ${batch.results.summary.success} 份 · 失败 ${batch.results.summary.failed} 份`;
   toast(outcome.success ? "已重试成功" : `重试失败：${outcome.error_message || ""}`, !outcome.success);
-  await Promise.all([loadContracts(), loadTemplates(), loadBootstrapAndMeta()]);
-  renderContracts();
+  await Promise.all([loadTemplates(), loadBootstrapAndMeta()]);
   renderTemplates();
+  notifyDataChanged(["contract", "template"]);
 }
 
 /* ---------- 手写签名（局域网扫码） ---------- */
@@ -1691,13 +1154,11 @@ async function loadBootstrapAndMeta() {
   const bootstrap = await api("/app/api/v1/bootstrap").catch(() => null);
   if (!bootstrap) return;
   state.bootstrap = bootstrap;
-  state.years = bootstrap.years || [];
   if (bootstrap.onboarding) {
     state.onboarding = bootstrap.onboarding;
     renderOnboarding();
   }
   renderMeta();
-  renderYearSelect();
 }
 
 /* ---------- 首装引导与模板向导（B8） ----------
@@ -1806,7 +1267,7 @@ async function handleOnboardingStep(action) {
     }
     case "contract_create":
       switchTab("contracts");
-      await openContractForm(null);
+      openContractFormInVue(null);
       return;
     default:
       toast("未知的引导步骤", true);
@@ -2864,7 +2325,7 @@ function clampNumber(v, min, max) {
 /* ---------- 字段管理 ----------
    字段页已迁到 Vue（frontend/src/components/fields/）：渲染、新建/编辑弹窗、
    归档与恢复都由 Vue 负责。app.js 只保留 loadFields() 与 state.fields，供
-   未迁移的合同表单与模板标定读取；字段变更仍经 refreshAfterWrite() 派发
+   未迁移的模板标定读取；字段变更仍经 refreshAfterWrite() 派发
    tengshou:data-changed。 */
 
 /* ---------- 变更记录 ---------- */
@@ -2923,43 +2384,6 @@ function renderRecentActivity(items) {
         <span class="recent-summary">${esc(entry.summary)}</span>
       </li>`).join("")}
     </ul>`;
-}
-
-/* ---------- 审计详情（合同 / 相对方弹窗内的变更记录） ---------- */
-
-function auditHistoryHTML(items) {
-  if (!items.length) {
-    return `<div class="audit-block"><div class="audit-head">变更记录</div>
-      <div class="empty">这条记录还没有变更历史。</div></div>`;
-  }
-  return `<div class="audit-block">
-    <div class="audit-head">变更记录 <span class="muted">（最近 ${items.length} 条）</span></div>
-    <ul class="audit-list">${items.map((entry) => `
-      <li>
-        <div class="audit-line">
-          <span class="recent-time">${esc(fmtDate(entry.created_at))}</span>
-          ${actorBadgeHTML(entry)}
-          <span class="badge ${esc(entry.action)}">${esc(ACTION_LABELS[entry.action] || entry.action)}</span>
-          <span class="audit-summary">${esc(entry.summary)}</span>
-        </div>
-        ${changeDiffsHTML(entry)}
-      </li>`).join("")}
-    </ul></div>`;
-}
-
-async function loadAuditHistory(entity, id, selector) {
-  const host = $(selector);
-  if (!host || !id) return;
-  const params = new URLSearchParams({ entity, entity_id: id, limit: "20" });
-  try {
-    const data = await api("/app/api/v1/changelog?" + params.toString());
-    if (!host.isConnected) return; // this modal was closed or replaced meanwhile
-    host.innerHTML = auditHistoryHTML(data.items || []);
-  } catch (err) {
-    if (host.isConnected) {
-      host.innerHTML = `<div class="audit-block error">变更记录加载失败：${esc(err.message)}</div>`;
-    }
-  }
 }
 
 /* ---------- Excel 导入 ---------- */
@@ -3712,14 +3136,6 @@ function handleChangeEvent(item) {
   notifyDataChanged([item.entity || ""]);
   pendingEntities.add(item.entity || "");
   if (isAgentEntry(item)) pendingAgentActivity = true;
-  if (state.auditTarget &&
-      item.entity === state.auditTarget.entity &&
-      item.entity_id === state.auditTarget.id) {
-    loadAuditHistory(state.auditTarget.entity, state.auditTarget.id, state.auditTarget.selector);
-    if (isAgentEntry(item)) {
-      toast("Agent（MCP）修改了当前打开的记录，变更记录已刷新；请核对后再保存");
-    }
-  }
   scheduleRealtimeRefresh(350);
 }
 
@@ -3732,8 +3148,6 @@ async function flushRealtimeRefresh() {
   const needFields = entities.has("field");
   const needBootstrap = entities.has("contract") || needFields;
   const jobs = [];
-  if (entities.has("contract") || needFields) jobs.push(loadContracts());
-  if (entities.has("party") || needFields) jobs.push(loadParties());
   if (needFields) jobs.push(loadFields());
   if (entities.has("seal")) jobs.push(loadSeals());
   if (entities.has("template")) jobs.push(loadTemplates());
@@ -3746,16 +3160,13 @@ async function flushRealtimeRefresh() {
     const bootstrap = await api("/app/api/v1/bootstrap").catch(() => null);
     if (bootstrap) {
       state.bootstrap = bootstrap;
-      state.years = bootstrap.years || [];
       if (bootstrap.onboarding) {
         state.onboarding = bootstrap.onboarding;
         renderOnboarding();
       }
-      renderYearSelect();
       renderMeta();
     }
   }
-  if (entities.has("contract") || needFields) renderContracts();
   if (entities.has("template")) renderTemplates();
   if (state.tab === "changelog") {
     loadChangelog().catch(() => {});
@@ -3789,26 +3200,20 @@ function switchTab(tab) {
 }
 
 async function refreshAfterWrite() {
-  await Promise.all([loadFields(), loadParties(), loadContracts(), loadSeals(), loadTemplates()]);
+  await Promise.all([loadFields(), loadSeals(), loadTemplates()]);
   renderMeta();
   const bootstrap = await api("/app/api/v1/bootstrap").catch(() => null);
   if (bootstrap) {
     state.bootstrap = bootstrap;
-    state.years = bootstrap.years || [];
     if (bootstrap.onboarding) {
       state.onboarding = bootstrap.onboarding;
       renderOnboarding();
     }
-    if (state.year && !state.years.some((y) => String(y.year) === state.year)) {
-      state.year = "";
-      await loadContracts();
-    }
-    renderYearSelect();
     renderMeta();
   }
-  renderContracts();
   renderTemplates();
-  // Vue 域（相对方档案、字段管理、公章）不复用这里的 DOM，但需要知道数据已经变了。
+  // 已迁移的 Vue 域（合同台账、相对方档案、字段管理、公章）不复用这里的 DOM，
+  // 但需要知道数据已经变了：它们据此重取各自的列表。
   notifyDataChanged(["field", "party", "contract", "seal", "template"]);
   if (state.tab === "onboarding") {
     loadOnboarding();
@@ -3817,6 +3222,22 @@ async function refreshAfterWrite() {
   if (state.tab === "changelog") {
     loadChangelog().catch((err) => toast(err.message, true));
   }
+}
+
+/* 模板页的批量生成沿用「当前台账合同」语义：台账已迁到 Vue，优先读台账岛
+   当前筛选后的列表；岛缺席（未构建前端产物）时退回接口全量。 */
+async function ledgerContractsForBatch() {
+  const ledger = window.__tengshouContracts;
+  if (ledger) return ledger.currentContracts();
+  const data = await api("/app/api/v1/contracts?limit=500");
+  return data.items || [];
+}
+
+function openExcelImport() {
+  const input = $("#importFile");
+  if (!input) return;
+  input.value = "";
+  input.click();
 }
 
 /* ---------- 事件绑定与启动 ---------- */
@@ -3833,27 +3254,6 @@ function bindEvents() {
     const button = event.target.closest("[data-export-signature]");
     if (button) exportSignature(button.dataset.exportSignature);
   });
-  $("#yearSelect").addEventListener("change", async (e) => {
-    state.year = e.target.value;
-    try {
-      await loadContracts();
-      renderContracts();
-    } catch (err) { toast(err.message, true); }
-  });
-  $("#statusFilter").addEventListener("change", async (e) => {
-    state.status = e.target.value;
-    try {
-      await loadContracts();
-      renderContracts();
-    } catch (err) { toast(err.message, true); }
-  });
-  $("#contractSearch").addEventListener("input", debounce(async (e) => {
-    state.contractQ = e.target.value.trim();
-    try {
-      await loadContracts();
-      renderContracts();
-    } catch (err) { toast(err.message, true); }
-  }, 250));
   $("#templateSearch").addEventListener("input", debounce(async (e) => {
     state.templateQ = e.target.value.trim();
     try {
@@ -3874,35 +3274,18 @@ function bindEvents() {
     loadTemplates().then(renderTemplates).catch((err) => toast(err.message, true));
   });
   $("#templateBatchGenerateBtn").addEventListener("click", () => {
-    if (!state.contracts.length) {
-      toast("当前台账没有合同；请先切换年度或新建合同", true);
-      return;
-    }
-    const active = state.templates.find((t) => t.is_active) || state.templates[0];
-    openBatchGenerateDialog({
-      title: "批量生成 PDF",
-      contracts: state.contracts,
-      templateId: active ? active.id : "",
+    ledgerContractsForBatch().then((contracts) => {
+      if (!contracts.length) {
+        toast("当前台账没有合同；请先切换年度或新建合同", true);
+        return;
+      }
+      const active = state.templates.find((t) => t.is_active) || state.templates[0];
+      openBatchGenerateDialog({
+        title: "批量生成 PDF",
+        contracts,
+        templateId: active ? active.id : "",
+      }).catch((err) => toast(err.message, true));
     }).catch((err) => toast(err.message, true));
-  });
-  $("#newContractBtn").addEventListener("click", () => openContractForm(null));
-  $("#batchGenerateBtn").addEventListener("click", () => {
-    const contracts = state.contracts.filter((c) => state.selectedContracts.has(c.id));
-    if (!contracts.length) {
-      toast("请先在台账中勾选要生成 PDF 的合同", true);
-      return;
-    }
-    openBatchGenerateDialog({
-      title: `批量生成 PDF · ${contracts.length} 份合同`,
-      contracts,
-    }).catch((err) => toast(err.message, true));
-  });
-  $("#downloadTemplateBtn").addEventListener("click", () => downloadWorkbook("template"));
-  $("#exportLedgerBtn").addEventListener("click", () => downloadWorkbook("ledger"));
-  $("#importBtn").addEventListener("click", () => {
-    const input = $("#importFile");
-    input.value = "";
-    input.click();
   });
   $("#importFile").addEventListener("change", (e) => {
     const file = e.target.files && e.target.files[0];
@@ -3938,15 +3321,11 @@ function bindEvents() {
 async function boot() {
   bindEvents();
   try {
-    await Promise.all([loadBootstrap(), loadFields(), loadParties(), loadSeals(), loadTemplates(), loadConverters()]);
-    await loadContracts();
+    await Promise.all([loadBootstrap(), loadFields(), loadSeals(), loadTemplates(), loadConverters()]);
     renderMeta();
-    renderContracts();
     renderTemplates();
   } catch (err) {
     toast(err.message, true);
-    const summary = $("#contractSummary");
-    if (summary) summary.textContent = "加载失败：" + err.message;
   }
   // B8: a fresh vault starts on the guide, not on an empty ledger. The guide
   // is a normal tab, so every other page stays one click away.
@@ -3958,7 +3337,36 @@ async function boot() {
   startRealtime();
 }
 
-// 迁移期跨域桥：相对方档案（Vue）借用合同表单与整体刷新；随对应域迁完移除。
-window.__tengshouApp = { openContractForm, toast, refreshAfterWrite };
+/* 合同表单已迁到 Vue：app.js 侧（首装引导）经该事件打开新建表单。
+   台账岛监听 tengshou:open-contract-form 后弹 Vue 弹窗。 */
+function openContractFormInVue(contract, options) {
+  window.dispatchEvent(new CustomEvent("tengshou:open-contract-form", {
+    detail: { contract: contract || null, options: options || {} },
+  }));
+}
+
+/* 合同详情里的生成面板与签名摘要仍由 app.js 渲染：Vue 合同弹窗保留宿主
+   （#contractGeneration / #contractSignatures），挂载后把根节点、合同与详情
+   交过来。生成面板沿用原有 modal 形状，状态挂在局部对象上。 */
+function mountContractDetail(root, contract, detail) {
+  if (!root || !contract || !detail) return;
+  const pseudoModal = { body: root, generation: null };
+  const signatureHost = $("#contractSignatures", root);
+  if (signatureHost && detail.signatures && detail.signatures.length) {
+    signatureHost.innerHTML = signaturesSummaryHTML(detail);
+  }
+  renderContractGeneration(pseudoModal, contract, detail);
+}
+
+// 迁移期跨域桥：Vue 域借用 app.js 的 toast/整体刷新/签名/批量/Excel 导入
+// 与合同详情生成面板；随对应域迁完移除。
+window.__tengshouApp = {
+  toast,
+  refreshAfterWrite,
+  openSignatureDialog,
+  openBatchGenerateDialog,
+  openExcelImport,
+  mountContractDetail,
+};
 
 document.addEventListener("DOMContentLoaded", boot);

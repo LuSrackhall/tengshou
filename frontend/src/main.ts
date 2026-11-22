@@ -1,5 +1,6 @@
 import { createApp } from "vue";
 import LiveStatusBadge from "./components/LiveStatusBadge.vue";
+import ContractsView from "./components/contracts/ContractsView.vue";
 import FieldsView from "./components/fields/FieldsView.vue";
 import PartiesView from "./components/parties/PartiesView.vue";
 import SealsView from "./components/seals/SealsView.vue";
@@ -13,6 +14,14 @@ import "./styles/island.css";
 const liveStatusHost = document.getElementById("vue-live-status");
 if (liveStatusHost) {
   createApp(LiveStatusBadge).mount(liveStatusHost);
+}
+
+// 合同台账（阶段 1 迁出 app.js）：<section id="view-contracts"> 保留为宿主，
+// 其 class="view active" 的切换仍由 app.js 的 switchTab 负责。生成/签名/批量
+// 对话框与 Excel 导入仍由 app.js 实现，经 bridge/app.ts 双向调用。
+const contractsHost = document.getElementById("view-contracts");
+if (contractsHost) {
+  createApp(ContractsView).mount(contractsHost);
 }
 
 // 相对方档案（阶段 1 迁出 app.js）：<section id="view-parties"> 保留为宿主，

@@ -1,15 +1,25 @@
-// app.js ↔ Vue 迁移期桥（仅相对方域需要）。
+// app.js ↔ Vue 迁移期桥（相对方、合同与公章域共用）。
 //
 // 相对方域的跨域动作只有一个：借用合同表单（「以此档案新建合同」与历史
-// 合同的查看/续签），另外写入后需要触发 app.js 的整体刷新。app.js 在文件
-// 末尾设置 window.__tengshouApp；Vue 侧统一从这里调用，组件不直接读 window。
+// 合同的查看/续签），另外写入后需要触发 app.js 的整体刷新。合同表单已迁到
+// Vue（components/contracts/），因此这些入口改为派发
+// tengshou:open-contract-form，由台账岛打开表单；app.js 的引导步骤同样经该
+// 事件打开新建表单。
+//
+// 反向调用（Vue → app.js）：toast、整体刷新、扫码签名、批量生成、Excel 导入
+// 与合同详情里的生成面板/签名摘要仍由 app.js 实现，统一经
+// window.__tengshouApp 调用；组件不直接读 window。
 //
 // 实时刷新：app.js 收到 SSE / 轮询事件或本地写入完成后派发两个 window 事件：
 //   - tengshou:change       一条变更（detail 是 appEvent 的紧凑子集）
 //   - tengshou:data-changed 需要重取的实体列表（detail.entities）
 // 迁移期新旧入口都靠它们保持自动刷新；退役时随 app.js 一起删除。
 
-import type { ChangeEntity, Contract } from "../api/types";
+import type {
+  ChangeEntity,
+  Contract,
+  ContractDetail,
+} from "../api/types";
 
 export interface PartyRef {
   id: string;
@@ -22,27 +32,59 @@ export interface ContractFormOptions {
   focusGenerate?: boolean;
 }
 
+/** 台账批量生成：合同列表来自 Vue 当前筛选结果（迁移前是 state.contracts）。 */
+export interface BatchGenerateOptions {
+  title?: string;
+  contracts: Contract[];
+  templateId?: string;
+  kind?: string;
+}
+
 export interface AppBridge {
-  openContractForm(
-    contract: Contract | null,
-    options?: ContractFormOptions,
-  ): Promise<void> | void;
   toast(message: string, isError?: boolean): void;
   refreshAfterWrite(): Promise<void>;
+  /** 扫码签名对话框仍由 app.js 渲染。 */
+  openSignatureDialog(contract: Contract): void;
+  /** 批量生成对话框仍由 app.js 渲染；失败会自行 toast。 */
+  openBatchGenerateDialog(options: BatchGenerateOptions): Promise<unknown> | void;
+  /** 触发 app.js 的隐藏文件输入，导入 Excel 对话框仍归 app.js。 */
+  openExcelImport(): void;
+  /**
+   * 合同详情里的生成面板与签名摘要仍由 app.js 渲染：
+   * 传入 Vue 弹窗的根节点，app.js 在其中查找宿主元素并填充。
+   */
+  mountContractDetail(
+    root: Element,
+    contract: Contract,
+    detail: ContractDetail,
+  ): void;
+}
+
+/** app.js → Vue：台账岛注册的只读视图（模板页批量生成按钮使用）。 */
+export interface LedgerBridge {
+  currentContracts(): Contract[];
 }
 
 declare global {
   interface Window {
     /** 存量 app.js 在文件末尾设置；迁移完成后移除。 */
     __tengshouApp?: AppBridge;
+    /** 合同台账岛在挂载期间注册；模板页批量生成读取当前台账。 */
+    __tengshouContracts?: LedgerBridge;
   }
 }
 
 export const DATA_CHANGED_EVENT = "tengshou:data-changed";
 export const CHANGE_EVENT = "tengshou:change";
+export const OPEN_CONTRACT_FORM_EVENT = "tengshou:open-contract-form";
 
 export interface DataChangedDetail {
   entities: string[];
+}
+
+export interface OpenContractFormDetail {
+  contract: Contract | null;
+  options?: ContractFormOptions;
 }
 
 /** 本域关心的变更通知（appEvent 的紧凑子集）。 */
@@ -90,26 +132,60 @@ export async function refreshAfterWrite(): Promise<void> {
   await window.__tengshouApp?.refreshAfterWrite();
 }
 
-/** 「以此档案新建合同」：REUSE-7 语义不变，仍由 app.js 打开合同表单。 */
-export function openContractFormForParty(party: PartyRef): void {
-  const bridge = getAppBridge();
-  if (!bridge) {
-    return;
-  }
-  void Promise.resolve(
-    bridge.openContractForm(null, { partyB: { id: party.id, name: party.name } }),
+/** 打开合同表单（新建/编辑/续签）：由台账岛监听事件后打开 Vue 弹窗。 */
+export function openContractForm(
+  contract: Contract | null,
+  options: ContractFormOptions = {},
+): void {
+  window.dispatchEvent(
+    new CustomEvent<OpenContractFormDetail>(OPEN_CONTRACT_FORM_EVENT, {
+      detail: { contract, options },
+    }),
   );
 }
 
-/** 历史合同的「查看 / 续签」：关闭相对方弹窗后由 app.js 打开合同表单。 */
+/** 「以此档案新建合同」：REUSE-7 语义不变，仍打开合同表单（乙方预填）。 */
+export function openContractFormForParty(party: PartyRef): void {
+  openContractForm(null, { partyB: { id: party.id, name: party.name } });
+}
+
+/** 历史合同的「查看 / 续签」：打开合同表单并可选续签草稿。 */
 export function openContractFormForHistory(contract: Contract, renew: boolean): void {
+  openContractForm(contract, { renew });
+}
+
+/** 扫码签名对话框（app.js）。 */
+export function openSignatureDialog(contract: Contract): void {
   const bridge = getAppBridge();
   if (!bridge) {
     return;
   }
-  Promise.resolve(bridge.openContractForm(contract, { renew })).catch((error: unknown) => {
-    bridge.toast(errorMessage(error), true);
+  bridge.openSignatureDialog(contract);
+}
+
+/** 批量生成对话框（app.js）；失败统一经 toast 呈现。 */
+export function openBatchGenerateDialog(options: BatchGenerateOptions): void {
+  const bridge = getAppBridge();
+  if (!bridge) {
+    return;
+  }
+  void Promise.resolve(bridge.openBatchGenerateDialog(options)).catch((error: unknown) => {
+    toast(errorMessage(error), true);
   });
+}
+
+/** 触发 app.js 的 Excel 导入文件选择（对话框仍归 app.js）。 */
+export function openExcelImport(): void {
+  getAppBridge()?.openExcelImport();
+}
+
+/** 把合同详情里的生成面板/签名摘要宿主交给 app.js 渲染。 */
+export function mountContractDetail(
+  root: Element,
+  contract: Contract,
+  detail: ContractDetail,
+): void {
+  getAppBridge()?.mountContractDetail(root, contract, detail);
 }
 
 function normalizeDataChanged(raw: unknown): DataChangedDetail {
@@ -131,6 +207,28 @@ export function subscribeDataChanged(
   };
   window.addEventListener(DATA_CHANGED_EVENT, listener);
   return () => window.removeEventListener(DATA_CHANGED_EVENT, listener);
+}
+
+/** 订阅「打开合同表单」事件；返回取消订阅函数。 */
+export function subscribeOpenContractForm(
+  handler: (detail: OpenContractFormDetail) => void,
+): () => void {
+  const listener = (event: Event): void => {
+    const raw = (event as CustomEvent<unknown>).detail;
+    if (!isRecord(raw)) {
+      handler({ contract: null });
+      return;
+    }
+    const contract = isRecord(raw.contract)
+      ? (raw.contract as unknown as Contract)
+      : null;
+    const options = isRecord(raw.options)
+      ? (raw.options as unknown as ContractFormOptions)
+      : undefined;
+    handler({ contract, options });
+  };
+  window.addEventListener(OPEN_CONTRACT_FORM_EVENT, listener);
+  return () => window.removeEventListener(OPEN_CONTRACT_FORM_EVENT, listener);
 }
 
 function normalizeChange(raw: unknown): AppChangeNotice | null {

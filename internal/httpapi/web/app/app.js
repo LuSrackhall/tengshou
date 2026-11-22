@@ -88,7 +88,6 @@ function fmtDate(iso) {
 
 function closeModal() {
   stopSignPolling();
-  closePDFOverlay();
   if (currentSignSessionId) {
     const id = currentSignSessionId;
     currentSignSessionId = null;
@@ -134,15 +133,6 @@ function footerButton(modal, label, cls, onClick) {
   btn.addEventListener("click", onClick);
   modal.foot.appendChild(btn);
   return btn;
-}
-
-function fieldErrorsHTML(err) {
-  if (err && err.fields && err.fields.length) {
-    const items = err.fields.map((f) =>
-      `<li>${esc(f.label || f.field || "")}：${esc(f.message || "")}</li>`).join("");
-    return `<div class="form-errors">请修正以下问题：<ul>${items}</ul></div>`;
-  }
-  return `<div class="form-errors">${esc(err.message || "保存失败")}</div>`;
 }
 
 /* ---------- 数据加载 ---------- */
@@ -201,385 +191,9 @@ function renderMeta() {
     <span title="应用版本（数据格式 v${esc(String(state.bootstrap.schema_version || ""))}）">版本 ${esc(state.bootstrap.version || "未知")}</span>`;
 }
 
-/* ---------- 合同批量生成、整改重出与 PDF 预览（B4） ----------
-   合同详情里的单份生成面板与生成历史已迁到 Vue
-   （frontend/src/components/contracts/ContractGenerationPanel.vue，PDF
-   预览 overlay 在 frontend/src/components/pdf/）；这里保留批量生成对话框与
-   showPDFOverlay，批量样例预览仍在使用。 */
-
-let pdfOverlayEl = null;
-let pdfOverlayDoc = null;
-let pdfOverlayKeyHandler = null;
-
-function closePDFOverlay() {
-  if (pdfOverlayEl && pdfOverlayEl.parentNode) {
-    pdfOverlayEl.parentNode.removeChild(pdfOverlayEl);
-  }
-  pdfOverlayEl = null;
-  try { if (pdfOverlayDoc) pdfOverlayDoc.destroy(); } catch (_) { /* ignore */ }
-  pdfOverlayDoc = null;
-  if (pdfOverlayKeyHandler) {
-    document.removeEventListener("keydown", pdfOverlayKeyHandler, true);
-    pdfOverlayKeyHandler = null;
-  }
-}
-
-/* showPDFOverlay renders a PDF on top of the page. actions are optional
-   buttons placed in the header (used by generation previews). */
-async function showPDFOverlay(bytes, opts) {
-  const options = opts || {};
-  closePDFOverlay();
-  const overlay = document.createElement("div");
-  overlay.className = "pdf-overlay";
-  const actionButtons = (options.actions || []).map((action, index) =>
-    `<button type="button" data-overlay-action="${index}"${action.primary ? ' class="primary"' : ""}>${esc(action.label)}</button>`).join("");
-  const warnings = options.warnings || [];
-  overlay.innerHTML = `
-    <div class="tpl-preview-head">
-      <strong>${esc(options.title || "PDF 预览")}</strong>
-      <span class="spacer"></span>
-      ${actionButtons}
-      <button type="button" id="pdfOverlayClose">关闭预览</button>
-    </div>
-    <div class="tpl-preview-pages"><div class="tpl-loading">正在渲染预览…</div></div>
-    <div class="tpl-preview-warnings">${warnings.length
-      ? warnings.map((w) => `<div class="tpl-warning">${esc(w.message || w.code)}</div>`).join("")
-      : `<div class="tpl-status ok">未发现缺失字段或位置问题。</div>`}</div>`;
-  document.body.appendChild(overlay);
-  pdfOverlayEl = overlay;
-  $("#pdfOverlayClose", overlay).addEventListener("click", closePDFOverlay);
-  (options.actions || []).forEach((action, index) => {
-    const button = overlay.querySelector(`button[data-overlay-action="${index}"]`);
-    if (button && action.onClick) button.addEventListener("click", () => action.onClick(overlay));
-  });
-  pdfOverlayKeyHandler = (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closePDFOverlay();
-    }
-  };
-  document.addEventListener("keydown", pdfOverlayKeyHandler, true);
-  const pages = $(".tpl-preview-pages", overlay);
-  try {
-    pdfOverlayDoc = await renderPDFPagesInto(pages, bytes, 0.9);
-  } catch (err) {
-    pages.innerHTML = `<div class="tpl-loading">预览渲染失败：${esc(err.message)}</div>`;
-  }
-}
-
-function templateByID(id) { return state.templates.find((t) => t.id === id); }
-
-function pdfTemplateOptionsHTML(selectedID) {
-  return state.templates.map((tpl) =>
-    `<option value="${esc(tpl.id)}"${tpl.id === selectedID ? " selected" : ""}>${esc(tpl.name)} v${tpl.version}${tpl.is_active ? "（当前版本）" : ""}</option>`).join("");
-}
-
-const BATCH_STATUS_LABELS = {
-  ready: "可用",
-  needs_signature: "缺签名",
-  needs_resign: "需重新签名",
-  missing_fields: "缺必填字段",
-  missing_party: "缺相对方",
-  missing_seal: "缺公章",
-  blocked: "不可用",
-  error: "预检失败",
-};
-
-function batchStatusLabel(status) { return BATCH_STATUS_LABELS[status] || "不可用"; }
-
-/* A preflight item can be generated when it is ready, or when the only
-   blocking issue is a content change and the user explicitly allowed reusing
-   the old signature for this batch. */
-function batchItemEligible(batch, item) {
-  if (!batch.selected.has(item.contract_id)) return false;
-  if (item.ready) return true;
-  if (!batch.allowStale) return false;
-  return (item.issues || []).every((issue) => issue.code === "content_changed");
-}
-
-function batchEligibleItems(batch) {
-  if (!batch.preview) return [];
-  return (batch.preview.items || []).filter((item) => batchItemEligible(batch, item));
-}
-
-function updateBatchGenerateState(modal, batch) {
-  if (!batch.generateBtn) return;
-  batch.generateBtn.disabled = batchEligibleItems(batch).length === 0;
-  if (!batch.preview) return;
-  const eligible = batchEligibleItems(batch).length;
-  const needsResign = (batch.preview.items || []).some((item) => item.status === "needs_resign");
-  const staleWrap = $("#batchStaleWrap", modal.body);
-  if (staleWrap) staleWrap.style.display = needsResign ? "" : "none";
-  $("#batchSummary", modal.body).textContent =
-    `可生成 ${eligible} 份 · 需处理 ${(batch.preview.items || []).filter((item) => !batchItemEligible(batch, item) && batch.selected.has(item.contract_id)).length} 份` +
-    `（共 ${batch.preview.summary.total} 份）` +
-    (batch.allowStale ? " · 已确认保留旧签名" : "");
-}
-
-/* openBatchGenerateDialog runs the B4 batch flow: choose a template version,
-   preflight each contract (required fields / party / signatures / seals), show
-   a sample preview, then generate with per-contract results and retry. */
-async function openBatchGenerateDialog(opts) {
-  const options = opts || {};
-  const contracts = (options.contracts || []).filter(Boolean);
-  if (!contracts.length) { toast("请选择要生成 PDF 的合同", true); return null; }
-  if (!state.templates.length) { toast("还没有 PDF 模板，请先在「模板」页导入", true); return null; }
-  const modal = openModal(options.title || `批量生成 PDF · ${contracts.length} 份合同`, { wide: true });
-  const fallback = state.templates.find((t) => t.is_active) || state.templates[0];
-  const templateID = options.templateId && templateByID(options.templateId)
-    ? options.templateId : fallback.id;
-  const batch = {
-    contracts,
-    templateID,
-    kind: options.kind || "",
-    selected: new Set(contracts.map((c) => c.id)),
-    preview: null,
-    sampleBytes: null,
-    results: null,
-    allowStale: false,
-    generateBtn: null,
-  };
-  modal.body.innerHTML = `
-    <div id="batchErrors"></div>
-    <div class="gen-row">
-      <div class="field"><label for="batchTemplate">模板版本</label>
-        <select id="batchTemplate">${pdfTemplateOptionsHTML(templateID)}</select></div>
-      <div class="gen-actions">
-        <button type="button" id="batchPreflight">预检 / 刷新状态</button>
-        <button type="button" id="batchSample" disabled>查看样例预览</button>
-      </div>
-    </div>
-    <div class="hint">勾选要生成的合同。预检会逐份检查必填字段、相对方档案、签名（含内容版本）与公章，再开始生成。</div>
-    <div class="batch-contract-list" id="batchContractList">
-      ${contracts.map((c) => `<label class="batch-contract-row">
-        <input type="checkbox" data-batch-select="${esc(c.id)}" checked>
-        <span class="mono">${esc(c.contract_no)}</span>
-        <span class="grow" title="${esc(c.title)}">${esc(c.title)}</span>
-        <span class="gen-chip" data-contract-status="${esc(c.id)}">未预检</span>
-      </label>`).join("")}
-    </div>
-    <div id="batchSummary" class="tpl-status">已选 ${contracts.length} 份合同。点击「预检 / 刷新状态」查看每份合同能否生成。</div>
-    <label class="check-row" id="batchStaleWrap" style="display:none">
-      <input type="checkbox" id="batchAllowStale">
-      保留内容变更前的旧签名重出（仅对签名未失效、内容已变化的合同生效，逐份写入变更记录）
-    </label>
-    <div id="batchIssues" class="tpl-warnings"></div>
-    <div id="batchResults"></div>`;
-  modal.foot.innerHTML = "";
-  footerButton(modal, "关闭", "", closeModal);
-  batch.generateBtn = footerButton(modal, "开始批量生成", "primary", () => {
-    runBatchGeneration(modal, batch).catch((err) => {
-      $("#batchErrors", modal.body).innerHTML = fieldErrorsHTML(err);
-    });
-  });
-  batch.generateBtn.disabled = true;
-
-  $("#batchTemplate", modal.body).addEventListener("change", (event) => {
-    batch.templateID = event.target.value;
-    batch.preview = null;
-    batch.sampleBytes = null;
-    batch.allowStale = false;
-    $("#batchAllowStale", modal.body).checked = false;
-    $("#batchStaleWrap", modal.body).style.display = "none";
-    batch.generateBtn.disabled = true;
-    $("#batchSample", modal.body).disabled = true;
-    $("#batchSummary", modal.body).textContent = "模板版本已更换，请重新预检。";
-    $("#batchIssues", modal.body).innerHTML = "";
-    $$("#batchContractList [data-contract-status]", modal.body).forEach((chip) => {
-      chip.textContent = "未预检";
-      chip.className = "gen-chip";
-    });
-  });
-  $("#batchPreflight", modal.body).addEventListener("click", () => {
-    runBatchPreflight(modal, batch).catch((err) => {
-      $("#batchErrors", modal.body).innerHTML = fieldErrorsHTML(err);
-    });
-  });
-  $("#batchSample", modal.body).addEventListener("click", () => {
-    if (!batch.sampleBytes) return;
-    const tpl = templateByID(batch.templateID);
-    showPDFOverlay(batch.sampleBytes, {
-      title: `样例预览 · ${tpl ? `${tpl.name} v${tpl.version}` : "模板"}`,
-      warnings: (batch.preview && batch.preview.warnings) || [],
-    }).catch((err) => toast(err.message, true));
-  });
-  $("#batchAllowStale", modal.body).addEventListener("change", (event) => {
-    if (event.target.checked) {
-      const confirmed = window.confirm(
-        "确认保留内容变更前的旧签名重出？\n\n" +
-        "仅当签名仍然有效、只是合同内容有改动时使用。每份合同都会在变更记录中单独记载此确认。");
-      if (!confirmed) {
-        event.target.checked = false;
-        return;
-      }
-    }
-    batch.allowStale = event.target.checked;
-    updateBatchGenerateState(modal, batch);
-  });
-  $$("#batchContractList input[data-batch-select]", modal.body).forEach((input) => {
-    input.addEventListener("change", () => {
-      if (input.checked) batch.selected.add(input.dataset.batchSelect);
-      else batch.selected.delete(input.dataset.batchSelect);
-      batch.preview = null;
-      batch.allowStale = false;
-      $("#batchAllowStale", modal.body).checked = false;
-      $("#batchStaleWrap", modal.body).style.display = "none";
-      batch.generateBtn.disabled = true;
-      $("#batchSummary", modal.body).textContent =
-        `已选 ${batch.selected.size} 份合同。勾选变化后请重新预检。`;
-    });
-  });
-  return modal;
-}
-
-async function runBatchPreflight(modal, batch) {
-  const ids = batch.contracts.filter((c) => batch.selected.has(c.id)).map((c) => c.id);
-  if (!ids.length) { toast("请至少勾选一份合同", true); return; }
-  if (ids.length > 200) { toast("一次最多预检 200 份合同，请减少勾选", true); return; }
-  const button = $("#batchPreflight", modal.body);
-  button.disabled = true;
-  $("#batchErrors", modal.body).innerHTML = "";
-  $("#batchSummary", modal.body).textContent = "正在逐份预检…";
-  try {
-    const res = await api(`/app/api/v1/templates/${encodeURIComponent(batch.templateID)}/batch/preview`, {
-      method: "POST",
-      body: { contract_ids: ids, sample: true },
-    });
-    batch.preview = res;
-    batch.sampleBytes = res.pdf_base64 ? base64ToBytes(res.pdf_base64) : null;
-    $("#batchSample", modal.body).disabled = !batch.sampleBytes;
-    const items = res.items || [];
-    const byID = new Map(items.map((item) => [item.contract_id, item]));
-    $$("#batchContractList input[data-batch-select]", modal.body).forEach((input) => {
-      const chip = $(`[data-contract-status="${input.dataset.batchSelect}"]`, modal.body);
-      if (!chip) return;
-      const item = byID.get(input.dataset.batchSelect);
-      if (!item) {
-        chip.textContent = "未预检";
-        chip.className = "gen-chip";
-        return;
-      }
-      chip.textContent = batchStatusLabel(item.status);
-      chip.className = "gen-chip " + (item.ready ? "ok" : "warn");
-    });
-    const blocked = items.filter((item) => !item.ready);
-    $("#batchIssues", modal.body).innerHTML = blocked.map((item) =>
-      `<div class="tpl-warning">${esc(item.contract_no)}：${esc(item.issues.map((issue) => issue.message).join("；"))}</div>`).join("");
-    updateBatchGenerateState(modal, batch);
-    if (res.summary.blocked > 0) {
-      toast(`${res.summary.blocked} 份合同预检未通过，原因已列出`, true);
-    } else {
-      toast("预检通过；可查看样例预览后开始批量生成");
-    }
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function runBatchGeneration(modal, batch) {
-  if (!batch.preview) { toast("请先预检，再开始批量生成", true); return; }
-  const ready = batchEligibleItems(batch);
-  if (!ready.length) { toast("没有预检通过的合同", true); return; }
-  const tpl = templateByID(batch.templateID);
-  const label = tpl ? `${tpl.name} v${tpl.version}` : "所选模板";
-  const staleNote = batch.allowStale ? "\n\n已勾选「保留内容变更前的旧签名重出」，该确认会逐份写入变更记录。" : "";
-  if (!window.confirm(`将用「${label}」生成 ${ready.length} 份合同 PDF，继续吗？${staleNote}`)) return;
-  batch.generateBtn.disabled = true;
-  $("#batchErrors", modal.body).innerHTML = "";
-  $("#batchSummary", modal.body).textContent = `正在生成 ${ready.length} 份 PDF…`;
-  try {
-    const res = await api(`/app/api/v1/templates/${encodeURIComponent(batch.templateID)}/batch/generate`, {
-      method: "POST",
-      body: {
-        items: ready.map((item) => ({
-          contract_id: item.contract_id, preview_sha256: item.preview_sha256,
-        })),
-        kind: batch.kind,
-        allow_stale_signature: batch.allowStale,
-      },
-    });
-    batch.results = res;
-    batch.preview = null;
-    renderBatchResults(modal, batch);
-    $("#batchSummary", modal.body).textContent =
-      `生成完成：成功 ${res.summary.success} 份 · 失败 ${res.summary.failed} 份`;
-    await Promise.all([loadTemplates(), loadBootstrapAndMeta()]);
-    notifyDataChanged(["contract", "template"]);
-  } finally {
-    batch.generateBtn.disabled = true;
-  }
-}
-
-function renderBatchResults(modal, batch) {
-  const host = $("#batchResults", modal.body);
-  if (!host) return;
-  const res = batch.results;
-  if (!res) { host.innerHTML = ""; return; }
-  const rows = (res.items || []).map((item) => {
-    const resultCell = item.success && item.document
-      ? `<button type="button" data-batch-download="${esc(item.document.id)}">下载 PDF</button>`
-      : `<span class="row-errors">${esc(item.error_message || "生成失败")}</span>`;
-    return `<tr>
-      <td class="mono">${esc(item.contract_no || "")}</td>
-      <td class="wrap">${esc(item.title || "")}</td>
-      <td><span class="gen-badge ${item.success ? "success" : "failed"}">${item.success ? "成功" : "失败"}</span></td>
-      <td class="wrap">${resultCell}</td>
-      <td><div class="row-actions">${item.success ? "" : `<button type="button" data-batch-retry="${esc(item.contract_id)}">重试</button>`}</div></td>
-    </tr>`;
-  }).join("");
-  host.innerHTML = `<div class="table-wrap"><table class="gen-history-table">
-    <thead><tr><th>合同编号</th><th>名称</th><th>状态</th><th>结果</th><th>操作</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>
-    <div class="tpl-status">批次号 <code>${esc(res.batch_id)}</code>，可在合同详情的生成历史中按批次追溯。</div>`;
-  $$("button[data-batch-download]", host).forEach((button) => {
-    button.addEventListener("click", () => downloadAsset(
-      `/app/api/v1/documents/${encodeURIComponent(button.dataset.batchDownload)}/file`, "contract.pdf"));
-  });
-  $$("button[data-batch-retry]", host).forEach((button) => {
-    button.addEventListener("click", () => {
-      retryBatchItem(modal, batch, button.dataset.batchRetry).catch((err) => toast(err.message, true));
-    });
-  });
-}
-
-async function retryBatchItem(modal, batch, contractID) {
-  const preview = await api(`/app/api/v1/templates/${encodeURIComponent(batch.templateID)}/batch/preview`, {
-    method: "POST",
-    body: { contract_ids: [contractID], sample: false },
-  });
-  const item = (preview.items || [])[0];
-  const eligible = item && (item.ready ||
-    (batch.allowStale && (item.issues || []).every((issue) => issue.code === "content_changed")));
-  if (!eligible) {
-    const reason = item ? item.issues.map((issue) => issue.message).join("；") : "预检失败";
-    toast(`仍不能生成：${reason}`, true);
-    return;
-  }
-  const res = await api(`/app/api/v1/templates/${encodeURIComponent(batch.templateID)}/batch/generate`, {
-    method: "POST",
-    body: {
-      items: [{ contract_id: contractID, preview_sha256: item.preview_sha256 }],
-      kind: batch.kind,
-      allow_stale_signature: batch.allowStale,
-    },
-  });
-  const outcome = (res.items || [])[0];
-  if (!outcome) throw new Error("批次没有返回结果");
-  batch.results.items = (batch.results.items || []).map((entry) =>
-    entry.contract_id === contractID ? outcome : entry);
-  batch.results.summary = {
-    total: batch.results.items.length,
-    success: batch.results.items.filter((entry) => entry.success).length,
-    failed: batch.results.items.filter((entry) => !entry.success).length,
-  };
-  renderBatchResults(modal, batch);
-  $("#batchSummary", modal.body).textContent =
-    `生成完成：成功 ${batch.results.summary.success} 份 · 失败 ${batch.results.summary.failed} 份`;
-  toast(outcome.success ? "已重试成功" : `重试失败：${outcome.error_message || ""}`, !outcome.success);
-  await Promise.all([loadTemplates(), loadBootstrapAndMeta()]);
-  notifyDataChanged(["contract", "template"]);
-}
+/* 合同详情里的单份生成面板与生成历史、批量生成对话框都已迁到 Vue
+   （frontend/src/components/contracts/），PDF 预览 overlay 在
+   frontend/src/components/pdf/；app.js 不再渲染 PDF 预览。 */
 
 /* ---------- 手写签名（局域网扫码） ---------- */
 
@@ -754,31 +368,6 @@ function pollSignatureSession(id) {
 
 /* ---------- 模板管理（Word → PDF 套印，B3） ---------- */
 
-async function downloadAsset(path, filename) {
-  try {
-    const res = await fetch(path, { headers: { "X-Tengshou-App": "1" } });
-    if (!res.ok) {
-      let message = `下载失败（${res.status}）`;
-      try {
-        const data = await res.json();
-        if (data && data.error && data.error.message) message = data.error.message;
-      } catch (_) { /* ignore */ }
-      throw new Error(message);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename || "download";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
 async function loadBootstrapAndMeta() {
   const bootstrap = await api("/app/api/v1/bootstrap").catch(() => null);
   if (!bootstrap) return;
@@ -791,44 +380,6 @@ async function loadBootstrapAndMeta() {
    frontend/src/components/onboarding/。app.js 只保留 boot 用的
    state.onboarding.show_guide 判断；深链经 bridge 切 tab 并派发
    tengshou:open-* 事件。 */
-
-async function renderPDFPagesInto(container, bytes, scale) {
-  container.innerHTML = "";
-  const doc = await pdfjsLib.getDocument({
-    data: bytes.slice(0),
-    isEvalSupported: false,
-    useSystemFonts: true,
-  }).promise;
-  const dpr = window.devicePixelRatio || 1;
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const viewport = page.getViewport({ scale });
-    const wrap = document.createElement("div");
-    wrap.className = "pdf-page";
-    wrap.style.width = viewport.width + "px";
-    wrap.style.height = viewport.height + "px";
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.floor(viewport.width * dpr);
-    canvas.height = Math.floor(viewport.height * dpr);
-    canvas.style.width = viewport.width + "px";
-    canvas.style.height = viewport.height + "px";
-    wrap.appendChild(canvas);
-    container.appendChild(wrap);
-    await page.render({
-      canvasContext: canvas.getContext("2d"),
-      viewport,
-      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
-    }).promise;
-  }
-  return doc;
-}
-
-function base64ToBytes(b64) {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
 
 /* ---------- 字段管理 ----------
    字段页已迁到 Vue（frontend/src/components/fields/）：渲染、新建/编辑弹窗、
@@ -1776,14 +1327,13 @@ function mountContractSignatures(root, detail) {
   }
 }
 
-// 迁移期跨域桥：Vue 域借用 app.js 的 toast/整体刷新/切 tab/签名/批量/Excel
-// 导入与合同详情签名摘要；随对应域迁完移除。
+// 迁移期跨域桥：Vue 域借用 app.js 的 toast/整体刷新/切 tab/签名/Excel 导入与
+// 合同详情签名摘要；随对应域迁完移除。
 window.__tengshouApp = {
   toast,
   refreshAfterWrite,
   switchTab,
   openSignatureDialog,
-  openBatchGenerateDialog,
   openExcelImport,
   mountContractSignatures,
 };

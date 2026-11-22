@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 前端结构预算棘轮：
-#   1. 存量 internal/httpapi/web/app/app.js 只许减不许增（基线 1791 行，新手引导、模板与标定编辑器、合同详情生成面板迁出后）；
+#   1. 存量 internal/httpapi/web/app/app.js 只许减不许增（基线 1341 行，新手引导、模板与标定编辑器、合同详情生成面板与批量生成对话框迁出后）；
 #   2. 其余前端源文件（.js/.mjs/.cjs/.ts/.mts/.cts/.jsx/.tsx/.vue）单文件 ≤ 600 行。
 # 排除构建产物、依赖、第三方 vendored 代码与并行 worktree。
 # 用法：在仓库任意位置执行 `bash scripts/check-frontend-structure.sh`
@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 APP_JS="internal/httpapi/web/app/app.js"
-APP_JS_BASELINE=1791
+APP_JS_BASELINE=1341
 MAX_LINES=600
 
 fail=0

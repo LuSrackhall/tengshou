@@ -3,9 +3,8 @@
 
 const state = {
   bootstrap: null,
-  /* B8 首装引导状态与最近一次自检结果。 */
+  /* B8 首装引导：仅 boot 用来决定是否默认停在引导页；界面由 Vue 岛渲染。 */
   onboarding: null,
-  onboardingCheck: null,
   fields: { contract: [], party: [] },
   templates: [],
   changelog: [],
@@ -97,10 +96,6 @@ function closeModal() {
   const root = document.getElementById("modalRoot");
   root.innerHTML = "";
   document.removeEventListener("keydown", onModalKey);
-  if (state.tab === "onboarding") {
-    loadOnboarding().catch(() => {});
-    loadOnboardingTemplateCheck().catch(() => {});
-  }
 }
 function onModalKey(e) { if (e.key === "Escape") closeModal(); }
 
@@ -145,10 +140,7 @@ function footerButton(modal, label, cls, onClick) {
 async function loadBootstrap() {
   const data = await api("/app/api/v1/bootstrap");
   state.bootstrap = data;
-  if (data.onboarding) {
-    state.onboarding = data.onboarding;
-    renderOnboarding();
-  }
+  if (data.onboarding) state.onboarding = data.onboarding;
   renderMeta();
 }
 
@@ -380,249 +372,14 @@ async function loadBootstrapAndMeta() {
   const bootstrap = await api("/app/api/v1/bootstrap").catch(() => null);
   if (!bootstrap) return;
   state.bootstrap = bootstrap;
-  if (bootstrap.onboarding) {
-    state.onboarding = bootstrap.onboarding;
-    renderOnboarding();
-  }
   renderMeta();
 }
 
 /* ---------- 首装引导与模板向导（B8） ----------
-   引导只做提示与校验：不新建模板编辑器、不预置任何地方模板、不联网。
-   数据驱动的步骤由服务端按真实数据判定；样例预览与试生成不写入台账，
-   因此这两步的完成时间记录在 config.json 的 onboarding 中。 */
-
-const TAB_LABELS = {
-  onboarding: "新手引导", contracts: "合同台账", templates: "模板", seals: "公章",
-  parties: "相对方档案", fields: "字段", changelog: "变更记录", data: "数据安全", settings: "设置",
-};
-
-function tabLabel(tab) { return TAB_LABELS[tab] || tab; }
-
-async function loadOnboarding() {
-  try {
-    const data = await api("/app/api/v1/onboarding");
-    state.onboarding = data;
-    renderOnboarding();
-    return data;
-  } catch (err) {
-    const list = $("#onboardSteps");
-    if (list) list.innerHTML = `<div class="form-errors">引导状态读取失败：${esc(err.message)}</div>`;
-    return null;
-  }
-}
-
-function onboardingActiveTemplate() {
-  return state.templates.find((t) => t.is_active) || state.templates[0] || null;
-}
-
-function renderOnboarding() {
-  const data = state.onboarding;
-  const list = $("#onboardSteps");
-  if (!list || !data) return;
-  const steps = data.steps || [];
-  const done = steps.filter((s) => s.done).length;
-  const progress = $("#onboardProgress");
-  if (progress) progress.textContent = `${done} / ${steps.length} 步已完成`;
-  list.innerHTML = steps.map((step, index) => `
-    <button type="button" class="onboard-step ${step.done ? "done" : ""}" data-step="${esc(step.action)}">
-      <span class="onboard-step-no">${step.done ? "✓" : index + 1}</span>
-      <span class="onboard-step-copy">
-        <strong>${esc(step.label)}</strong>
-        <span>${esc(step.detail || "")}</span>
-      </span>
-      <span class="badge ${step.done ? "active" : "draft"}">${step.done ? "已完成" : "待完成"}</span>
-    </button>`).join("");
-  $$(".onboard-step", list).forEach((button) => {
-    button.addEventListener("click", () => {
-      handleOnboardingStep(button.dataset.step).catch((err) => toast(err.message, true));
-    });
-  });
-  const banner = $("#onboardBanner");
-  if (banner) {
-    if (data.completed) {
-      banner.textContent = `引导已完成${data.completed_at ? "（" + fmtDate(data.completed_at) + "）" : ""}；仍可从本页重新查看。`;
-    } else if (data.skipped) {
-      banner.textContent = `已跳过引导${data.skipped_at ? "（" + fmtDate(data.skipped_at) + "）" : ""}；需要时点「重新打开引导」。`;
-    } else if (data.first_run) {
-      banner.textContent = "这是第一次打开腾手：按下面五步完成第一份模板与试生成。";
-    } else if (steps.length && done === steps.length) {
-      banner.textContent = "五步都已完成，可以继续正常使用。";
-    } else {
-      banner.textContent = `已完成 ${done} / ${steps.length} 步；点击任一步继续。`;
-    }
-  }
-  const completeBtn = $("#onboardCompleteBtn");
-  if (completeBtn) completeBtn.style.display = data.completed ? "none" : "";
-  const reopenBtn = $("#onboardReopenBtn");
-  if (reopenBtn) reopenBtn.style.display = (data.completed || data.skipped) ? "" : "none";
-  const skipBtn = $("#onboardSkipBtn");
-  if (skipBtn) skipBtn.style.display = (data.completed || data.skipped) ? "none" : "";
-}
-
-async function handleOnboardingStep(action) {
-  switch (action) {
-    case "template_import": {
-      switchTab("templates");
-      setTimeout(openTemplateImportInVue, 60);
-      return;
-    }
-    case "template_calibrate": {
-      const tpl = onboardingActiveTemplate();
-      if (!tpl) {
-        toast("先导入一份模板，再做标定", true);
-        return handleOnboardingStep("template_import");
-      }
-      switchTab("templates");
-      openTemplateEditorInVue(tpl);
-      return;
-    }
-    case "sample_preview":
-    case "trial_pdf": {
-      const tpl = onboardingActiveTemplate();
-      if (!tpl) {
-        toast("先导入并标定模板，再用样例预览", true);
-        return handleOnboardingStep("template_import");
-      }
-      switchTab("templates");
-      openTemplateEditorInVue(tpl, action === "trial_pdf" ? "download-sample" : "sample-preview");
-      return;
-    }
-    case "contract_create":
-      switchTab("contracts");
-      openContractFormInVue(null);
-      return;
-    default:
-      toast("未知的引导步骤", true);
-  }
-}
-
-async function setOnboardingAction(action) {
-  const data = await api("/app/api/v1/onboarding/state", { method: "POST", body: { action } });
-  state.onboarding = data;
-  renderOnboarding();
-  return data;
-}
-
-async function completeOnboarding() {
-  try {
-    await setOnboardingAction("complete");
-    toast("引导已完成；可从顶部「新手引导」再次查看");
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
-async function skipOnboarding() {
-  try {
-    await setOnboardingAction("skip");
-    toast("已暂时跳过引导；随时可从顶部「新手引导」重新打开");
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
-async function reopenOnboarding() {
-  try {
-    await setOnboardingAction("reopen");
-    toast("引导已重新打开");
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
-// 模板标定的样例预览/试生成已迁到 Vue（useTemplateEditor）：引导步骤的
-// 进度记录改由它在预览/下载后直接调用 /onboarding/state。
-
-async function loadOnboardingCheck() {
-  const host = $("#onboardCheckList");
-  if (!host) return;
-  host.innerHTML = `<p class="hint">正在自检…</p>`;
-  try {
-    const data = await api("/app/api/v1/onboarding/check");
-    state.onboardingCheck = data;
-    renderOnboardingCheck(data);
-  } catch (err) {
-    host.innerHTML = `<div class="form-errors">自检失败：${esc(err.message)}</div>`;
-  }
-}
-
-const CHECK_STATUS_LABELS = { ok: "通过", warn: "需留意", error: "需处理" };
-
-function renderOnboardingCheck(data) {
-  const host = $("#onboardCheckList");
-  const summary = $("#onboardCheckSummary");
-  if (!host) return;
-  const counts = data.summary || {};
-  if (summary) {
-    summary.textContent = `通过 ${counts.ok || 0} · 需留意 ${counts.warn || 0} · 需处理 ${counts.error || 0}`;
-  }
-  host.innerHTML = (data.items || []).map((item) => `
-    <div class="onboard-check ${esc(item.status)}">
-      <div class="onboard-check-head">
-        <span class="onboard-dot"></span>
-        <strong>${esc(item.label)}</strong>
-        <span class="badge ${item.status === "ok" ? "active" : item.status === "warn" ? "draft" : "error"}">${CHECK_STATUS_LABELS[item.status] || esc(item.status)}</span>
-      </div>
-      ${item.detail ? `<p class="muted">${esc(item.detail)}</p>` : ""}
-      ${item.status !== "ok" && item.action ? `<p class="onboard-next">下一步：${esc(item.action)}</p>` : ""}
-      ${item.status !== "ok" && item.target ? `<button type="button" data-target="${esc(item.target)}">前往「${esc(tabLabel(item.target))}」</button>` : ""}
-    </div>`).join("");
-  $$("button[data-target]", host).forEach((button) => {
-    button.addEventListener("click", () => switchTab(button.dataset.target));
-  });
-}
-
-async function loadOnboardingTemplateCheck() {
-  const host = $("#onboardTemplateCheck");
-  if (!host) return;
-  const tpl = onboardingActiveTemplate();
-  if (!tpl) {
-    host.innerHTML = `<p class="hint">还没有可体检的模板；先完成第 1 步导入模板。</p>`;
-    return;
-  }
-  host.innerHTML = `<p class="hint">正在检查「${esc(tpl.name)}」v${tpl.version}…</p>`;
-  try {
-    const data = await api(`/app/api/v1/templates/${encodeURIComponent(tpl.id)}/check`);
-    renderOnboardingTemplateCheck(data);
-  } catch (err) {
-    host.innerHTML = `<div class="form-errors">模板体检失败：${esc(err.message)}</div>`;
-  }
-}
-
-function renderOnboardingTemplateCheck(data) {
-  const host = $("#onboardTemplateCheck");
-  if (!host) return;
-  const issues = data.issues || [];
-  const rows = issues.map((issue) => `
-    <div class="onboard-check ${issue.severity === "error" ? "error" : "warn"}">
-      <div class="onboard-check-head">
-        <span class="onboard-dot"></span>
-        <strong>${esc(issue.message)}</strong>
-      </div>
-      <p class="onboard-next">下一步：${esc(issue.action)}</p>
-    </div>`).join("");
-  host.innerHTML = `
-    <p class="muted">「${esc(data.name)}」v${data.version} · ${data.field_placements || 0} 个字段位置 · ${data.signature_placements || 0} 个签名位置 · ${data.seal_placements || 0} 个公章位置</p>
-    ${issues.length ? rows : `
-      <div class="onboard-check ok">
-        <div class="onboard-check-head"><span class="onboard-dot"></span><strong>模板占位与字段定义一致，未发现缺失。</strong></div>
-      </div>`}
-    <div class="onboard-check-actions">
-      <button type="button" id="onboardGoFields">去字段页</button>
-      <button type="button" id="onboardGoCalibrate">去模板标定</button>
-    </div>`;
-  const fieldsBtn = $("#onboardGoFields", host);
-  if (fieldsBtn) fieldsBtn.addEventListener("click", () => switchTab("fields"));
-  const calibrateBtn = $("#onboardGoCalibrate", host);
-  if (calibrateBtn) {
-    calibrateBtn.addEventListener("click", () => {
-      const tpl = onboardingActiveTemplate();
-      switchTab("templates");
-      openTemplateEditorInVue(tpl);
-    });
-  }
-}
+   引导界面（五步列表、完成/跳过/重新打开、本机自检与模板体检）已迁到
+   frontend/src/components/onboarding/。app.js 只保留 boot 用的
+   state.onboarding.show_guide 判断；深链经 bridge 切 tab 并派发
+   tengshou:open-* 事件。 */
 
 /* ---------- 字段管理 ----------
    字段页已迁到 Vue（frontend/src/components/fields/）：渲染、新建/编辑弹窗、
@@ -1455,10 +1212,6 @@ async function flushRealtimeRefresh() {
     const bootstrap = await api("/app/api/v1/bootstrap").catch(() => null);
     if (bootstrap) {
       state.bootstrap = bootstrap;
-      if (bootstrap.onboarding) {
-        state.onboarding = bootstrap.onboarding;
-        renderOnboarding();
-      }
       renderMeta();
     }
   }
@@ -1482,12 +1235,10 @@ function switchTab(tab) {
   state.tab = tab;
   $$("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${tab}`));
+  // 已迁移的 Vue 域据此在重新显示时刷新（等价于迁移前 switchTab 内联的
+  // loadXxx 调用；例如新手引导会重跑自检与模板体检）。
+  window.dispatchEvent(new CustomEvent("tengshou:tab-change", { detail: { tab } }));
   if (tab === "changelog") loadChangelog().catch((err) => toast(err.message, true));
-  if (tab === "onboarding") {
-    loadOnboarding();
-    loadOnboardingCheck();
-    loadOnboardingTemplateCheck();
-  }
   if (tab === "data") loadBackupStatus().catch((err) => toast(err.message, true));
   if (tab === "settings") loadMCPStatus().catch((err) => toast(err.message, true));
 }
@@ -1498,19 +1249,11 @@ async function refreshAfterWrite() {
   const bootstrap = await api("/app/api/v1/bootstrap").catch(() => null);
   if (bootstrap) {
     state.bootstrap = bootstrap;
-    if (bootstrap.onboarding) {
-      state.onboarding = bootstrap.onboarding;
-      renderOnboarding();
-    }
     renderMeta();
   }
-  // 已迁移的 Vue 域（合同台账、相对方档案、字段管理、公章、模板）不复用
-  // 这里的 DOM，但需要知道数据已经变了：它们据此重取各自的列表。
+  // 已迁移的 Vue 域（新手引导、合同台账、相对方档案、字段管理、公章、模板）
+  // 不复用这里的 DOM，但需要知道数据已经变了：它们据此重取各自的列表。
   notifyDataChanged(["field", "party", "contract", "seal", "template"]);
-  if (state.tab === "onboarding") {
-    loadOnboarding();
-    loadOnboardingTemplateCheck();
-  }
   if (state.tab === "changelog") {
     loadChangelog().catch((err) => toast(err.message, true));
   }
@@ -1553,19 +1296,6 @@ function bindEvents() {
   $("#refreshMCPStatusBtn").addEventListener("click", () => {
     loadMCPStatus().catch((err) => toast(err.message, true));
   });
-  $("#onboardStartBtn").addEventListener("click", () => {
-    handleOnboardingStep("template_import").catch((err) => toast(err.message, true));
-  });
-  $("#onboardRecheckBtn").addEventListener("click", () => {
-    loadOnboardingCheck();
-    loadOnboardingTemplateCheck();
-  });
-  $("#onboardSkipBtn").addEventListener("click", skipOnboarding);
-  $("#onboardCompleteBtn").addEventListener("click", completeOnboarding);
-  $("#onboardReopenBtn").addEventListener("click", reopenOnboarding);
-  $("#onboardTemplateCheckBtn").addEventListener("click", () => {
-    loadOnboardingTemplateCheck();
-  });
 }
 
 async function boot() {
@@ -1586,28 +1316,6 @@ async function boot() {
   startRealtime();
 }
 
-/* 合同表单已迁到 Vue：app.js 侧（首装引导）经该事件打开新建表单。
-   台账岛监听 tengshou:open-contract-form 后弹 Vue 弹窗。 */
-function openContractFormInVue(contract, options) {
-  window.dispatchEvent(new CustomEvent("tengshou:open-contract-form", {
-    detail: { contract: contract || null, options: options || {} },
-  }));
-}
-
-/* 模板页已迁到 Vue（frontend/src/components/templates/）：引导与引导自检经
-   这两个事件打开导入选择或标定编辑器；样例动作随 detail.action 传入，
-   由模板岛在编辑器打开后执行。 */
-function openTemplateEditorInVue(template, action) {
-  if (!template) return;
-  window.dispatchEvent(new CustomEvent("tengshou:open-template-editor", {
-    detail: { templateId: template.id, action: action || "" },
-  }));
-}
-
-function openTemplateImportInVue() {
-  window.dispatchEvent(new CustomEvent("tengshou:open-template-import"));
-}
-
 /* 合同详情里的签名摘要仍由 app.js 渲染（扫码签名域尚未迁移）：Vue 合同弹窗
    保留宿主 #contractSignatures，挂载后把根节点与详情交过来。生成面板已迁到
    Vue（frontend/src/components/contracts/ContractGenerationPanel.vue）。 */
@@ -1619,11 +1327,12 @@ function mountContractSignatures(root, detail) {
   }
 }
 
-// 迁移期跨域桥：Vue 域借用 app.js 的 toast/整体刷新/签名/Excel 导入与
+// 迁移期跨域桥：Vue 域借用 app.js 的 toast/整体刷新/切 tab/签名/Excel 导入与
 // 合同详情签名摘要；随对应域迁完移除。
 window.__tengshouApp = {
   toast,
   refreshAfterWrite,
+  switchTab,
   openSignatureDialog,
   openExcelImport,
   mountContractSignatures,

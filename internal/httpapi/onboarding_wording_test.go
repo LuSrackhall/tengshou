@@ -33,6 +33,17 @@ func TestOnboardingWordingBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	files = append(files, templateModules...)
+	// 阶段 1：新手引导已迁到 Vue，引导文案落在这里，边界检查随迁移覆盖。
+	onboardingViews, err := filepath.Glob("../../frontend/src/components/onboarding/*.vue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, onboardingViews...)
+	onboardingModules, err := filepath.Glob("../../frontend/src/components/onboarding/*.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, onboardingModules...)
 	docs, err := filepath.Glob("../../docs/*.md")
 	if err != nil {
 		t.Fatal(err)
@@ -68,9 +79,9 @@ func TestOnboardingCopyPresent(t *testing.T) {
 		file string
 		text string
 	}{
-		{"web/app/index.html", "我有一份上级模板"},
-		{"web/app/index.html", "样例数据，不写入台账"},
-		{"web/app/index.html", "本机自检"},
+		{"../../frontend/src/components/onboarding/OnboardingView.vue", "我有一份上级模板"},
+		{"../../frontend/src/components/onboarding/OnboardingView.vue", "样例数据，不写入台账"},
+		{"../../frontend/src/components/onboarding/OnboardingView.vue", "本机自检"},
 		{"../../frontend/src/components/templates/useTemplatePreviewGenerate.ts", "样例数据未写入台账"},
 		{"../../docs/b8-onboarding.md", "试用数据与真实数据的边界"},
 		{"../../docs/b8-onboarding.md", "不预置地方模板"},

@@ -20,6 +20,7 @@
     <button type="button" data-tab="parties">相对方档案</button>
     <button type="button" data-tab="fields">字段</button>
     <button type="button" data-tab="changelog">变更记录</button>
+    <button type="button" data-tab="data">数据安全</button>
   </nav>
   <div class="meta" id="meta"></div>
 </header>
@@ -120,11 +121,26 @@
     <div id="changelogSummary" class="summary"></div>
     <div id="changelogList" class="changelog"></div>
   </section>
+    <div id="changelogSummary" class="summary"></div>
+    <div id="changelogList" class="changelog"></div>
+  </section>
+
+  <section id="view-data" class="view" aria-label="数据安全">
+    <div class="toolbar">
+      <button type="button" id="exportBackupBtn" class="primary">导出完整备份包</button>
+      <button type="button" id="restoreBackupBtn">从备份包恢复…</button>
+      <button type="button" id="checkIntegrityBtn">数据一致性检查</button>
+    </div>
+    <p class="hint">所有数据都在本机数据目录：数据库、签名与公章图片、模板文件、已生成的 PDF 和配置。备份包包含上述全部内容（不含日志），换电脑时可在新机器上恢复。备份包未加密，请像保管合同原件一样保管它。</p>
+    <div id="backupStatus" class="summary"></div>
+    <div id="integrityReport"></div>
+  </section>
 </main>
 
 <input type="file" id="importFile" accept=".xlsx" hidden>
 <input type="file" id="sealImageFile" accept="image/png,image/jpeg" hidden>
 <input type="file" id="templateFileInput" accept=".docx,.pdf" hidden>
+<input type="file" id="backupFileInput" accept=".zip,application/zip" hidden>
 <div id="modalRoot"></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script src="/app/vendor/pdf.min.js"></script>

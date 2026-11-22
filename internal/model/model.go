@@ -71,16 +71,21 @@ const (
 
 // Change-log entities/actions.
 const (
-	ChangeEntityContract = "contract"
-	ChangeEntityParty    = "party"
-	ChangeEntityField    = "field"
-	ChangeEntitySeal     = "seal"
-	ChangeEntityTemplate = "template"
-	ChangeActionCreate   = "create"
-	ChangeActionUpdate   = "update"
-	ChangeActionDelete   = "delete"
-	ChangeActionArchive  = "archive"
-	ChangeActionImport   = "import"
+	ChangeEntityContract  = "contract"
+	ChangeEntityParty     = "party"
+	ChangeEntityField     = "field"
+	ChangeEntitySeal      = "seal"
+	ChangeEntityTemplate  = "template"
+	ChangeEntitySignature = "signature"
+	ChangeEntityBackup    = "backup"
+	ChangeActionCreate    = "create"
+	ChangeActionUpdate    = "update"
+	ChangeActionDelete    = "delete"
+	ChangeActionArchive   = "archive"
+	ChangeActionImport    = "import"
+	ChangeActionExport    = "export"
+	ChangeActionRestore   = "restore"
+	ChangeActionGenerate  = "generate"
 )
 
 // Party is a counterparty (person or organization) in a contract.

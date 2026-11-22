@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LuSrackhall/tengshou/internal/backup"
 	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/httpapi"
 	"github.com/LuSrackhall/tengshou/internal/model"
@@ -29,6 +30,8 @@ type fixture struct {
 	contractID string
 	dataDir    string
 	service    *service.Service
+	store      *store.Store
+	reader     *store.Reader
 }
 
 type fixtureOptions struct {
@@ -96,6 +99,11 @@ func newFixtureWithOptions(t *testing.T, opts fixtureOptions) *fixture {
 	svc := service.New(st, reader, "tester")
 	dataDir := t.TempDir()
 	svc.SetDataDir(dataDir)
+	if paths, err := config.ResolvePaths(dataDir); err == nil {
+		svc.SetBackupManager(backup.New(paths, "test",
+			func(ctx context.Context, dest string) error { return st.Snapshot(dest) },
+			func(ctx context.Context) (int, error) { return st.SchemaVersion() }))
+	}
 	server := httpapi.New(httpapi.Options{
 		Reader:   reader,
 		Service:  svc,
@@ -108,7 +116,8 @@ func newFixtureWithOptions(t *testing.T, opts fixtureOptions) *fixture {
 	ts := httptest.NewServer(server.Handler())
 	t.Cleanup(ts.Close)
 	return &fixture{server: ts, handler: server.Handler(), partyID: partyA.ID,
-		partyBID: partyB.ID, contractID: contract.ID, dataDir: dataDir, service: svc}
+		partyBID: partyB.ID, contractID: contract.ID, dataDir: dataDir, service: svc,
+		store: st, reader: reader}
 }
 
 func (f *fixture) get(t *testing.T, path string, auth bool) (*http.Response, []byte) {

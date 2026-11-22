@@ -48,7 +48,10 @@
   字段、相对方档案与合同草稿，复用同一 `internal/service` 校验，并以
   `tengshou-mcp` 记入变更记录；`config.json` 的 `mcp.write_enabled` 可关闭
   写入。注册方式、工具 schema 与安全边界见 [docs/mcp.md](docs/mcp.md)。
-- **备份约定**：`VACUUM INTO` 备份到 `<data>/backups/`（含字段定义与数据）。
+- **数据安全与备份（B9）**：一键导出完整备份包（一致性数据库快照 + 签名 /
+  公章 / 模板 / PDF + 配置 + manifest 摘要），校验后恢复，换机可迁移；启动时
+  数据库完整性检查与孤儿资产报告；签名导出二次确认并写审计。详见
+  [docs/b9-backup.md](docs/b9-backup.md)。
 - **构建与发布**：`scripts/build.sh`、`scripts/build-windows.ps1`；GitHub Actions。
 
 ## 快速开始
@@ -90,10 +93,12 @@ Excel 模板下载、导入与台账导出都在 `/app/` 的「合同台账」�
 go run ./cmd/tengshou-cli render --data-dir ./data --contract demo-contract-1
 ```
 
-备份数据库：
+备份与恢复（完整包，含资产与配置）：
 
 ```bash
 go run ./cmd/tengshou-cli backup --data-dir ./data
+# 恢复前请先关闭正在运行的腾手
+go run ./cmd/tengshou-cli restore --data-dir ./data --file <备份包.zip>
 ```
 
 ## 数据目录
@@ -115,7 +120,7 @@ go run ./cmd/tengshou-cli backup --data-dir ./data
   assets/         # 签名（signatures/）、公章（seals/）等模板资源
   templates/      # 用户 HTML 模板；PDF 模板在 templates/pdf/<模板id>/
   outputs/        # 生成的 PDF
-  backups/        # 数据库备份
+  backups/        # 完整备份包与恢复前安全副本（pre-restore-*/）
   logs/           # JSON 日志（启动时按大小轮转）
   fonts/          # 可选：用户自带中文字体（优先于系统字体）
 ```

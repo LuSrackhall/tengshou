@@ -562,7 +562,7 @@ func (s *Service) GenerateContractPDF(ctx context.Context, id, contractID, previ
 			fmt.Sprintf("合同模板版本更新为「%s」v%d", tpl.Name, tpl.Version),
 			[]model.FieldChange{{Field: "template_id", Label: "模板", Old: before, New: tpl.ID}})
 	}
-	s.logChange(ctx, model.ChangeEntityContract, rc.contract.ID, model.ChangeActionUpdate,
+	s.logChange(ctx, model.ChangeEntityContract, rc.contract.ID, model.ChangeActionGenerate,
 		fmt.Sprintf("按模板「%s」v%d 生成 PDF（%d 页，sha256 %s…）",
 			tpl.Name, tpl.Version, len(pages), shortSHA(doc.SHA256)), nil)
 	warnings := append([]overlay.Warning{}, built.Warnings...)

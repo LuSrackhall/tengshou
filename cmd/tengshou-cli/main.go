@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/LuSrackhall/tengshou/internal/app"
+	"github.com/LuSrackhall/tengshou/internal/backup"
 	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/demo"
 	"github.com/LuSrackhall/tengshou/internal/httpapi"
@@ -91,6 +92,13 @@ func run(args []string) error {
 			return err
 		}
 		return runBackup(*c.dataDir)
+	case "restore":
+		fs, c := newFlags("restore")
+		file := fs.String("file", "", "备份包 .zip 路径（必填）")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return runRestore(*c.dataDir, *file)
 	case "mcp":
 		return runMCP(args[1:])
 	default:
@@ -109,7 +117,8 @@ func usage() {
   demo      生成示例合同、签名与 PDF（可重复执行）
   serve     启动本地 HTTP 服务（含局域网测试页）
   render    用模板重新生成一份合同 PDF
-  backup    备份 SQLite 数据库到 backups/
+  backup    导出完整备份包（数据库快照 + 签名 / 公章 / 模板 / PDF + 配置）
+  restore   从完整备份包恢复数据（请先关闭正在运行的腾手）
   mcp       启动 MCP stdio 连接器（供 Claude Code / Claude Desktop 注册）
   version   显示版本
 
@@ -302,11 +311,47 @@ func runBackup(dataDir string) error {
 		return err
 	}
 	defer a.Close()
-	path, err := a.Backup()
+	path, manifest, err := a.Service.CreateBackupFile(context.Background())
 	if err != nil {
 		return err
 	}
-	fmt.Printf("数据库备份：%s\n", path)
+	fmt.Printf("完整备份包：%s\n", path)
+	fmt.Printf("  文件 %d 个，共 %d 字节，数据库 schema v%d，应用版本 %s\n",
+		len(manifest.Files), manifest.TotalSize(), manifest.SchemaVersion, manifest.AppVersion)
+	return nil
+}
+
+// runRestore validates a package and applies it immediately. It deliberately
+// does not open the application database: another running 腾手 instance would
+// still hold SQLite handles, so the user is told to close it first.
+func runRestore(dataDir, file string) error {
+	if strings.TrimSpace(file) == "" {
+		return errors.New("restore 需要 --file <备份包.zip>")
+	}
+	paths, err := config.ResolvePaths(dataDir)
+	if err != nil {
+		return err
+	}
+	src, err := os.Open(file)
+	if err != nil {
+		return fmt.Errorf("读取备份包：%w", err)
+	}
+	defer src.Close()
+	mgr := backup.New(paths, version.String(), nil, nil)
+	manifest, err := mgr.Stage(context.Background(), src, backup.DefaultMaxUploadBytes)
+	if err != nil {
+		return err
+	}
+	res, err := backup.ApplyPending(paths)
+	if err != nil {
+		return err
+	}
+	if !res.Applied {
+		return errors.New("没有可应用的暂存恢复")
+	}
+	fmt.Printf("恢复完成：%d 个文件，数据库 schema v%d，应用版本 %s\n",
+		len(manifest.Files), manifest.SchemaVersion, manifest.AppVersion)
+	fmt.Printf("恢复前数据副本：%s\n", res.SafetyDir)
 	return nil
 }
 

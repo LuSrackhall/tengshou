@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/LuSrackhall/tengshou/internal/backup"
 	"github.com/LuSrackhall/tengshou/internal/doctopdf"
 	"github.com/LuSrackhall/tengshou/internal/model"
 	"github.com/LuSrackhall/tengshou/internal/store"
@@ -39,6 +40,8 @@ type Service struct {
 	// converters turns imported Word documents into PDF (B3). Callers may
 	// replace the chain, e.g. in tests.
 	converters *doctopdf.Chain
+	// backupMgr builds and stages full data backup packages (B9).
+	backupMgr *backup.Manager
 	// fontLoader lazily resolves the CJK font used for template overlays.
 	// It is injected by the app layer so the font is shared with the HTML
 	// generator.
@@ -107,6 +110,10 @@ func (s *Service) actorFor(ctx context.Context) string {
 // SetDataDir configures the data directory used for binary assets such as
 // captured signature images. It is called once at startup, before serving.
 func (s *Service) SetDataDir(dir string) { s.dataDir = dir }
+
+// SetBackupManager wires the B9 backup package manager. It is called once at
+// startup, before serving.
+func (s *Service) SetBackupManager(m *backup.Manager) { s.backupMgr = m }
 
 // DataDir returns the configured data directory ("" when unset).
 func (s *Service) DataDir() string { return s.dataDir }

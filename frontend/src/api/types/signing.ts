@@ -1,0 +1,61 @@
+// 局域网扫码签名会话契约（桌面端 app API 视角）。
+//
+// 来源（与 Go 侧逐字段核对）：
+//   internal/sign/session.go        Session 状态常量与字段
+//   internal/httpapi/signapi.go     signSessionView / createSignSessionInput /
+//                                   cancel 响应
+//
+// 手机签名页（/sign/{token}）由 Go 直接渲染 HTML，不属于 Vue 前端工程。
+
+import type { ISODateTime } from "./common";
+
+export type SignatureSessionState =
+  | "pending"
+  | "submitting"
+  | "completed"
+  | "expired";
+
+/**
+ * 会话视图（signSessionView）。一次性 token 只存在于二维码 URL 里，
+ * 不会出现在该结构中。
+ */
+export interface SignatureSession {
+  id: string;
+  state: SignatureSessionState;
+  contract_id: string;
+  contract_no: string;
+  contract_title: string;
+  content_sha256: string;
+  party_id: string;
+  signer_name: string;
+  urls: string[];
+  /** urls 的第一个地址（urls 非空时才有）。 */
+  url?: string;
+  /** 二维码 PNG 的相对地址，可直接作为 img.src。 */
+  qr_url: string;
+  created_at: ISODateTime;
+  expires_at: ISODateTime;
+  /** 以下字段仅在 state=completed 时出现。 */
+  completed_at?: ISODateTime;
+  signature_id?: string;
+  asset_path?: string;
+  width_px?: number;
+  height_px?: number;
+  /** GET 时会补上：合同当前内容摘要与是否已变化。 */
+  current_content_sha256?: string;
+  content_changed?: boolean;
+}
+
+/** POST /signature-sessions 的请求体（createSignSessionInput）。 */
+export interface CreateSignatureSessionInput {
+  contract_id: string;
+  /** 默认取合同乙方；必须是甲方或乙方的档案。 */
+  party_id?: string;
+  /** 默认取档案名称。 */
+  signer_name?: string;
+}
+
+/** DELETE /signature-sessions/{id} 的响应。 */
+export interface SignatureSessionCancelResponse {
+  cancelled: boolean;
+}

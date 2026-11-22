@@ -1,52 +1,20 @@
-// 本地 vendored pdf.js 的最小类型适配（阶段 1 模板标定迁移）。
+// 阶段 1 模板标定域的 pdf.js 调用面：类型统一来自 src/pdfjs.ts（与生成域
+// 共用一份全局声明），这里只保留模板域用到的加载/渲染函数。
 //
 // index.html 以 classic script 先加载 /app/vendor/pdf.min.js（全局
 // pdfjsLib）再加载 app.js 与 Vue 产物；worker 也来自 /app/vendor/。
-// 这里只声明用到的调用面，不引入 npm 包、不访问 CDN，保持离线单二进制。
-// 禁止 any / ts-ignore：未知能力一律按最小接口收敛。
+// 不引入 npm 包、不访问 CDN，保持离线单二进制。禁止 any / ts-ignore。
+import type {
+  PdfDocument,
+  PdfJsLib,
+  PdfPage,
+  PdfRenderTask,
+  PdfViewport,
+} from "../../pdfjs";
 
-export interface PdfViewport {
-  width: number;
-  height: number;
-}
+export type { PdfDocument, PdfPage, PdfRenderTask, PdfViewport };
 
-export interface PdfRenderTask {
-  promise: Promise<void>;
-  cancel(): void;
-}
-
-export interface PdfPage {
-  getViewport(params: { scale: number }): PdfViewport;
-  render(params: {
-    canvasContext: CanvasRenderingContext2D | null;
-    viewport: PdfViewport;
-    transform?: number[] | null;
-  }): PdfRenderTask;
-}
-
-export interface PdfDocument {
-  numPages: number;
-  getPage(pageNumber: number): Promise<PdfPage>;
-  destroy(): Promise<void> | void;
-}
-
-interface PdfLib {
-  GlobalWorkerOptions: { workerSrc: string };
-  getDocument(params: {
-    data: Uint8Array;
-    isEvalSupported?: boolean;
-    useSystemFonts?: boolean;
-  }): { promise: Promise<PdfDocument> };
-}
-
-declare global {
-  interface Window {
-    /** /app/vendor/pdf.min.js 暴露的全局对象；开发预览页可能缺席。 */
-    pdfjsLib?: PdfLib;
-  }
-}
-
-function requirePdfLib(): PdfLib {
+function requirePdfLib(): PdfJsLib {
   const lib = window.pdfjsLib;
   if (!lib) {
     throw new Error("PDF 渲染组件未加载：缺少本地 pdf.js");

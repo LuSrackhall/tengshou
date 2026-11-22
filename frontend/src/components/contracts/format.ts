@@ -1,7 +1,13 @@
 // 合同域的展示格式化：与存量 app.js 的同名逻辑保持逐字一致。
 // 迁移只换渲染框架，不改文案、金额/日期格式与状态标签。
 
-import type { Contract, FieldDefinition, Party } from "../../api/types";
+import type {
+  Contract,
+  DocumentKind,
+  DocumentStatus,
+  FieldDefinition,
+  Party,
+} from "../../api/types";
 
 /** 变更动作标签（app.js ACTION_LABELS，保留完整表）。 */
 export const ACTION_LABELS: Record<string, string> = {
@@ -69,6 +75,21 @@ export function partyName(parties: Party[], id: string | undefined): string {
   }
   const party = parties.find((item) => item.id === id);
   return party ? party.name : "";
+}
+
+/** 生成类型标签（app.js generationKindLabel）。 */
+export function generationKindLabel(kind: DocumentKind): string {
+  return kind === "regenerate" ? "整改重出" : "初次生成";
+}
+
+/** 生成状态标签（app.js generationStatusLabel）。 */
+export function generationStatusLabel(status: DocumentStatus): string {
+  return status === "failed" ? "失败" : "成功";
+}
+
+/** 生成记录的内容版本摘要（app.js shortDigest）。 */
+export function shortDigest(sha: string | undefined): string {
+  return String(sha ?? "").slice(0, 12);
 }
 
 /** 台账单元格：内置列走一级字段，其余读 data（app.js contractFieldValue）。 */

@@ -209,7 +209,11 @@ function renderMeta() {
     <span title="应用版本（数据格式 v${esc(String(state.bootstrap.schema_version || ""))}）">版本 ${esc(state.bootstrap.version || "未知")}</span>`;
 }
 
-/* ---------- 合同 PDF 生成、整改重出与批量生成（B4） ---------- */
+/* ---------- 合同批量生成、整改重出与 PDF 预览（B4） ----------
+   合同详情里的单份生成面板与生成历史已迁到 Vue
+   （frontend/src/components/contracts/ContractGenerationPanel.vue，PDF
+   预览 overlay 在 frontend/src/components/pdf/）；这里保留批量生成对话框与
+   showPDFOverlay，批量样例预览仍在使用。 */
 
 let pdfOverlayEl = null;
 let pdfOverlayDoc = null;
@@ -272,245 +276,11 @@ async function showPDFOverlay(bytes, opts) {
   }
 }
 
-function shortDigest(sha) { return String(sha || "").slice(0, 12); }
-function generationKindLabel(kind) { return kind === "regenerate" ? "整改重出" : "初次生成"; }
-function generationStatusLabel(status) { return status === "failed" ? "失败" : "成功"; }
 function templateByID(id) { return state.templates.find((t) => t.id === id); }
 
 function pdfTemplateOptionsHTML(selectedID) {
   return state.templates.map((tpl) =>
     `<option value="${esc(tpl.id)}"${tpl.id === selectedID ? " selected" : ""}>${esc(tpl.name)} v${tpl.version}${tpl.is_active ? "（当前版本）" : ""}</option>`).join("");
-}
-
-function defaultTemplateIDForContract(contract) {
-  const pinned = contract && contract.template_id ? templateByID(contract.template_id) : null;
-  if (pinned) return pinned.id;
-  const active = state.templates.find((t) => t.is_active);
-  return active ? active.id : (state.templates[0] ? state.templates[0].id : "");
-}
-
-function renderContractGeneration(modal, contract, detail) {
-  const panel = $("#contractGeneration", modal.body);
-  if (!panel) return;
-  if (!state.templates.length) {
-    panel.innerHTML = `<h3>合同 PDF 生成</h3>
-      <div class="tpl-status">还没有 PDF 模板。请先在「模板」页导入 Word 模板并完成位置标定。</div>`;
-    return;
-  }
-  const selected = defaultTemplateIDForContract(contract);
-  panel.innerHTML = `
-    <h3>合同 PDF 生成</h3>
-    <div class="gen-row">
-      <div class="field"><label for="genTemplate">模板版本</label>
-        <select id="genTemplate">${pdfTemplateOptionsHTML(selected)}</select></div>
-      <div class="gen-actions">
-        <button type="button" id="genPreview">预览</button>
-        <button type="button" id="genGenerate" class="primary" disabled>生成 PDF</button>
-      </div>
-    </div>
-    <div id="genStatus" class="tpl-status">选择模板版本后，先「预览」确认版式与数据，再生成 PDF。</div>
-    <div id="genErrors"></div>
-    <div id="genWarnings" class="tpl-warnings"></div>
-    <h3>生成历史</h3>
-    <div id="genHistory"></div>`;
-  modal.generation = { preview: null };
-  $("#genTemplate", panel).addEventListener("change", () => {
-    modal.generation = { preview: null };
-    $("#genGenerate", panel).disabled = true;
-    $("#genStatus", panel).textContent = "模板版本已更换，请重新预览。";
-    $("#genWarnings", panel).innerHTML = "";
-  });
-  $("#genPreview", panel).addEventListener("click", () => {
-    previewContractGeneration(modal, contract).catch((err) => toast(err.message, true));
-  });
-  $("#genGenerate", panel).addEventListener("click", () => {
-    generateContractFromPanel(modal, contract).catch((err) => toast(err.message, true));
-  });
-  renderGenerationHistory($("#genHistory", panel), (detail && detail.documents) || [], modal, contract);
-}
-
-function renderGenerationHistory(host, documents, modal, contract) {
-  if (!host) return;
-  if (!documents.length) {
-    host.innerHTML = `<div class="tpl-status">还没有生成记录。预览后生成 PDF，这里会记录谁、何时、用哪个模板版本生成及使用的签名。</div>`;
-    return;
-  }
-  const rows = documents.map((doc) => {
-    const tpl = doc.template_id ? templateByID(doc.template_id) : null;
-    const tplLabel = tpl ? `${tpl.name} v${doc.template_version}` : `v${doc.template_version || "?"}`;
-    const failed = doc.status === "failed";
-    const resultCell = failed
-      ? `<span class="row-errors">${esc(doc.error_message || "生成失败")}</span>`
-      : `<button type="button" data-doc-download="${esc(doc.id)}">下载 PDF</button>`;
-    return `<tr>
-      <td>${esc(fmtDate(doc.created_at))}</td>
-      <td>${esc(doc.operator || "—")}</td>
-      <td>${esc(tplLabel)}</td>
-      <td><code>${esc(shortDigest(doc.content_sha256))}</code></td>
-      <td>${esc(generationKindLabel(doc.kind))}</td>
-      <td><span class="gen-badge ${failed ? "failed" : "success"}">${esc(generationStatusLabel(doc.status))}</span></td>
-      <td class="wrap">${resultCell}</td>
-      <td><div class="row-actions">${failed ? `<button type="button" data-doc-retry="${esc(doc.id)}">重试</button>` : ""}</div></td>
-    </tr>`;
-  }).join("");
-  host.innerHTML = `<div class="table-wrap"><table class="gen-history-table">
-    <thead><tr><th>时间</th><th>操作人</th><th>模板版本</th><th>内容版本</th><th>类型</th><th>状态</th><th>文件 / 失败原因</th><th>操作</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
-  $$("button[data-doc-download]", host).forEach((button) => {
-    button.addEventListener("click", () => downloadAsset(
-      `/app/api/v1/documents/${encodeURIComponent(button.dataset.docDownload)}/file`, "contract.pdf"));
-  });
-  $$("button[data-doc-retry]", host).forEach((button) => {
-    button.addEventListener("click", () => {
-      const doc = documents.find((d) => d.id === button.dataset.docRetry);
-      if (doc) retryFailedGeneration(modal, contract, doc).catch((err) => toast(err.message, true));
-    });
-  });
-}
-
-function renderGenerationWarnings(panel, warnings) {
-  const box = $("#genWarnings", panel);
-  if (!box) return;
-  box.innerHTML = (warnings || []).map((w) => `<div class="tpl-warning">${esc(w.message || w.code)}</div>`).join("");
-}
-
-function generationErrorHTML(err) {
-  let html = fieldErrorsHTML(err);
-  const hints = {
-    missing_signature: "请先在合同行点「扫码签名」采集签名，再预览并生成。",
-    content_changed: "合同内容在签名后已修改；请重新签名，或确认旧签名仍有效时选择「保留旧签名重出」。",
-    missing_field: "请先补全合同或相对方档案中的必填信息。",
-    missing_party: "请先为合同补齐相对方档案。",
-    missing_seal: "请先在「公章」页导入或关联公章图片。",
-    preview_required: "请先重新预览，再生成。",
-  };
-  if (err && hints[err.code]) {
-    html += `<div class="warning-list">${esc(hints[err.code])}</div>`;
-  }
-  return html;
-}
-
-async function previewContractGeneration(modal, contract) {
-  const panel = $("#contractGeneration", modal.body);
-  const select = $("#genTemplate", panel);
-  const templateID = select.value;
-  if (!templateID) { toast("请选择模板版本", true); return; }
-  const button = $("#genPreview", panel);
-  button.disabled = true;
-  $("#genErrors", panel).innerHTML = "";
-  $("#genStatus", panel).textContent = "正在生成预览…";
-  try {
-    const res = await api(`/app/api/v1/templates/${encodeURIComponent(templateID)}/preview`, {
-      method: "POST",
-      body: { contract_id: contract.id },
-    });
-    modal.generation = { preview: { templateID, sha: res.preview_sha256, contractID: contract.id } };
-    $("#genGenerate", panel).disabled = false;
-    $("#genStatus", panel).textContent = "预览已完成。确认版式与数据无误后点击「生成 PDF」。";
-    renderGenerationWarnings(panel, res.warnings || []);
-    const tpl = templateByID(templateID);
-    await showPDFOverlay(base64ToBytes(res.pdf_base64), {
-      title: `合同预览 · ${contract.contract_no}${tpl ? ` · ${tpl.name} v${tpl.version}` : ""}`,
-      warnings: res.warnings || [],
-    });
-  } catch (err) {
-    modal.generation = { preview: null };
-    $("#genGenerate", panel).disabled = true;
-    $("#genStatus", panel).textContent = "预览失败。";
-    $("#genErrors", panel).innerHTML = generationErrorHTML(err);
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function generateContractFromPanel(modal, contract, extra) {
-  const panel = $("#contractGeneration", modal.body);
-  const select = $("#genTemplate", panel);
-  const preview = modal.generation && modal.generation.preview;
-  if (!preview) {
-    toast("请先点击「预览」，确认版式与数据后再生成", true);
-    return;
-  }
-  if (select.value !== preview.templateID) {
-    modal.generation = { preview: null };
-    $("#genGenerate", panel).disabled = true;
-    toast("模板版本已更换，请重新预览", true);
-    return;
-  }
-  const options = extra || {};
-  const button = $("#genGenerate", panel);
-  button.disabled = true;
-  $("#genErrors", panel).innerHTML = "";
-  $("#genStatus", panel).textContent = "正在生成 PDF…";
-  try {
-    const res = await api(`/app/api/v1/templates/${encodeURIComponent(preview.templateID)}/generate`, {
-      method: "POST",
-      body: {
-        contract_id: contract.id,
-        preview_sha256: preview.sha,
-        kind: options.kind || "",
-        allow_stale_signature: !!options.allow_stale_signature,
-      },
-    });
-    const doc = res.item;
-    renderGenerationWarnings(panel, res.warnings || []);
-    $("#genStatus", panel).textContent =
-      `已${generationKindLabel(doc.kind)} PDF：${doc.page_count} 页，模板 v${doc.template_version}。`;
-    modal.generation = { preview: null };
-    toast(doc.kind === "regenerate" ? "已整改重出 PDF" : "已生成 PDF");
-    await refreshContractGeneration(modal, contract);
-  } catch (err) {
-    if (err.code === "content_changed" && !options.allow_stale_signature) {
-      const confirmed = window.confirm(
-        "合同内容在签名采集后已经修改。\n\n" +
-        "重新让签名人扫码更稳妥。如果确认旧签名仍然有效，可以「保留旧签名重出」，此确认会写入变更记录。\n\n" +
-        "是否保留旧签名重出？");
-      if (confirmed) {
-        button.disabled = false;
-        await generateContractFromPanel(modal, contract, { allow_stale_signature: true });
-        return;
-      }
-    }
-    $("#genStatus", panel).textContent = "生成失败。";
-    $("#genErrors", panel).innerHTML = generationErrorHTML(err);
-    await refreshContractGeneration(modal, contract, { refreshLists: false });
-  } finally {
-    if ($("#genGenerate", panel)) {
-      $("#genGenerate", panel).disabled = !(modal.generation && modal.generation.preview);
-    }
-  }
-}
-
-async function refreshContractGeneration(modal, contract, opts) {
-  const options = opts || {};
-  try {
-    const detail = await api(`/app/api/v1/contracts/${encodeURIComponent(contract.id)}`);
-    renderGenerationHistory($("#genHistory", modal.body), detail.documents || [], modal, contract);
-  } catch (_) { /* transient: keep the previous history */ }
-  if (options.refreshLists === false) return;
-  try {
-    await Promise.all([loadTemplates(), loadBootstrapAndMeta()]);
-    // 合同台账已迁到 Vue：派发变更通知，由台账岛自行重取列表。
-    notifyDataChanged(["contract", "template"]);
-  } catch (_) { /* transient */ }
-}
-
-async function retryFailedGeneration(modal, contract, doc) {
-  const panel = $("#contractGeneration", modal.body);
-  const select = $("#genTemplate", panel);
-  if (doc.template_id && !templateByID(doc.template_id)) {
-    toast("失败记录使用的模板版本已不存在，请选择其他版本并重新预览", true);
-    return;
-  }
-  if (doc.template_id) {
-    select.value = doc.template_id;
-  }
-  modal.generation = { preview: null };
-  $("#genGenerate", panel).disabled = true;
-  await previewContractGeneration(modal, contract);
-  if (modal.generation && modal.generation.preview) {
-    toast("已重新预览；确认后点击「生成 PDF」重试");
-  }
 }
 
 const BATCH_STATUS_LABELS = {
@@ -2287,28 +2057,26 @@ function openTemplateImportInVue() {
   window.dispatchEvent(new CustomEvent("tengshou:open-template-import"));
 }
 
-/* 合同详情里的生成面板与签名摘要仍由 app.js 渲染：Vue 合同弹窗保留宿主
-   （#contractGeneration / #contractSignatures），挂载后把根节点、合同与详情
-   交过来。生成面板沿用原有 modal 形状，状态挂在局部对象上。 */
-function mountContractDetail(root, contract, detail) {
-  if (!root || !contract || !detail) return;
-  const pseudoModal = { body: root, generation: null };
+/* 合同详情里的签名摘要仍由 app.js 渲染（扫码签名域尚未迁移）：Vue 合同弹窗
+   保留宿主 #contractSignatures，挂载后把根节点与详情交过来。生成面板已迁到
+   Vue（frontend/src/components/contracts/ContractGenerationPanel.vue）。 */
+function mountContractSignatures(root, detail) {
+  if (!root || !detail) return;
   const signatureHost = $("#contractSignatures", root);
   if (signatureHost && detail.signatures && detail.signatures.length) {
     signatureHost.innerHTML = signaturesSummaryHTML(detail);
   }
-  renderContractGeneration(pseudoModal, contract, detail);
 }
 
 // 迁移期跨域桥：Vue 域借用 app.js 的 toast/整体刷新/签名/批量/Excel 导入
-// 与合同详情生成面板；随对应域迁完移除。
+// 与合同详情签名摘要；随对应域迁完移除。
 window.__tengshouApp = {
   toast,
   refreshAfterWrite,
   openSignatureDialog,
   openBatchGenerateDialog,
   openExcelImport,
-  mountContractDetail,
+  mountContractSignatures,
 };
 
 document.addEventListener("DOMContentLoaded", boot);

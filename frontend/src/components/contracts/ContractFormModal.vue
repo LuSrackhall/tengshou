@@ -4,9 +4,10 @@
 // renewal-banner / audit-host 类名不变），含动态字段、相对方 datalist、
 // 续签草稿与来源横幅、删除确认、422 逐字段错误。
 //
-// 跨域：生成面板、签名摘要仍由 app.js 渲染——本组件保留宿主元素，挂载后经
-// bridge/app.ts 的 mountContractDetail 交给 app.js；扫码签名与批量生成同样
-// 经桥调用。「已关联公章」摘要直接用公章域的 SealSummary 组件渲染。
+// 跨域：扫码签名与签名摘要仍由 app.js 渲染——本组件保留 #contractSignatures
+// 宿主，挂载后经 bridge/app.ts 的 mountContractSignatures 交给 app.js；扫码
+// 签名与批量生成同样经桥调用。「生成 PDF」面板已迁到 Vue
+// （ContractGenerationPanel），「已关联公章」摘要用公章域的 SealSummary 渲染。
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ApiError } from "../../api/client";
 import {
@@ -25,7 +26,7 @@ import type {
 } from "../../api/types";
 import {
   errorMessage,
-  mountContractDetail,
+  mountContractSignatures,
   refreshAfterWrite,
   subscribeChange,
   toast,
@@ -35,6 +36,7 @@ import {
 import SealSummary from "../seals/SealSummary.vue";
 import ContractAuditHistory from "./ContractAuditHistory.vue";
 import ContractFieldControl from "./ContractFieldControl.vue";
+import ContractGenerationPanel from "./ContractGenerationPanel.vue";
 import { isAgentActor, partyName } from "./format";
 import {
   collectContractInput,
@@ -258,24 +260,29 @@ async function loadRenewalSource(): Promise<void> {
   }
 }
 
-// 生成面板与签名摘要仍属 app.js：宿主渲染完成后把根节点交过去。
-function mountExtras(): void {
-  if (props.mode !== "edit" || !props.contract || !props.detail) {
+// 签名摘要仍属 app.js：宿主渲染完成后把详情交过去。
+function mountSignatureSummary(): void {
+  if (props.mode !== "edit" || !props.detail) {
     return;
   }
   const root = bodyEl.value;
   if (!root) {
     return;
   }
-  mountContractDetail(root, props.contract, props.detail);
-  if (props.focusGenerate) {
-    void nextTick(() => {
-      const panel = root.querySelector("#contractGeneration");
-      if (panel instanceof HTMLElement) {
-        panel.scrollIntoView({ block: "start", behavior: "smooth" });
-      }
-    });
+  mountContractSignatures(root, props.detail);
+}
+
+// 行内「生成 PDF」入口：生成面板完成首次渲染（模板加载后高度稳定）再滚动。
+function onGenerationReady(): void {
+  if (!props.focusGenerate) {
+    return;
   }
+  void nextTick(() => {
+    const panel = bodyEl.value?.querySelector("#contractGeneration");
+    if (panel instanceof HTMLElement) {
+      panel.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  });
 }
 
 onMounted(() => {
@@ -284,7 +291,7 @@ onMounted(() => {
   if (props.contract?.source_contract_id) {
     void loadRenewalSource();
   }
-  mountExtras();
+  mountSignatureSummary();
 });
 
 onBeforeUnmount(() => {
@@ -360,7 +367,12 @@ onBeforeUnmount(() => {
             />
           </div>
 
-          <div v-if="mode === 'edit'" id="contractGeneration" class="gen-panel"></div>
+          <ContractGenerationPanel
+            v-if="mode === 'edit' && contract && detail"
+            :contract="contract"
+            :detail="detail"
+            @ready="onGenerationReady"
+          />
           <div v-if="mode === 'edit'" id="contractHistory" class="audit-host">
             <ContractAuditHistory :contract-id="contractId" />
           </div>

@@ -170,8 +170,8 @@ export interface TemplateGenerateInput {
   contract_id: string;
   /** 预览返回的摘要，必须回传。 */
   preview_sha256?: string;
-  /** initial | regenerate；空表示服务端判断。 */
-  kind?: DocumentKind;
+  /** initial | regenerate；空串表示由服务端判断（存量界面即传空串）。 */
+  kind?: DocumentKind | "";
   source_document_id?: string;
   allow_stale_signature?: boolean;
 }

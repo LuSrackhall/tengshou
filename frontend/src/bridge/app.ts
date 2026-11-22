@@ -7,8 +7,9 @@
 // 事件打开新建表单。
 //
 // 反向调用（Vue → app.js）：toast、整体刷新、扫码签名、批量生成、Excel 导入
-// 与合同详情里的生成面板/签名摘要仍由 app.js 实现，统一经
-// window.__tengshouApp 调用；组件不直接读 window。
+// 与合同详情里的签名摘要仍由 app.js 实现，统一经 window.__tengshouApp 调用；
+// 组件不直接读 window。合同详情里的生成面板已迁到 Vue
+// （components/contracts/ContractGenerationPanel.vue）。
 //
 // 实时刷新：app.js 收到 SSE / 轮询事件或本地写入完成后派发两个 window 事件：
 //   - tengshou:change       一条变更（detail 是 appEvent 的紧凑子集）
@@ -50,14 +51,10 @@ export interface AppBridge {
   /** 触发 app.js 的隐藏文件输入，导入 Excel 对话框仍归 app.js。 */
   openExcelImport(): void;
   /**
-   * 合同详情里的生成面板与签名摘要仍由 app.js 渲染：
+   * 合同详情里的签名摘要仍由 app.js 渲染（扫码签名域尚未迁移）：
    * 传入 Vue 弹窗的根节点，app.js 在其中查找宿主元素并填充。
    */
-  mountContractDetail(
-    root: Element,
-    contract: Contract,
-    detail: ContractDetail,
-  ): void;
+  mountContractSignatures(root: Element, detail: ContractDetail): void;
 }
 
 /** app.js → Vue：台账岛注册的只读视图（模板页批量生成按钮使用）。 */
@@ -191,13 +188,9 @@ export function openExcelImport(): void {
   getAppBridge()?.openExcelImport();
 }
 
-/** 把合同详情里的生成面板/签名摘要宿主交给 app.js 渲染。 */
-export function mountContractDetail(
-  root: Element,
-  contract: Contract,
-  detail: ContractDetail,
-): void {
-  getAppBridge()?.mountContractDetail(root, contract, detail);
+/** 把合同详情里的签名摘要宿主交给 app.js 渲染。 */
+export function mountContractSignatures(root: Element, detail: ContractDetail): void {
+  getAppBridge()?.mountContractSignatures(root, detail);
 }
 
 function normalizeDataChanged(raw: unknown): DataChangedDetail {

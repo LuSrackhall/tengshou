@@ -45,7 +45,7 @@ const TYPE_LABELS = {
 
 const ENTITY_LABELS = {
   contract: "合同", party: "相对方", field: "字段", seal: "公章", template: "模板",
-  signature: "签名", backup: "备份", settings: "设置",
+  signature: "签名", backup: "备份", settings: "设置", import: "导入",
 };
 const ACTION_LABELS = {
   create: "新建", update: "修改", delete: "删除", archive: "归档", import: "导入",
@@ -2954,7 +2954,7 @@ function openFieldForm(field) {
         <input id="fieldNote" type="text" value="${esc(field ? field.note || "" : "")}"></div>
       <div class="field full">
         <div class="check-row"><input id="fieldRequired" type="checkbox" ${field && field.required ? "checked" : ""}> 必填</div>
-        <div class="check-row"><input id="fieldLedger" type="checkbox" ${!field || field.in_ledger ? "checked" : ""}> 出现在台账与 Excel</div>
+        <div class="check-row"><input id="fieldLedger" type="checkbox" ${!field || field.in_ledger ? "checked" : ""}> 出现在应用内台账表格</div>
         <div class="check-row"><input id="fieldTemplate" type="checkbox" ${!field || field.in_template ? "checked" : ""}> 用于模板占位符</div>
       </div>
     </div>`;

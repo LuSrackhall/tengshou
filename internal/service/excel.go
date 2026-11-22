@@ -480,13 +480,21 @@ func (s *Service) previewRow(ctx context.Context, row xlsx.Row, ictx *importCont
 		preview.ContractNo = snapshotRow.ContractNo
 		preview.ConflictReason = "系统在导出后删除了该合同；选择「采用 Excel」将按此行重新创建。"
 		preview.ExcelValues = s.excelValuesByKey(row, ictx)
-	case snapshotRow == nil:
+	case snapshotRow == nil && ictx.snapshot != nil:
 		// The system created this contract after the export, so applying the
 		// row would overwrite data the file never saw.
 		preview.Action = "conflict"
 		preview.ConflictReason = "系统在导出后新建了该编号的合同（导出快照中没有此行）。"
 		preview.SystemValues = s.systemValuesByKey(ctx, existing, ictx)
 		preview.ExcelValues = s.excelValuesByKey(row, ictx)
+	case snapshotRow == nil:
+		// External/legacy workbook without a snapshot: keep the B2 upsert
+		// behavior and never invent conflicts from missing snapshot rows.
+		if len(s.diffContract(ctx, existing, &plan.contract)) == 0 {
+			preview.Action = "unchanged"
+		} else {
+			preview.Action = "update"
+		}
 	default:
 		fpSystem := s.systemFingerprint(ctx, existing, ictx)
 		fpExcel := s.excelFingerprint(row, ictx)
@@ -936,6 +944,7 @@ func (s *Service) planImportRow(ctx context.Context, row xlsx.Row, existing *mod
 		b, _ := strconv.Atoi(idxKeys[j])
 		return a < b
 	})
+	var immutableNo string
 	for _, idxStr := range idxKeys {
 		field, ok := ictx.byKey[ictx.mapping[idxStr]]
 		if !ok {
@@ -948,6 +957,13 @@ func (s *Service) planImportRow(ctx context.Context, row xlsx.Row, existing *mod
 		}
 		if existing != nil && cell == "" {
 			continue // empty cells leave existing values unchanged
+		}
+		if existing != nil && field.Key == model.FieldContractNo && cell != existing.ContractNo {
+			// Contract numbers are immutable (B2). Keep the system number and
+			// warn instead of failing the whole row: the hidden contract id
+			// already matched this record, so the other edits are still valid.
+			immutableNo = existing.ContractNo
+			continue
 		}
 		if err := applyRawField(&plan.in, field, cell, existingName); err != nil {
 			plan.errs = append(plan.errs, FieldError{Field: field.Key, Label: field.Label, Message: err.Error()})
@@ -969,6 +985,10 @@ func (s *Service) planImportRow(ctx context.Context, row xlsx.Row, existing *mod
 	}
 	plan.contract = contract
 	plan.warnings = warnings
+	if immutableNo != "" {
+		plan.warnings = append(plan.warnings,
+			fmt.Sprintf("合同编号创建后不可修改，已保留原编号 %s。", immutableNo))
+	}
 	return plan, nil
 }
 

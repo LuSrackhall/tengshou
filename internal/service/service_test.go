@@ -462,6 +462,80 @@ func TestImportRejectsUnknownFieldColumn(t *testing.T) {
 	}
 }
 
+// An external workbook (no snapshot) that uses an existing contract number
+// keeps the B2 upsert behavior: it updates the record instead of reporting a
+// conflict. Conflict detection only applies to files exported by this system.
+func TestExcelExternalWorkbookUpdatesExistingContract(t *testing.T) {
+	svc, rd, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "张三")
+	contract := mustContract(t, svc, service.ContractInput{
+		ContractNo: "EXT-0001", Year: 2026, Title: "外部台账合同", PartyBID: party.ID, Amount: 100,
+	})
+	workbook := newWorkbook(t,
+		[]string{"合同编号", "年度", "合同名称", "相对方", "金额（元）"},
+		[][]string{{"EXT-0001", "2026", "外部台账合同", "张三", "150"}},
+	)
+	preview, err := svc.PreviewImport(ctx, workbook, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Rows) != 1 || preview.Rows[0].Action != "update" {
+		t.Fatalf("external workbook row = %+v", preview.Rows)
+	}
+	if preview.Summary.Conflicts != 0 {
+		t.Fatalf("external workbook must not report conflicts: %+v", preview.Summary)
+	}
+	if _, err := svc.CommitImport(ctx, workbook, service.ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := rd.GetContract(ctx, contract.ID)
+	if err != nil || updated.Amount != 150 {
+		t.Fatalf("updated contract = %+v err=%v", updated, err)
+	}
+}
+
+// Editing an existing contract number in the exported ledger keeps the system
+// number and reports a row warning; the rest of the row still applies. The
+// hidden contract id is what matched the record, so this is not a conflict.
+func TestExcelContractNumberEditKeepsSystemNumber(t *testing.T) {
+	svc, rd, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "张三")
+	contract := mustContract(t, svc, service.ContractInput{
+		ContractNo: "HT-E-0001", Year: 2026, Title: "编号合同", PartyBID: party.ID, Amount: 100,
+	})
+	ledger, err := svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbook := editWorkbook(t, ledger, func(f *excelize.File, header []string) {
+		setCell(t, f, header, "合同编号", 2, "HT-E-9999")
+		setCell(t, f, header, "金额（元）", 2, "175")
+	})
+	preview, err := svc.PreviewImport(ctx, workbook, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := preview.Rows[0]
+	if row.Action != "update" {
+		t.Fatalf("renumber preview = %+v", row)
+	}
+	if !strings.Contains(strings.Join(row.Warnings, "\n"), "合同编号创建后不可修改") {
+		t.Fatalf("renumber warning missing: %v", row.Warnings)
+	}
+	if _, err := svc.CommitImport(ctx, workbook, service.ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := rd.GetContract(ctx, contract.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ContractNo != "HT-E-0001" || updated.Amount != 175 {
+		t.Fatalf("renumber commit = %+v", updated)
+	}
+}
+
 /* ---------- B14 Excel 自有台账双向互转 ---------- */
 
 // A full round-trip: export -> edit an existing row, add a row, remove a row

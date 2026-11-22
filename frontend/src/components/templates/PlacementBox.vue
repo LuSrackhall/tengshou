@@ -2,7 +2,7 @@
 // 单个标定框：拖动移动、右下角手柄缩放，类名/手柄/删除按钮与迁移前
 // makeTemplateBox + startTemplateBoxDrag/Resize 一致。
 // 坐标仍是 PDF 点（1 位小数），换算显示时乘以缩放比例。
-import { computed, ref } from "vue";
+import { computed, ref, type ComponentPublicInstance } from "vue";
 import type { Placement } from "../../api/types";
 import { clampNumber, roundPt } from "./format";
 
@@ -14,6 +14,8 @@ const props = defineProps<{
   pageHeight: number;
   selected: boolean;
   label: string;
+  /** 登记本框的真实 DOM 元素，供编辑器滚动定位；卸载时为 null。 */
+  registerElement?: (element: HTMLElement | null) => void;
 }>();
 
 const emit = defineEmits<{
@@ -23,6 +25,13 @@ const emit = defineEmits<{
 }>();
 
 const boxEl = ref<HTMLDivElement | null>(null);
+
+/** 模板 ref 回调：既保存拖动/缩放用的元素，也登记给编辑器做滚动定位。 */
+function setBoxEl(element: Element | ComponentPublicInstance | null): void {
+  const boxElement = element instanceof HTMLDivElement ? element : null;
+  boxEl.value = boxElement;
+  props.registerElement?.(boxElement);
+}
 
 const typeClass = computed(() =>
   props.placement.type === "signature"
@@ -100,7 +109,7 @@ function onHandleDown(event: PointerEvent): void {
 
 <template>
   <div
-    ref="boxEl"
+    :ref="setBoxEl"
     class="tpl-box"
     :class="[typeClass, { selected }]"
     :data-id="placement.id"

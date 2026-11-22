@@ -48,6 +48,8 @@ X-Api-Token: <token>
 - 时间：RFC3339 UTC 字符串；日期字段为 `YYYY-MM-DD`。
 - `data` 字段为对象，承载合同 / 相对方的扩展字段（B2 动态字段）。
 - 接口契约版本：`tengshou.data.v1`（见 `/api/v1/schema`）。
+- 应用版本：`/api/v1` 与 `/api/v1/schema` 均返回 `app_version`（构建时注入；
+  与界面顶栏、`tengshou-cli version`、MCP `serverInfo.version` 同源）。
 
 ## 端点
 

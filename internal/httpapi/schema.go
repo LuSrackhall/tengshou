@@ -22,6 +22,7 @@ type resourceDoc struct {
 
 type schemaDoc struct {
 	Schema          string        `json:"schema"`
+	AppVersion      string        `json:"app_version"`
 	DatabaseVersion int           `json:"database_version"`
 	ReadOnly        bool          `json:"read_only"`
 	Auth            string        `json:"auth"`
@@ -36,6 +37,7 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, schemaDoc{
 		Schema:          SchemaName,
+		AppVersion:      s.version(),
 		DatabaseVersion: dbVersion,
 		ReadOnly:        true,
 		Auth:            "Authorization: Bearer <token> (token lives in config.json)",

@@ -22,6 +22,17 @@ func TestOnboardingWordingBoundary(t *testing.T) {
 		"web/sign.html",
 		"../../README.md",
 	}
+	// 阶段 1：模板页与标定编辑器已迁到 Vue，界面文案落在这里，边界检查随迁移覆盖。
+	templates, err := filepath.Glob("../../frontend/src/components/templates/*.vue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, templates...)
+	templateModules, err := filepath.Glob("../../frontend/src/components/templates/*.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, templateModules...)
 	docs, err := filepath.Glob("../../docs/*.md")
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +71,7 @@ func TestOnboardingCopyPresent(t *testing.T) {
 		{"web/app/index.html", "我有一份上级模板"},
 		{"web/app/index.html", "样例数据，不写入台账"},
 		{"web/app/index.html", "本机自检"},
-		{"web/app/app.js", "样例数据未写入台账"},
+		{"../../frontend/src/components/templates/useTemplateEditor.ts", "样例数据未写入台账"},
 		{"../../docs/b8-onboarding.md", "试用数据与真实数据的边界"},
 		{"../../docs/b8-onboarding.md", "不预置地方模板"},
 		{"../../README.md", "第一次使用"},

@@ -82,20 +82,7 @@
     <p class="hint" id="onboardFooter">引导只做提示与校验，不改变您原有的模板、台账和生成流程；随时可从顶部导航重新打开。</p>
   </section>
 
-  <section id="view-templates" class="view" aria-label="合同模板">
-    <div class="toolbar">
-      <input id="templateSearch" type="search" placeholder="搜索模板名称" autocomplete="off">
-      <span class="spacer"></span>
-      <button type="button" id="importTemplateBtn" class="primary">导入模板</button>
-      <button type="button" id="templateBatchGenerateBtn">批量生成</button>
-      <button type="button" id="refreshTemplatesBtn">刷新</button>
-    </div>
-    <p class="hint">导入您自己的 Word 合同模板（.docx）：本机有 Word 时直接用 Word 转成 PDF，否则用 LibreOffice 或先另存为 PDF 导入。转换后以 PDF 页面显示，拖框标定字段、签名和公章位置。每次保存都会生成新版本，旧合同仍按旧版本重出。</p>
-    <div id="templateSummary" class="summary"></div>
-    <div class="table-wrap">
-      <table id="templateTable" class="data-table"></table>
-    </div>
-  </section>
+  <section id="view-templates" class="view" aria-label="合同模板"></section>
 
   <section id="view-seals" class="view" aria-label="公章图片"></section>
 
@@ -151,7 +138,6 @@
 </main>
 
 <input type="file" id="importFile" accept=".xlsx" hidden>
-<input type="file" id="templateFileInput" accept=".docx,.pdf" hidden>
 <input type="file" id="backupFileInput" accept=".zip,application/zip" hidden>
 <div id="modalRoot"></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>

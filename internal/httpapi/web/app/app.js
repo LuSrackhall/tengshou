@@ -3,6 +3,9 @@
 
 const state = {
   bootstrap: null,
+  /* B8 首装引导状态与最近一次自检结果。 */
+  onboarding: null,
+  onboardingCheck: null,
   fields: { contract: [], party: [] },
   contracts: [],
   contractTotal: 0,
@@ -146,6 +149,10 @@ function closeModal() {
   const root = document.getElementById("modalRoot");
   root.innerHTML = "";
   document.removeEventListener("keydown", onModalKey);
+  if (state.tab === "onboarding") {
+    loadOnboarding().catch(() => {});
+    loadOnboardingTemplateCheck().catch(() => {});
+  }
 }
 function onModalKey(e) { if (e.key === "Escape") closeModal(); }
 
@@ -200,6 +207,10 @@ async function loadBootstrap() {
   const data = await api("/app/api/v1/bootstrap");
   state.bootstrap = data;
   state.years = data.years || [];
+  if (data.onboarding) {
+    state.onboarding = data.onboarding;
+    renderOnboarding();
+  }
   const hasCurrent = state.years.some((y) => y.year === data.current_year);
   state.year = hasCurrent ? String(data.current_year) : (state.years.length ? String(state.years[0].year) : "");
   renderMeta();
@@ -1987,8 +1998,262 @@ async function loadBootstrapAndMeta() {
   if (!bootstrap) return;
   state.bootstrap = bootstrap;
   state.years = bootstrap.years || [];
+  if (bootstrap.onboarding) {
+    state.onboarding = bootstrap.onboarding;
+    renderOnboarding();
+  }
   renderMeta();
   renderYearSelect();
+}
+
+/* ---------- 首装引导与模板向导（B8） ----------
+   引导只做提示与校验：不新建模板编辑器、不预置任何地方模板、不联网。
+   数据驱动的步骤由服务端按真实数据判定；样例预览与试生成不写入台账，
+   因此这两步的完成时间记录在 config.json 的 onboarding 中。 */
+
+const TAB_LABELS = {
+  onboarding: "新手引导", contracts: "合同台账", templates: "模板", seals: "公章",
+  parties: "相对方档案", fields: "字段", changelog: "变更记录", data: "数据安全", settings: "设置",
+};
+
+function tabLabel(tab) { return TAB_LABELS[tab] || tab; }
+
+async function loadOnboarding() {
+  try {
+    const data = await api("/app/api/v1/onboarding");
+    state.onboarding = data;
+    renderOnboarding();
+    return data;
+  } catch (err) {
+    const list = $("#onboardSteps");
+    if (list) list.innerHTML = `<div class="form-errors">引导状态读取失败：${esc(err.message)}</div>`;
+    return null;
+  }
+}
+
+function onboardingActiveTemplate() {
+  return state.templates.find((t) => t.is_active) || state.templates[0] || null;
+}
+
+function renderOnboarding() {
+  const data = state.onboarding;
+  const list = $("#onboardSteps");
+  if (!list || !data) return;
+  const steps = data.steps || [];
+  const done = steps.filter((s) => s.done).length;
+  const progress = $("#onboardProgress");
+  if (progress) progress.textContent = `${done} / ${steps.length} 步已完成`;
+  list.innerHTML = steps.map((step, index) => `
+    <button type="button" class="onboard-step ${step.done ? "done" : ""}" data-step="${esc(step.action)}">
+      <span class="onboard-step-no">${step.done ? "✓" : index + 1}</span>
+      <span class="onboard-step-copy">
+        <strong>${esc(step.label)}</strong>
+        <span>${esc(step.detail || "")}</span>
+      </span>
+      <span class="badge ${step.done ? "active" : "draft"}">${step.done ? "已完成" : "待完成"}</span>
+    </button>`).join("");
+  $$(".onboard-step", list).forEach((button) => {
+    button.addEventListener("click", () => {
+      handleOnboardingStep(button.dataset.step).catch((err) => toast(err.message, true));
+    });
+  });
+  const banner = $("#onboardBanner");
+  if (banner) {
+    if (data.completed) {
+      banner.textContent = `引导已完成${data.completed_at ? "（" + fmtDate(data.completed_at) + "）" : ""}；仍可从本页重新查看。`;
+    } else if (data.skipped) {
+      banner.textContent = `已跳过引导${data.skipped_at ? "（" + fmtDate(data.skipped_at) + "）" : ""}；需要时点「重新打开引导」。`;
+    } else if (data.first_run) {
+      banner.textContent = "这是第一次打开腾手：按下面五步完成第一份模板与试生成。";
+    } else if (steps.length && done === steps.length) {
+      banner.textContent = "五步都已完成，可以继续正常使用。";
+    } else {
+      banner.textContent = `已完成 ${done} / ${steps.length} 步；点击任一步继续。`;
+    }
+  }
+  const completeBtn = $("#onboardCompleteBtn");
+  if (completeBtn) completeBtn.style.display = data.completed ? "none" : "";
+  const reopenBtn = $("#onboardReopenBtn");
+  if (reopenBtn) reopenBtn.style.display = (data.completed || data.skipped) ? "" : "none";
+  const skipBtn = $("#onboardSkipBtn");
+  if (skipBtn) skipBtn.style.display = (data.completed || data.skipped) ? "none" : "";
+}
+
+async function handleOnboardingStep(action) {
+  switch (action) {
+    case "template_import": {
+      switchTab("templates");
+      const input = $("#templateFileInput");
+      setTimeout(() => { input.value = ""; input.click(); }, 60);
+      return;
+    }
+    case "template_calibrate": {
+      const tpl = onboardingActiveTemplate();
+      if (!tpl) {
+        toast("先导入一份模板，再做标定", true);
+        return handleOnboardingStep("template_import");
+      }
+      switchTab("templates");
+      await openTemplateEditor(tpl);
+      return;
+    }
+    case "sample_preview":
+    case "trial_pdf": {
+      const tpl = onboardingActiveTemplate();
+      if (!tpl) {
+        toast("先导入并标定模板，再用样例预览", true);
+        return handleOnboardingStep("template_import");
+      }
+      switchTab("templates");
+      await openTemplateEditor(tpl);
+      await previewTemplate(templateEditor, true);
+      if (action === "trial_pdf") await downloadSampleTemplatePDF(templateEditor);
+      return;
+    }
+    case "contract_create":
+      switchTab("contracts");
+      await openContractForm(null);
+      return;
+    default:
+      toast("未知的引导步骤", true);
+  }
+}
+
+async function setOnboardingAction(action) {
+  const data = await api("/app/api/v1/onboarding/state", { method: "POST", body: { action } });
+  state.onboarding = data;
+  renderOnboarding();
+  return data;
+}
+
+async function completeOnboarding() {
+  try {
+    await setOnboardingAction("complete");
+    toast("引导已完成；可从顶部「新手引导」再次查看");
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+async function skipOnboarding() {
+  try {
+    await setOnboardingAction("skip");
+    toast("已暂时跳过引导；随时可从顶部「新手引导」重新打开");
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+async function reopenOnboarding() {
+  try {
+    await setOnboardingAction("reopen");
+    toast("引导已重新打开");
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+// recordOnboardingStep only records sample-only progress (no business data).
+async function recordOnboardingStep(step) {
+  try {
+    const data = await api("/app/api/v1/onboarding/state", {
+      method: "POST", body: { action: "step", step },
+    });
+    state.onboarding = data;
+    if (state.tab === "onboarding") renderOnboarding();
+  } catch (_) {
+    /* 引导进度记录失败不影响预览本身 */
+  }
+}
+
+async function loadOnboardingCheck() {
+  const host = $("#onboardCheckList");
+  if (!host) return;
+  host.innerHTML = `<p class="hint">正在自检…</p>`;
+  try {
+    const data = await api("/app/api/v1/onboarding/check");
+    state.onboardingCheck = data;
+    renderOnboardingCheck(data);
+  } catch (err) {
+    host.innerHTML = `<div class="form-errors">自检失败：${esc(err.message)}</div>`;
+  }
+}
+
+const CHECK_STATUS_LABELS = { ok: "通过", warn: "需留意", error: "需处理" };
+
+function renderOnboardingCheck(data) {
+  const host = $("#onboardCheckList");
+  const summary = $("#onboardCheckSummary");
+  if (!host) return;
+  const counts = data.summary || {};
+  if (summary) {
+    summary.textContent = `通过 ${counts.ok || 0} · 需留意 ${counts.warn || 0} · 需处理 ${counts.error || 0}`;
+  }
+  host.innerHTML = (data.items || []).map((item) => `
+    <div class="onboard-check ${esc(item.status)}">
+      <div class="onboard-check-head">
+        <span class="onboard-dot"></span>
+        <strong>${esc(item.label)}</strong>
+        <span class="badge ${item.status === "ok" ? "active" : item.status === "warn" ? "draft" : "error"}">${CHECK_STATUS_LABELS[item.status] || esc(item.status)}</span>
+      </div>
+      ${item.detail ? `<p class="muted">${esc(item.detail)}</p>` : ""}
+      ${item.status !== "ok" && item.action ? `<p class="onboard-next">下一步：${esc(item.action)}</p>` : ""}
+      ${item.status !== "ok" && item.target ? `<button type="button" data-target="${esc(item.target)}">前往「${esc(tabLabel(item.target))}」</button>` : ""}
+    </div>`).join("");
+  $$("button[data-target]", host).forEach((button) => {
+    button.addEventListener("click", () => switchTab(button.dataset.target));
+  });
+}
+
+async function loadOnboardingTemplateCheck() {
+  const host = $("#onboardTemplateCheck");
+  if (!host) return;
+  const tpl = onboardingActiveTemplate();
+  if (!tpl) {
+    host.innerHTML = `<p class="hint">还没有可体检的模板；先完成第 1 步导入模板。</p>`;
+    return;
+  }
+  host.innerHTML = `<p class="hint">正在检查「${esc(tpl.name)}」v${tpl.version}…</p>`;
+  try {
+    const data = await api(`/app/api/v1/templates/${encodeURIComponent(tpl.id)}/check`);
+    renderOnboardingTemplateCheck(data);
+  } catch (err) {
+    host.innerHTML = `<div class="form-errors">模板体检失败：${esc(err.message)}</div>`;
+  }
+}
+
+function renderOnboardingTemplateCheck(data) {
+  const host = $("#onboardTemplateCheck");
+  if (!host) return;
+  const issues = data.issues || [];
+  const rows = issues.map((issue) => `
+    <div class="onboard-check ${issue.severity === "error" ? "error" : "warn"}">
+      <div class="onboard-check-head">
+        <span class="onboard-dot"></span>
+        <strong>${esc(issue.message)}</strong>
+      </div>
+      <p class="onboard-next">下一步：${esc(issue.action)}</p>
+    </div>`).join("");
+  host.innerHTML = `
+    <p class="muted">「${esc(data.name)}」v${data.version} · ${data.field_placements || 0} 个字段位置 · ${data.signature_placements || 0} 个签名位置 · ${data.seal_placements || 0} 个公章位置</p>
+    ${issues.length ? rows : `
+      <div class="onboard-check ok">
+        <div class="onboard-check-head"><span class="onboard-dot"></span><strong>模板占位与字段定义一致，未发现缺失。</strong></div>
+      </div>`}
+    <div class="onboard-check-actions">
+      <button type="button" id="onboardGoFields">去字段页</button>
+      <button type="button" id="onboardGoCalibrate">去模板标定</button>
+    </div>`;
+  const fieldsBtn = $("#onboardGoFields", host);
+  if (fieldsBtn) fieldsBtn.addEventListener("click", () => switchTab("fields"));
+  const calibrateBtn = $("#onboardGoCalibrate", host);
+  if (calibrateBtn) {
+    calibrateBtn.addEventListener("click", () => {
+      const tpl = onboardingActiveTemplate();
+      switchTab("templates");
+      if (tpl) openTemplateEditor(tpl).catch((err) => toast(err.message, true));
+    });
+  }
 }
 
 async function openTemplateImport(file) {
@@ -2180,6 +2445,7 @@ async function openTemplateEditor(template) {
           <div id="tplSelectedPanel"></div>
           <h3>预览与生成</h3>
           <div id="tplUsage" class="tpl-status">正在统计影响范围…</div>
+          <div id="tplCheck" class="tpl-status">正在检查字段绑定…</div>
           <div class="field"><label for="tplContract">合同</label>
             <select id="tplContract"><option value="">（正在加载合同…）</option></select></div>
           <div class="tpl-add" style="grid-template-columns:1fr 1fr">
@@ -2197,6 +2463,7 @@ async function openTemplateEditor(template) {
   renderPlacementList(editor);
   updateTemplatePreviewStatus(editor);
   loadTemplateUsage(editor).catch(() => {});
+  loadTemplateCheckPanel(editor).catch(() => {});
   loadEditorContracts(editor).catch(() => {});
   try {
     await loadTemplateEditorPDF(editor);
@@ -2617,6 +2884,30 @@ async function loadTemplateUsage(editor) {
   }
 }
 
+// loadTemplateCheckPanel is the B8 template wizard validation: it compares the
+// calibrated placements with the current field definitions and points at the
+// existing pages that fix each problem. It never edits the template.
+async function loadTemplateCheckPanel(editor) {
+  const el = $("#tplCheck", editor.modal.body);
+  if (!el) return;
+  try {
+    const data = await api(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/check`);
+    if (templateEditor !== editor) return;
+    const issues = data.issues || [];
+    if (!issues.length) {
+      el.className = "tpl-status ok";
+      el.textContent = "模板体检通过：占位与字段定义一致，签名 / 公章位置齐全。";
+      return;
+    }
+    el.className = "tpl-warnings";
+    el.innerHTML = issues.map((issue) =>
+      `<div class="tpl-warning">${esc(issue.message)}${issue.action ? `（${esc(issue.action)}）` : ""}</div>`).join("");
+  } catch (err) {
+    el.className = "tpl-status warn";
+    el.textContent = "模板体检失败：" + err.message;
+  }
+}
+
 async function loadEditorContracts(editor) {
   const select = $("#tplContract", editor.modal.body);
   try {
@@ -2671,6 +2962,7 @@ async function saveTemplateMapping(editor) {
   renderTemplates();
   await loadBootstrapAndMeta();
   loadTemplateUsage(editor).catch(() => {});
+  loadTemplateCheckPanel(editor).catch(() => {});
   const warnings = res.warnings || [];
   toast(`已保存为 v${item.version}`);
   if (warnings.length) setTimeout(() => toast(warnings.join("；")), 350);
@@ -2695,14 +2987,30 @@ async function previewTemplate(editor, sample) {
     sample: !!sample,
     contractID: sample ? "" : contractID,
     sha: res.preview_sha256,
+    bytes: base64ToBytes(res.pdf_base64),
   };
-  const bytes = base64ToBytes(res.pdf_base64);
+  const bytes = editor.preview.bytes;
   const title = sample
-    ? "样例数据预览"
+    ? "样例数据预览（不写入台账）"
     : `合同预览 · ${($("#tplContract", editor.modal.body).selectedOptions[0] || {}).textContent || ""}`;
-  await showTemplatePreview(editor, bytes, res.warnings || [], title, null);
+  const download = sample ? { bytes, filename: "样例试生成.pdf", sample: true } : null;
+  await showTemplatePreview(editor, bytes, res.warnings || [], title, download);
   renderTemplateWarnings(editor, res.warnings || []);
   updateTemplatePreviewStatus(editor);
+  if (sample) await recordOnboardingStep("sample_preview");
+}
+
+// downloadSampleTemplatePDF saves the already-rendered sample PDF locally and
+// records the guide's trial step. It never asks the server to persist an
+// output document, so the sample stays out of the ledger and generation log.
+async function downloadSampleTemplatePDF(editor) {
+  if (!editor || !editor.preview || !editor.preview.sample || !editor.preview.bytes) {
+    toast("先完成样例预览，再试生成 PDF", true);
+    return;
+  }
+  downloadBytes(editor.preview.bytes, "样例试生成.pdf");
+  await recordOnboardingStep("trial_pdf");
+  toast("样例 PDF 已下载；样例数据未写入台账");
 }
 
 function renderTemplateWarnings(editor, warnings) {
@@ -2725,7 +3033,7 @@ async function showTemplatePreview(editor, bytes, warnings, title, download) {
     <div class="tpl-preview-head">
       <strong>${esc(title)}</strong>
       <span class="spacer"></span>
-      ${download ? `<button type="button" id="tplPreviewDownload">下载 PDF</button>` : ""}
+      ${download ? `<button type="button" id="tplPreviewDownload">${download.sample ? "下载试生成 PDF" : "下载 PDF"}</button>` : ""}
       <button type="button" id="tplPreviewClose">关闭预览</button>
     </div>
     <div class="tpl-preview-pages"><div class="tpl-loading">正在渲染预览…</div></div>
@@ -2736,7 +3044,15 @@ async function showTemplatePreview(editor, bytes, warnings, title, download) {
   editor.previewOverlay = overlay;
   $("#tplPreviewClose", overlay).addEventListener("click", () => closeTemplatePreview(editor));
   if (download) {
-    $("#tplPreviewDownload", overlay).addEventListener("click", () => {
+    $("#tplPreviewDownload", overlay).addEventListener("click", async () => {
+      if (download.bytes) {
+        downloadBytes(download.bytes, download.filename || "preview.pdf");
+        if (download.sample) {
+          await recordOnboardingStep("trial_pdf");
+          toast("样例 PDF 已下载；样例数据未写入台账");
+        }
+        return;
+      }
       downloadAsset(download.path, download.filename);
     });
   }
@@ -3638,6 +3954,12 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+// downloadBytes saves an in-memory preview (sample trial PDFs never become
+// output-document records).
+function downloadBytes(bytes, filename) {
+  downloadBlob(new Blob([bytes], { type: "application/pdf" }), filename || "preview.pdf");
+}
+
 async function loadBackupStatus() {
   const status = await api("/app/api/v1/backup/status");
   renderBackupStatus(status);
@@ -4054,6 +4376,10 @@ async function flushRealtimeRefresh() {
     if (bootstrap) {
       state.bootstrap = bootstrap;
       state.years = bootstrap.years || [];
+      if (bootstrap.onboarding) {
+        state.onboarding = bootstrap.onboarding;
+        renderOnboarding();
+      }
       renderYearSelect();
       renderMeta();
     }
@@ -4084,6 +4410,11 @@ function switchTab(tab) {
   $$("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${tab}`));
   if (tab === "changelog") loadChangelog().catch((err) => toast(err.message, true));
+  if (tab === "onboarding") {
+    loadOnboarding();
+    loadOnboardingCheck();
+    loadOnboardingTemplateCheck();
+  }
   if (tab === "seals") loadSeals().then(renderSeals).catch((err) => toast(err.message, true));
   if (tab === "templates") loadTemplates().then(renderTemplates).catch((err) => toast(err.message, true));
   if (tab === "data") loadBackupStatus().catch((err) => toast(err.message, true));
@@ -4097,6 +4428,10 @@ async function refreshAfterWrite() {
   if (bootstrap) {
     state.bootstrap = bootstrap;
     state.years = bootstrap.years || [];
+    if (bootstrap.onboarding) {
+      state.onboarding = bootstrap.onboarding;
+      renderOnboarding();
+    }
     if (state.year && !state.years.some((y) => String(y.year) === state.year)) {
       state.year = "";
       await loadContracts();
@@ -4109,6 +4444,10 @@ async function refreshAfterWrite() {
   renderFields();
   renderSeals();
   renderTemplates();
+  if (state.tab === "onboarding") {
+    loadOnboarding();
+    loadOnboardingTemplateCheck();
+  }
   if (state.tab === "changelog") {
     loadChangelog().catch((err) => toast(err.message, true));
   }
@@ -4251,6 +4590,19 @@ function bindEvents() {
   $("#refreshMCPStatusBtn").addEventListener("click", () => {
     loadMCPStatus().catch((err) => toast(err.message, true));
   });
+  $("#onboardStartBtn").addEventListener("click", () => {
+    handleOnboardingStep("template_import").catch((err) => toast(err.message, true));
+  });
+  $("#onboardRecheckBtn").addEventListener("click", () => {
+    loadOnboardingCheck();
+    loadOnboardingTemplateCheck();
+  });
+  $("#onboardSkipBtn").addEventListener("click", skipOnboarding);
+  $("#onboardCompleteBtn").addEventListener("click", completeOnboarding);
+  $("#onboardReopenBtn").addEventListener("click", reopenOnboarding);
+  $("#onboardTemplateCheckBtn").addEventListener("click", () => {
+    loadOnboardingTemplateCheck();
+  });
 }
 
 async function boot() {
@@ -4268,6 +4620,11 @@ async function boot() {
     toast(err.message, true);
     const summary = $("#contractSummary");
     if (summary) summary.textContent = "加载失败：" + err.message;
+  }
+  // B8: a fresh vault starts on the guide, not on an empty ledger. The guide
+  // is a normal tab, so every other page stays one click away.
+  if (state.onboarding && state.onboarding.show_guide) {
+    switchTab("onboarding");
   }
   // Start the change feed even when the initial load failed: it is what
   // surfaces data written by agents while the page is open.

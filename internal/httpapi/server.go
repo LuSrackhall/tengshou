@@ -216,6 +216,9 @@ func (s *Server) routes() {
 	// Application write surface. It is loopback-only and requires the
 	// X-Tengshou-App header on mutating requests (see withAppGuard).
 	m.HandleFunc("GET /app/api/v1/bootstrap", s.handleAppBootstrap)
+	m.HandleFunc("GET /app/api/v1/onboarding", s.handleAppOnboarding)
+	m.HandleFunc("GET /app/api/v1/onboarding/check", s.handleAppOnboardingCheck)
+	m.HandleFunc("POST /app/api/v1/onboarding/state", s.handleAppOnboardingState)
 	m.HandleFunc("GET /app/api/v1/events", s.handleAppEvents)
 	m.HandleFunc("GET /app/api/v1/mcp/status", s.handleAppMCPStatus)
 	m.HandleFunc("PUT /app/api/v1/settings/mcp", s.handleAppUpdateMCPSettings)
@@ -260,6 +263,7 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /app/api/v1/templates/{id}", s.handleAppDeleteTemplate)
 	m.HandleFunc("PUT /app/api/v1/templates/{id}/mapping", s.handleAppSaveTemplateMapping)
 	m.HandleFunc("GET /app/api/v1/templates/{id}/usage", s.handleAppTemplateUsage)
+	m.HandleFunc("GET /app/api/v1/templates/{id}/check", s.handleAppTemplateCheck)
 	m.HandleFunc("GET /app/api/v1/templates/{id}/pdf", s.handleAppTemplatePDF)
 	m.HandleFunc("GET /app/api/v1/templates/{id}/source", s.handleAppTemplateSource)
 	m.HandleFunc("POST /app/api/v1/templates/{id}/preview", s.handleAppPreviewTemplate)

@@ -6,6 +6,7 @@ package xlsx
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -19,23 +20,59 @@ const (
 	SheetHelp   = "填写说明"
 )
 
+// B14 round-trip technical layout. Exported ledgers carry a hidden trailing
+// column with the stable contract id and a hidden snapshot worksheet with the
+// export-time state of every row. Both are skipped by Read's data-sheet scan.
+const (
+	// SheetSnapshot is the hidden worksheet recording the export state.
+	SheetSnapshot = "_腾手快照"
+	// SnapshotVersion is the current snapshot layout version.
+	SnapshotVersion = 1
+	// ColumnContractID is the hidden trailing ledger column carrying contract ids.
+	ColumnContractID = "_合同ID"
+	// technicalPrefix marks technical worksheets that are never data sheets.
+	technicalPrefix = "_腾手"
+)
+
+// SnapshotRow is one contract's state at export time.
+type SnapshotRow struct {
+	ContractID  string
+	ContractNo  string
+	Fingerprint string
+}
+
+// Snapshot is the export-time state of a ledger workbook. A file without one
+// is treated as external/legacy: no delete or conflict detection.
+type Snapshot struct {
+	Version    int
+	ExportedAt string
+	FieldKeys  []string
+	Rows       []SnapshotRow
+}
+
 // Row is one parsed worksheet row. Number is the 1-based Excel row number so
 // validation reports point at what the user sees in Excel.
 type Row struct {
 	Number int
 	Cells  []string
+	// ContractID is taken from the hidden trailing technical column when the
+	// file was exported by BuildLedger. Empty for externally created files.
+	ContractID string
 }
 
 // ReadResult is a parsed workbook.
 type ReadResult struct {
-	Sheet   string
-	Headers []string
-	Rows    []Row
+	Sheet    string
+	Headers  []string
+	Rows     []Row
+	Snapshot *Snapshot
 }
 
 // Read parses the first usable worksheet of an .xlsx workbook. The first
-// non-empty row becomes the header row. Old binary .xls files are rejected by
-// excelize; callers should surface that error as a request to save as .xlsx.
+// non-empty row becomes the header row. Technical worksheets (names starting
+// with "_腾手", including the hidden snapshot sheet) are never chosen as the
+// data sheet. Old binary .xls files are rejected by excelize; callers should
+// surface that error as a request to save as .xlsx.
 func Read(data []byte) (ReadResult, error) {
 	f, err := excelize.OpenReader(bytes.NewReader(data))
 	if err != nil {
@@ -44,7 +81,7 @@ func Read(data []byte) (ReadResult, error) {
 	defer f.Close()
 	var sheet string
 	for _, name := range f.GetSheetList() {
-		if name == SheetHelp {
+		if name == SheetHelp || strings.HasPrefix(name, technicalPrefix) {
 			continue
 		}
 		rows, err := f.GetRows(name)
@@ -63,7 +100,7 @@ func Read(data []byte) (ReadResult, error) {
 	if err != nil {
 		return ReadResult{}, err
 	}
-	result := ReadResult{Sheet: sheet}
+	result := ReadResult{Sheet: sheet, Snapshot: readSnapshot(f)}
 	headerRow := -1
 	for i, cells := range rows {
 		if !emptyCells(cells) {
@@ -78,21 +115,98 @@ func Read(data []byte) (ReadResult, error) {
 	if headerRow < 0 {
 		return ReadResult{}, fmt.Errorf("Excel 文件中没有表头行")
 	}
+	hasIDColumn := len(result.Headers) > 0 &&
+		result.Headers[len(result.Headers)-1] == ColumnContractID
+	if hasIDColumn {
+		result.Headers = result.Headers[:len(result.Headers)-1]
+	}
 	width := len(result.Headers)
 	for i := headerRow + 1; i < len(rows); i++ {
 		cells := rows[i]
-		if emptyCells(cells) {
+		total := width
+		if hasIDColumn {
+			total = width + 1
+		}
+		full := normalizeWidth(cells, total)
+		contractID := ""
+		if hasIDColumn {
+			contractID = strings.TrimSpace(full[width])
+		}
+		visible := full[:width]
+		if emptyCells(visible) {
+			// A row whose visible cells are all blank counts as missing even
+			// when the hidden id column still has a value: the user removed
+			// the row's data, so B14 proposes a delete instead of an update.
 			continue
 		}
 		if len(result.Rows) >= 10000 {
 			return ReadResult{}, fmt.Errorf("Excel 数据行超过 10000 行，请拆分后再导入")
 		}
 		result.Rows = append(result.Rows, Row{
-			Number: i + 1,
-			Cells:  normalizeWidth(cells, width),
+			Number:     i + 1,
+			Cells:      visible,
+			ContractID: contractID,
 		})
 	}
 	return result, nil
+}
+
+// readSnapshot parses the hidden snapshot worksheet. A malformed or missing
+// sheet yields nil, which callers treat as an external/legacy file.
+func readSnapshot(f *excelize.File) *Snapshot {
+	found := false
+	for _, name := range f.GetSheetList() {
+		if name == SheetSnapshot {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	rows, err := f.GetRows(SheetSnapshot)
+	if err != nil || len(rows) < 2 {
+		return nil
+	}
+	header := rows[0]
+	if len(header) < 6 || strings.TrimSpace(header[0]) != "快照版本" {
+		return nil
+	}
+	meta := rows[1]
+	if len(meta) < 3 {
+		return nil
+	}
+	version, err := strconv.Atoi(strings.TrimSpace(meta[0]))
+	if err != nil || version != SnapshotVersion {
+		return nil
+	}
+	snapshot := &Snapshot{
+		Version:    version,
+		ExportedAt: strings.TrimSpace(meta[1]),
+	}
+	if keys := strings.TrimSpace(meta[2]); keys != "" {
+		for _, key := range strings.Split(keys, ",") {
+			if key = strings.TrimSpace(key); key != "" {
+				snapshot.FieldKeys = append(snapshot.FieldKeys, key)
+			}
+		}
+	}
+	for _, row := range rows[2:] {
+		if len(row) < 6 {
+			continue
+		}
+		id := strings.TrimSpace(row[3])
+		fingerprint := strings.TrimSpace(row[5])
+		if id == "" || fingerprint == "" {
+			continue
+		}
+		snapshot.Rows = append(snapshot.Rows, SnapshotRow{
+			ContractID:  id,
+			ContractNo:  strings.TrimSpace(row[4]),
+			Fingerprint: fingerprint,
+		})
+	}
+	return snapshot
 }
 
 func normalizeWidth(cells []string, width int) []string {
@@ -156,8 +270,10 @@ func BuildTemplate(fields []model.FieldDefinition) ([]byte, error) {
 
 // BuildLedger creates an export workbook from the same field definitions.
 // Cell values are either string or float64; numeric values stay numeric so
-// users can sum them in Excel.
-func BuildLedger(fields []model.FieldDefinition, rows [][]any) ([]byte, error) {
+// users can sum them in Excel. It also writes the hidden contract-id column
+// and, when snapshot is non-nil, the hidden snapshot worksheet that enables
+// round-trip delete/conflict detection. Image assets are never embedded.
+func BuildLedger(fields []model.FieldDefinition, rows [][]any, snapshot *Snapshot) ([]byte, error) {
 	f := excelize.NewFile()
 	defer f.Close()
 	index, err := f.NewSheet(SheetLedger)
@@ -169,6 +285,16 @@ func BuildLedger(fields []model.FieldDefinition, rows [][]any) ([]byte, error) {
 		return nil, err
 	}
 	if err := writeHeader(f, SheetLedger, fields); err != nil {
+		return nil, err
+	}
+	idCol, err := excelize.ColumnNumberToName(len(fields) + 1)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.SetCellValue(SheetLedger, idCol+"1", ColumnContractID); err != nil {
+		return nil, err
+	}
+	if err := f.SetColVisible(SheetLedger, idCol, false); err != nil {
 		return nil, err
 	}
 	moneyStyle := moneyStyleID(f)
@@ -189,9 +315,23 @@ func BuildLedger(fields []model.FieldDefinition, rows [][]any) ([]byte, error) {
 				_ = f.SetCellStyle(SheetLedger, cell, cell, moneyStyle)
 			}
 		}
+		if snapshot != nil && i < len(snapshot.Rows) {
+			cell, err := excelize.CoordinatesToCellName(len(fields)+1, excelRow)
+			if err != nil {
+				return nil, err
+			}
+			if err := f.SetCellValue(SheetLedger, cell, snapshot.Rows[i].ContractID); err != nil {
+				return nil, err
+			}
+		}
 	}
 	lastCol, _ := excelize.ColumnNumberToName(len(fields))
 	_ = f.AutoFilter(SheetLedger, "A1:"+lastCol+"1", nil)
+	if snapshot != nil {
+		if err := writeSnapshotSheet(f, snapshot); err != nil {
+			return nil, err
+		}
+	}
 	f.SetDocProps(&excelize.DocProperties{
 		Title:   "腾手合同台账",
 		Creator: "腾手",
@@ -201,6 +341,55 @@ func BuildLedger(fields []model.FieldDefinition, rows [][]any) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// writeSnapshotSheet writes the hidden snapshot worksheet. Layout:
+//
+//	row 1: 快照版本 | 导出时间 | 字段键 | 合同ID | 合同编号 | 行指纹
+//	row 2: version  | RFC3339  | key,key… |         |          |
+//	row 3+:                                    id |  no      | sha256
+func writeSnapshotSheet(f *excelize.File, snapshot *Snapshot) error {
+	if _, err := f.NewSheet(SheetSnapshot); err != nil {
+		return err
+	}
+	headers := []string{"快照版本", "导出时间", "字段键", "合同ID", "合同编号", "行指纹"}
+	style := headerStyle(f)
+	for i, header := range headers {
+		cell, err := excelize.CoordinatesToCellName(i+1, 1)
+		if err != nil {
+			return err
+		}
+		if err := f.SetCellValue(SheetSnapshot, cell, header); err != nil {
+			return err
+		}
+		_ = f.SetCellStyle(SheetSnapshot, cell, cell, style)
+	}
+	meta := []any{snapshot.Version, snapshot.ExportedAt, strings.Join(snapshot.FieldKeys, ",")}
+	for i, value := range meta {
+		cell, err := excelize.CoordinatesToCellName(i+1, 2)
+		if err != nil {
+			return err
+		}
+		if err := f.SetCellValue(SheetSnapshot, cell, value); err != nil {
+			return err
+		}
+	}
+	for i, row := range snapshot.Rows {
+		excelRow := i + 3
+		values := []any{"", "", "", row.ContractID, row.ContractNo, row.Fingerprint}
+		for j, value := range values {
+			cell, err := excelize.CoordinatesToCellName(j+1, excelRow)
+			if err != nil {
+				return err
+			}
+			if err := f.SetCellValue(SheetSnapshot, cell, value); err != nil {
+				return err
+			}
+		}
+	}
+	_ = f.SetColWidth(SheetSnapshot, "C", "C", 48)
+	_ = f.SetColWidth(SheetSnapshot, "F", "F", 72)
+	return f.SetSheetVisible(SheetSnapshot, false)
 }
 
 func moneyStyleID(f *excelize.File) int {

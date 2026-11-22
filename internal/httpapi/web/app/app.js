@@ -3145,7 +3145,10 @@ async function openImport(file) {
     fileName: file.name,
     preview: null,
     mapping: null,
-    options: { mode: "upsert", skip_errors: false, create_parties: true },
+    options: {
+      mode: "upsert", skip_errors: false, create_parties: true,
+      apply_deletes: false, file_name: file.name,
+    },
     dirty: false,
     loading: false,
   };
@@ -3157,6 +3160,15 @@ async function openImport(file) {
     modal.body.innerHTML = `<div class="form-errors">${esc(err.message)}</div>`;
     footerButton(modal, "关闭", "", closeModal);
   }
+}
+
+const IMPORT_ACTION_LABELS = {
+  create: "新增", update: "更新", unchanged: "不变", error: "错误",
+  delete: "删除", conflict: "冲突",
+};
+
+function importActionLabel(action) {
+  return IMPORT_ACTION_LABELS[action] || action;
 }
 
 function importOptionsHTML(options) {
@@ -3186,8 +3198,96 @@ function renderImportMapping(preview, mapping) {
   }).join("")}</div>`;
 }
 
+function renderImportSummary(preview) {
+  const summary = preview.summary || {};
+  const badges = [
+    ["create", "新增", summary.create],
+    ["update", "更新", summary.update],
+    ["unchanged", "不变", summary.unchanged],
+    ["delete", "删除", summary.deleted],
+    ["conflict", "冲突", summary.conflicts],
+    ["error", "错误", summary.error],
+  ];
+  return `<div class="import-summary">
+      ${badges.map(([cls, label, count]) =>
+        `<span class="badge ${cls}">${label} ${count || 0}</span>`).join("")}
+      <span class="badge">共 ${summary.total || 0} 行</span>
+    </div>`;
+}
+
+function fieldLabelByKey(preview, key) {
+  const field = (preview.fields || []).find((f) => f.key === key);
+  return field ? field.label : key;
+}
+
+function conflictValuesHTML(preview, row) {
+  const system = row.system_values || {};
+  const excel = row.excel_values || {};
+  const keys = Array.from(new Set([...Object.keys(system), ...Object.keys(excel)]));
+  if (!keys.length) return "";
+  const rows = keys.map((key) => `<tr>
+      <td>${esc(fieldLabelByKey(preview, key))}</td>
+      <td class="wrap">${esc(system[key] == null ? "" : system[key])}</td>
+      <td class="wrap">${esc(excel[key] == null ? "" : excel[key])}</td>
+    </tr>`).join("");
+  return `<div class="table-wrap"><table class="data-table conflict-table">
+      <thead><tr><th>字段</th><th>系统当前</th><th>Excel</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
+function conflictChoiceHTML(row, keepLabel, useLabel) {
+  const name = "resolve-" + String(row.key).replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `<div class="conflict-choice" data-resolve-key="${esc(row.key)}">
+      <label class="inline"><input type="radio" name="${name}" value="keep_system" checked> ${esc(keepLabel)}</label>
+      <label class="inline"><input type="radio" name="${name}" value="use_excel"> ${esc(useLabel)}</label>
+    </div>`;
+}
+
+function renderImportConflicts(preview) {
+  const conflicts = (preview.rows || []).filter((row) => row.row > 0 && row.action === "conflict");
+  if (!conflicts.length) return "";
+  return `<h3 class="import-section-title">冲突（${conflicts.length} 行，需逐行选择）</h3>
+    ${conflicts.map((row) => `<div class="import-conflict">
+      <div class="import-conflict-head">
+        <strong>第 ${row.row} 行 · ${esc(row.contract_no || "")} ${esc(row.title || "")}</strong>
+        <span class="badge conflict">冲突</span>
+      </div>
+      <p class="hint">${esc(row.conflict_reason || "导出后两边都有改动，需要选择保留哪一边。")}</p>
+      ${conflictValuesHTML(preview, row)}
+      ${conflictChoiceHTML(row, "保留系统", "采用 Excel")}
+    </div>`).join("")}`;
+}
+
+function renderImportDeletes(preview) {
+  const deletes = (preview.rows || []).filter((row) => row.row === 0);
+  if (!deletes.length) return "";
+  const rows = deletes.map((row) => {
+    const conflict = row.action === "conflict";
+    return `<tr>
+      <td class="mono">${esc(row.contract_no || "")}</td>
+      <td class="wrap">${esc(row.title || "")}</td>
+      <td>${esc(row.party_b || "")}</td>
+      <td class="wrap">${conflict
+        ? `<span class="badge conflict">系统有改动</span>
+           <div class="hint">${esc(row.conflict_reason || "系统在导出后修改了该合同；默认保留系统。")}</div>
+           ${conflictChoiceHTML(row, "保留系统（不删除）", "采用 Excel（删除）")}`
+        : `<span class="badge delete">将删除</span>`}</td>
+    </tr>`;
+  }).join("");
+  return `<div class="import-deletes">
+    <h3 class="import-section-title">删除候选（${deletes.length} 行）</h3>
+    <p class="hint">这些合同在导出快照中存在，但 Excel 里已经没有对应行。默认不删除；确认后才能勾选应用删除。</p>
+    <label class="check-row"><input type="checkbox" id="importApplyDeletes"${importState.options.apply_deletes ? " checked" : ""}> 应用删除（未勾选时这些行会被跳过）</label>
+    <div class="table-wrap"><table class="data-table import-table">
+      <thead><tr><th>合同编号</th><th>合同名称</th><th>相对方</th><th>处理</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>`;
+}
+
 function renderImportRows(preview) {
-  const rows = preview.rows || [];
+  const rows = (preview.rows || []).filter((row) => row.row > 0 && row.action !== "conflict");
   const shown = rows.slice(0, 200);
   const body = shown.map((row) => {
     const issues = [];
@@ -3197,7 +3297,7 @@ function renderImportRows(preview) {
     const warnings = (row.warnings || []).map((w) => `<li>${esc(w)}</li>`).join("");
     return `<tr>
       <td class="row-num">${row.row}</td>
-      <td><span class="badge ${esc(row.action)}">${esc({ create: "新增", update: "更新", unchanged: "不变", error: "错误" }[row.action] || row.action)}</span></td>
+      <td><span class="badge ${esc(row.action)}">${esc(importActionLabel(row.action))}</span></td>
       <td class="mono">${esc(row.contract_no || "")}</td>
       <td class="wrap">${esc(row.title || "")}</td>
       <td>${esc(row.party_b || "")}</td>
@@ -3207,14 +3307,7 @@ function renderImportRows(preview) {
       </td>
     </tr>`;
   }).join("");
-  return `<div class="import-summary">
-      <span class="badge create">新增 ${preview.summary.create}</span>
-      <span class="badge update">更新 ${preview.summary.update}</span>
-      <span class="badge unchanged">不变 ${preview.summary.unchanged}</span>
-      <span class="badge error">错误 ${preview.summary.error}</span>
-      <span class="badge">共 ${preview.summary.total} 行</span>
-    </div>
-    <div class="table-wrap"><table class="data-table import-table">
+  return `<div class="table-wrap"><table class="data-table import-table">
       <thead><tr><th>行</th><th>动作</th><th>合同编号</th><th>合同名称</th><th>相对方</th><th>问题</th></tr></thead>
       <tbody>${body || `<tr><td class="empty" colspan="6">没有数据行</td></tr>`}</tbody>
     </table></div>
@@ -3242,14 +3335,17 @@ async function runImportPreview(modal, mappingOverride) {
 }
 
 function readImportOptions(modal) {
-  if (!modal || !modal.body.querySelector("#importMode")) {
-    return importState ? Object.assign({}, importState.options) : { mode: "upsert", skip_errors: false, create_parties: true };
-  }
-  return {
+  const base = importState
+    ? Object.assign({}, importState.options)
+    : { mode: "upsert", skip_errors: false, create_parties: true, apply_deletes: false };
+  if (!modal || !modal.body.querySelector("#importMode")) return base;
+  const applyDeletes = $("#importApplyDeletes", modal.body);
+  return Object.assign(base, {
     mode: $("#importMode", modal.body).value,
     skip_errors: $("#importSkipErrors", modal.body).checked,
     create_parties: $("#importCreateParties", modal.body).checked,
-  };
+    apply_deletes: applyDeletes ? applyDeletes.checked : !!base.apply_deletes,
+  });
 }
 
 function currentMapping(modal) {
@@ -3258,6 +3354,22 @@ function currentMapping(modal) {
     if (select.value) mapping[select.dataset.mapIndex] = select.value;
   });
   return mapping;
+}
+
+function collectResolutions(modal) {
+  const resolutions = {};
+  $$("[data-resolve-key]", modal.body).forEach((box) => {
+    const checked = $('input[type="radio"]:checked', box);
+    if (checked) resolutions[box.dataset.resolveKey] = checked.value;
+  });
+  return resolutions;
+}
+
+function importResultToast(result) {
+  const parts = [`新增 ${result.created || 0} 条`, `更新 ${result.updated || 0} 条`];
+  if (result.deleted) parts.push(`删除 ${result.deleted} 条`);
+  if (result.skipped) parts.push(`跳过 ${result.skipped} 条`);
+  return `导入完成：${parts.join("，")}`;
 }
 
 function renderImport(modal) {
@@ -3270,6 +3382,9 @@ function renderImport(modal) {
     ${notes ? `<ul class="import-notes">${notes}</ul>` : ""}
     <p id="importDirtyHint" class="hint" style="display:none">列映射已修改，建议先点「重新预览」确认结果。</p>
     <div id="importResult"></div>
+    ${renderImportSummary(preview)}
+    ${renderImportConflicts(preview)}
+    ${renderImportDeletes(preview)}
     ${renderImportRows(preview)}`;
   modal.foot.innerHTML = "";
   footerButton(modal, "取消", "", closeModal);
@@ -3283,13 +3398,16 @@ function renderImport(modal) {
   const commit = footerButton(modal, "确认导入", "primary", async () => {
     commit.disabled = true;
     try {
-      const body = {
-        file_base64: importState.base64,
-        options: Object.assign({}, importState.options, { mapping: currentMapping(modal) }),
-      };
+      const applyDeletes = $("#importApplyDeletes", modal.body);
+      const options = Object.assign({}, importState.options, {
+        mapping: currentMapping(modal),
+        apply_deletes: applyDeletes ? applyDeletes.checked : false,
+        resolutions: collectResolutions(modal),
+      });
+      const body = { file_base64: importState.base64, options };
       const result = await api("/app/api/v1/excel/commit", { method: "POST", body });
       showImportResult(modal, result, false);
-      toast(`导入完成：新增 ${result.created} 条，更新 ${result.updated} 条`);
+      toast(importResultToast(result));
       await refreshAfterWrite();
     } catch (err) {
       commit.disabled = false;
@@ -3309,6 +3427,12 @@ function renderImport(modal) {
   $$("#importMode, #importSkipErrors, #importCreateParties", modal.body).forEach((el) => {
     el.addEventListener("change", () => { importState.options = readImportOptions(modal); });
   });
+  const applyDeletes = $("#importApplyDeletes", modal.body);
+  if (applyDeletes) {
+    applyDeletes.addEventListener("change", () => {
+      importState.options.apply_deletes = applyDeletes.checked;
+    });
+  }
 }
 
 function showImportResult(modal, result, blocked) {
@@ -3317,19 +3441,25 @@ function showImportResult(modal, result, blocked) {
   const rows = (result.rows || []).slice(0, 200).map((row) => {
     const errors = (row.errors || []).map((e) => `<li>${esc(e.label || "")}：${esc(e.message)}</li>`).join("");
     return `<tr>
-      <td class="row-num">${row.row}</td>
-      <td><span class="badge ${esc(row.action)}">${esc({ create: "新增", update: "更新", unchanged: "不变", error: "错误" }[row.action] || row.action)}</span></td>
+      <td class="row-num">${row.row || "—"}</td>
+      <td><span class="badge ${esc(row.action)}">${esc(importActionLabel(row.action))}</span></td>
       <td class="mono">${esc(row.contract_no || "")}</td>
       <td class="wrap">${esc(row.title || "")}</td>
       <td class="wrap">${errors ? `<ul class="row-errors">${errors}</ul>` : ""}</td>
     </tr>`;
   }).join("");
+  const badges = [
+    ["create", "新增", result.created],
+    ["update", "更新", result.updated],
+    ["unchanged", "不变", result.unchanged],
+    ["delete", "删除", result.deleted],
+    ["conflict", "冲突", result.conflicts],
+    ["error", "错误", result.errors],
+  ];
   target.innerHTML = `
     <div class="import-summary">
-      <span class="badge create">新增 ${result.created || 0}</span>
-      <span class="badge update">更新 ${result.updated || 0}</span>
-      <span class="badge unchanged">不变 ${result.unchanged || 0}</span>
-      <span class="badge error">错误 ${result.errors || 0}</span>
+      ${badges.map(([cls, label, count]) => `<span class="badge ${cls}">${label} ${count || 0}</span>`).join("")}
+      ${result.skipped ? `<span class="badge">跳过 ${result.skipped}</span>` : ""}
     </div>
     ${blocked ? `<div class="form-errors">存在错误行，本次未写入任何数据。请修正 Excel 后重新导入，或勾选「跳过错误行」。</div>` : ""}
     <div class="table-wrap"><table class="data-table import-table">

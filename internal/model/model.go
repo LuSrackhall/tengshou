@@ -79,14 +79,17 @@ const (
 	ChangeEntitySignature = "signature"
 	ChangeEntityBackup    = "backup"
 	ChangeEntitySettings  = "settings"
-	ChangeActionCreate    = "create"
-	ChangeActionUpdate    = "update"
-	ChangeActionDelete    = "delete"
-	ChangeActionArchive   = "archive"
-	ChangeActionImport    = "import"
-	ChangeActionExport    = "export"
-	ChangeActionRestore   = "restore"
-	ChangeActionGenerate  = "generate"
+	// ChangeEntityImport records import-level (file) audit entries; per-row
+	// changes stay attached to their contract entries.
+	ChangeEntityImport   = "import"
+	ChangeActionCreate   = "create"
+	ChangeActionUpdate   = "update"
+	ChangeActionDelete   = "delete"
+	ChangeActionArchive  = "archive"
+	ChangeActionImport   = "import"
+	ChangeActionExport   = "export"
+	ChangeActionRestore  = "restore"
+	ChangeActionGenerate = "generate"
 )
 
 // Party is a counterparty (person or organization) in a contract.

@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -455,6 +457,467 @@ func TestImportRejectsUnknownFieldColumn(t *testing.T) {
 	if preview.Columns[1].Field != "" {
 		t.Fatalf("unknown field should not map: %+v", preview.Columns[1])
 	}
+	if len(preview.Notes) == 0 || !strings.Contains(strings.Join(preview.Notes, "\n"), "没有「_腾手快照」") {
+		t.Fatalf("external file note missing: %v", preview.Notes)
+	}
+}
+
+/* ---------- B14 Excel 自有台账双向互转 ---------- */
+
+// A full round-trip: export -> edit an existing row, add a row, remove a row
+// -> preview -> commit. Deletes stay off unless explicitly applied, and every
+// import leaves one file-level audit entry.
+func TestExcelRoundTripSnapshotUpdatesDeletesAndAudit(t *testing.T) {
+	svc, rd, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "张三")
+	for _, in := range []service.FieldInput{
+		{Entity: model.FieldEntityContract, Key: "usage", Label: "用途",
+			Type: model.FieldTypeText, InLedger: boolPtr(true), InTemplate: boolPtr(true)},
+		{Entity: model.FieldEntityContract, Key: "photo", Label: "照片路径",
+			Type: model.FieldTypeImage, InLedger: boolPtr(false), InTemplate: boolPtr(false)},
+	} {
+		if _, err := svc.CreateField(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c1 := mustContract(t, svc, service.ContractInput{
+		ContractNo: "HT-A-0001", Year: 2026, Title: "合同甲", PartyBID: party.ID,
+		Amount: 100, Data: map[string]any{"usage": "居住", "photo": "assets/p1.png"},
+	})
+	mustContract(t, svc, service.ContractInput{
+		ContractNo: "HT-A-0002", Year: 2026, Title: "合同乙", PartyBID: party.ID,
+		Amount: 200, Data: map[string]any{"usage": "办公", "photo": "assets/p2.png"},
+	})
+	c3 := mustContract(t, svc, service.ContractInput{
+		ContractNo: "HT-A-0003", Year: 2026, Title: "合同丙", PartyBID: party.ID,
+		Amount: 300, Data: map[string]any{"usage": "仓储"},
+	})
+
+	ledger, err := svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := readHeader(t, ledger)
+	// Ledger and template columns follow the field definitions: no in_ledger
+	// filter and no export-column configuration (B14).
+	for _, label := range []string{"用途", "照片路径"} {
+		if columnIndex(header, label) < 0 {
+			t.Fatalf("ledger header missing %q: %v", label, header)
+		}
+	}
+	template, err := svc.TemplateWorkbook(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if columnIndex(readHeader(t, template), "照片路径") < 0 {
+		t.Fatalf("template header = %v", readHeader(t, template))
+	}
+
+	// Row 2 = HT-A-0001, row 3 = HT-A-0002, row 4 = HT-A-0003.
+	workbook := editWorkbook(t, ledger, func(f *excelize.File, header []string) {
+		if err := f.RemoveRow("合同台账", 4); err != nil {
+			t.Fatal(err)
+		}
+		setCell(t, f, header, "金额（元）", 2, "150")
+		setCell(t, f, header, "合同编号", 4, "HT-A-0004")
+		setCell(t, f, header, "年度", 4, "2026")
+		setCell(t, f, header, "合同名称", 4, "合同丁")
+		setCell(t, f, header, "相对方", 4, "张三")
+		setCell(t, f, header, "金额（元）", 4, "400")
+		setCell(t, f, header, "用途", 4, "仓储")
+	})
+
+	preview, err := svc.PreviewImport(ctx, workbook, service.ImportOptions{FileName: "台账.xlsx"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := preview.Summary
+	if summary.Total != 3 || summary.Update != 1 || summary.Unchanged != 1 ||
+		summary.Create != 1 || summary.Deleted != 1 || summary.Conflicts != 0 || summary.Error != 0 {
+		t.Fatalf("preview summary = %+v rows=%+v", summary, preview.Rows)
+	}
+	deleteRow := previewRowByAction(t, preview, "delete")
+	if deleteRow.ContractNo != "HT-A-0003" || deleteRow.Row != 0 || deleteRow.Key != "delete:"+c3.ID {
+		t.Fatalf("delete candidate = %+v", deleteRow)
+	}
+
+	// First commit leaves the delete unapplied.
+	result, err := svc.CommitImport(ctx, workbook, service.ImportOptions{FileName: "台账.xlsx"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Created != 1 || result.Updated != 1 || result.Unchanged != 1 ||
+		result.Deleted != 0 || result.Skipped != 1 || result.Errors != 0 {
+		t.Fatalf("commit result = %+v rows=%+v", result, result.Rows)
+	}
+	updated, err := rd.GetContract(ctx, c1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Amount != 150 || updated.Data["usage"] != "居住" || updated.Data["photo"] != "assets/p1.png" {
+		t.Fatalf("updated contract = %+v", updated)
+	}
+	if _, err := rd.GetContract(ctx, c3.ID); err != nil {
+		t.Fatalf("delete must not be applied by default: %v", err)
+	}
+	created, err := rd.GetContractByNo(ctx, "HT-A-0004")
+	if err != nil || created.Amount != 400 || created.Data["usage"] != "仓储" {
+		t.Fatalf("created contract = %+v err=%v", created, err)
+	}
+
+	// Import-level audit: file name, sheet, counts and the file digest.
+	sum := sha256.Sum256(workbook)
+	fileSHA := hex.EncodeToString(sum[:])
+	logs, err := rd.ListChangeLogs(ctx, store.ChangeFilter{Entity: model.ChangeEntityImport, Limit: 10})
+	if err != nil || logs.Total != 1 {
+		t.Fatalf("import audit = %+v err=%v", logs, err)
+	}
+	entry := logs.Items[0]
+	if entry.Action != model.ChangeActionImport || entry.Actor != "测试员" || entry.EntityID != fileSHA {
+		t.Fatalf("import audit entry = %+v", entry)
+	}
+	for _, part := range []string{"台账.xlsx", "合同台账", "新增 1", "更新 1", "不变 1", "删除 0", "跳过 1", fileSHA} {
+		if !strings.Contains(entry.Summary, part) {
+			t.Fatalf("audit summary missing %q: %s", part, entry.Summary)
+		}
+	}
+	contractLogs, err := rd.ListChangeLogs(ctx, store.ChangeFilter{
+		Entity: model.ChangeEntityContract, EntityID: c1.ID, Limit: 10,
+	})
+	if err != nil || !hasSummaryPrefix(contractLogs.Items, "Excel 导入：修改合同") {
+		t.Fatalf("per-row excel audit missing: %+v err=%v", contractLogs.Items, err)
+	}
+
+	// Re-export and apply the delete explicitly.
+	ledger2, err := svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbook2 := editWorkbook(t, ledger2, func(f *excelize.File, header []string) {
+		if err := f.RemoveRow("合同台账", 4); err != nil { // HT-A-0003
+			t.Fatal(err)
+		}
+	})
+	preview2, err := svc.PreviewImport(ctx, workbook2, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview2.Summary.Deleted != 1 || preview2.Summary.Unchanged != 3 || preview2.Summary.Conflicts != 0 {
+		t.Fatalf("preview2 = %+v rows=%+v", preview2.Summary, preview2.Rows)
+	}
+	result2, err := svc.CommitImport(ctx, workbook2, service.ImportOptions{
+		FileName: "台账-删除.xlsx", ApplyDeletes: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result2.Deleted != 1 || result2.Unchanged != 3 {
+		t.Fatalf("delete commit = %+v", result2)
+	}
+	if _, err := rd.GetContract(ctx, c3.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("contract should be deleted: %v", err)
+	}
+	contractLogs, _ = rd.ListChangeLogs(ctx, store.ChangeFilter{
+		Entity: model.ChangeEntityContract, EntityID: c3.ID, Limit: 10,
+	})
+	if !hasSummaryPrefix(contractLogs.Items, "Excel 导入：删除合同") {
+		t.Fatalf("excel delete audit missing: %+v", contractLogs.Items)
+	}
+}
+
+// Conflict detection covers both-sides edits, system-side edits, contracts
+// created or deleted in the system after export, and delete candidates whose
+// system row changed.
+func TestExcelImportConflicts(t *testing.T) {
+	svc, rd, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "张三")
+	c1 := mustContract(t, svc, service.ContractInput{
+		ContractNo: "HT-B-0001", Year: 2026, Title: "冲突合同", PartyBID: party.ID, Amount: 100,
+	})
+	ledger, err := svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// System-side edit after export, plus an Excel edit to the same row.
+	mustContract(t, svc, service.ContractInput{
+		ID: c1.ID, Year: 2026, Title: "冲突合同", PartyBID: party.ID, Amount: 120,
+	})
+	bothChanged := editWorkbook(t, ledger, func(f *excelize.File, header []string) {
+		setCell(t, f, header, "金额（元）", 2, "150")
+	})
+	preview, err := svc.PreviewImport(ctx, bothChanged, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := preview.Rows[0]
+	if row.Action != "conflict" || row.SystemValues["amount"] != "120" || row.ExcelValues["amount"] != "150" {
+		t.Fatalf("both-changed row = %+v", row)
+	}
+	if !strings.Contains(row.ConflictReason, "都被修改") {
+		t.Fatalf("conflict reason = %q", row.ConflictReason)
+	}
+	// Missing resolution blocks the whole import.
+	_, err = svc.CommitImport(ctx, bothChanged, service.ImportOptions{})
+	var be *service.Error
+	if !errors.As(err, &be) || be.Code != "conflict_unresolved" {
+		t.Fatalf("unresolved conflict error = %v", err)
+	}
+	current, _ := rd.GetContract(ctx, c1.ID)
+	if current.Amount != 120 {
+		t.Fatalf("unresolved conflict wrote data: %+v", current)
+	}
+	// keep_system skips the row.
+	result, err := svc.CommitImport(ctx, bothChanged, service.ImportOptions{
+		Resolutions: map[string]string{row.Key: "keep_system"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Skipped != 1 || result.Conflicts != 1 || result.Updated != 0 {
+		t.Fatalf("keep_system result = %+v", result)
+	}
+	current, _ = rd.GetContract(ctx, c1.ID)
+	if current.Amount != 120 {
+		t.Fatalf("keep_system changed data: %+v", current)
+	}
+	// use_excel applies the Excel values.
+	result, err = svc.CommitImport(ctx, bothChanged, service.ImportOptions{
+		Resolutions: map[string]string{row.Key: "use_excel"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Updated != 1 || result.Conflicts != 1 {
+		t.Fatalf("use_excel result = %+v", result)
+	}
+	current, _ = rd.GetContract(ctx, c1.ID)
+	if current.Amount != 150 {
+		t.Fatalf("use_excel contract = %+v", current)
+	}
+
+	// System-only edit: the untouched Excel row is a conflict, not an update.
+	ledger2, err := svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContract(t, svc, service.ContractInput{
+		ID: c1.ID, Year: 2026, Title: "冲突合同", PartyBID: party.ID, Amount: 180,
+	})
+	preview, err = svc.PreviewImport(ctx, ledger2, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Rows[0].Action != "conflict" || !strings.Contains(preview.Rows[0].ConflictReason, "系统在导出后修改") {
+		t.Fatalf("system-only change row = %+v", preview.Rows[0])
+	}
+
+	// Contract created in the system after the export.
+	ledger3, err := svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContract(t, svc, service.ContractInput{
+		ContractNo: "HT-B-0002", Year: 2026, Title: "系统新增合同", PartyBID: party.ID, Amount: 50,
+	})
+	workbook := editWorkbook(t, ledger3, func(f *excelize.File, header []string) {
+		setCell(t, f, header, "合同编号", 3, "HT-B-0002")
+		setCell(t, f, header, "年度", 3, "2026")
+		setCell(t, f, header, "合同名称", 3, "系统新增合同")
+		setCell(t, f, header, "相对方", 3, "张三")
+		setCell(t, f, header, "金额（元）", 3, "50")
+	})
+	preview, err = svc.PreviewImport(ctx, workbook, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Rows) != 2 || preview.Rows[1].Action != "conflict" ||
+		!strings.Contains(preview.Rows[1].ConflictReason, "新建") {
+		t.Fatalf("system-created row = %+v", preview.Rows)
+	}
+
+	// Contract deleted in the system after the export: the Excel row is a
+	// conflict and use_excel recreates it.
+	ledger4, err := svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteContract(ctx, c1.ID); err != nil {
+		t.Fatal(err)
+	}
+	preview, err = svc.PreviewImport(ctx, ledger4, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deletedRow := preview.Rows[0]
+	if deletedRow.Action != "conflict" || !strings.Contains(deletedRow.ConflictReason, "系统在导出后删除") {
+		t.Fatalf("system-deleted row = %+v", deletedRow)
+	}
+	result, err = svc.CommitImport(ctx, ledger4, service.ImportOptions{
+		Resolutions: map[string]string{deletedRow.Key: "use_excel"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Created != 1 || result.Conflicts != 1 {
+		t.Fatalf("recreate result = %+v", result)
+	}
+	recreated, err := rd.GetContractByNo(ctx, "HT-B-0001")
+	if err != nil || recreated.Title != "冲突合同" {
+		t.Fatalf("recreated contract = %+v err=%v", recreated, err)
+	}
+
+	// A delete candidate whose system row changed must not be deleted unless
+	// the user picks use_excel for that row.
+	ledger5, err := svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContract(t, svc, service.ContractInput{
+		ID: recreated.ID, Year: 2026, Title: "冲突合同", PartyBID: party.ID, Amount: 210,
+	})
+	workbook5 := editWorkbook(t, ledger5, func(f *excelize.File, header []string) {
+		if err := f.RemoveRow("合同台账", 2); err != nil { // HT-B-0001
+			t.Fatal(err)
+		}
+	})
+	preview, err = svc.PreviewImport(ctx, workbook5, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Summary.Deleted != 0 || preview.Summary.Conflicts != 1 {
+		t.Fatalf("changed delete candidate summary = %+v rows=%+v", preview.Summary, preview.Rows)
+	}
+	deleteConflict := previewRowByAction(t, preview, "conflict")
+	if !strings.Contains(deleteConflict.ConflictReason, "系统在导出后修改") {
+		t.Fatalf("delete conflict = %+v", deleteConflict)
+	}
+	result, err = svc.CommitImport(ctx, workbook5, service.ImportOptions{
+		ApplyDeletes: true,
+		Resolutions:  map[string]string{deleteConflict.Key: "keep_system"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deleted != 0 || result.Skipped != 1 || result.Conflicts != 1 {
+		t.Fatalf("blocked delete result = %+v", result)
+	}
+	if _, err := rd.GetContract(ctx, recreated.ID); err != nil {
+		t.Fatalf("changed contract must survive: %v", err)
+	}
+}
+
+// A field created after an export shows up in the next ledger/template export
+// and its column is recognized on import.
+func TestExcelNewFieldAppearsInLedgerAndImport(t *testing.T) {
+	svc, rd, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "张三")
+	mustContract(t, svc, service.ContractInput{
+		ContractNo: "HT-C-0001", Year: 2026, Title: "字段合同", PartyBID: party.ID, Amount: 10,
+	})
+	ledger, err := svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if columnIndex(readHeader(t, ledger), "楼层") >= 0 {
+		t.Fatalf("unexpected field before creation: %v", readHeader(t, ledger))
+	}
+	if _, err := svc.CreateField(ctx, service.FieldInput{
+		Entity: model.FieldEntityContract, Key: "floor_no", Label: "楼层",
+		Type: model.FieldTypeNumber, InLedger: boolPtr(false), InTemplate: boolPtr(false),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err = svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if columnIndex(readHeader(t, ledger), "楼层") < 0 {
+		t.Fatalf("new field missing from ledger: %v", readHeader(t, ledger))
+	}
+	template, err := svc.TemplateWorkbook(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if columnIndex(readHeader(t, template), "楼层") < 0 {
+		t.Fatalf("new field missing from template: %v", readHeader(t, template))
+	}
+	workbook := editWorkbook(t, ledger, func(f *excelize.File, header []string) {
+		setCell(t, f, header, "楼层", 2, "3")
+	})
+	preview, err := svc.PreviewImport(ctx, workbook, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Rows[0].Action != "update" {
+		t.Fatalf("new column preview = %+v", preview.Rows[0])
+	}
+	if _, err := svc.CommitImport(ctx, workbook, service.ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := rd.ListContracts(ctx, model.ListFilter{})
+	if err != nil || len(list.Items) != 1 || list.Items[0].Data["floor_no"] != 3.0 {
+		t.Fatalf("imported new field = %+v err=%v", list.Items, err)
+	}
+}
+
+// A 100+ row ledger round-trips unchanged, and formatting-only cell edits
+// (e.g. 1.00 instead of 1) never look like modifications.
+func TestExcelRoundTripLargeLedger(t *testing.T) {
+	svc, _, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "张三")
+	for i := 0; i < 120; i++ {
+		mustContract(t, svc, service.ContractInput{
+			ContractNo: fmt.Sprintf("HT-D-%04d", i+1), Year: 2026,
+			Title: fmt.Sprintf("批量合同 %03d", i+1), PartyBID: party.ID,
+			Amount: float64(i + 1),
+		})
+	}
+	ledger, err := svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := svc.PreviewImport(ctx, ledger, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Summary.Total != 120 || preview.Summary.Unchanged != 120 ||
+		preview.Summary.Deleted != 0 || preview.Summary.Conflicts != 0 {
+		t.Fatalf("large ledger summary = %+v", preview.Summary)
+	}
+	workbook := editWorkbook(t, ledger, func(f *excelize.File, header []string) {
+		setCell(t, f, header, "金额（元）", 2, "1.00")
+	})
+	preview, err = svc.PreviewImport(ctx, workbook, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Summary.Unchanged != 120 || preview.Summary.Update != 0 {
+		t.Fatalf("formatting-only edit summary = %+v rows=%+v", preview.Summary, preview.Rows[:1])
+	}
+}
+
+func previewRowByAction(t *testing.T, preview service.ImportPreview, action string) service.ImportRow {
+	t.Helper()
+	for _, row := range preview.Rows {
+		if row.Action == action {
+			return row
+		}
+	}
+	t.Fatalf("no %q row in preview: %+v", action, preview.Rows)
+	return service.ImportRow{}
+}
+
+func hasSummaryPrefix(entries []model.ChangeLog, prefix string) bool {
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Summary, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 /* ---------- Excel 测试辅助 ---------- */

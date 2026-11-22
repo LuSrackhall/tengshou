@@ -548,7 +548,7 @@ function contractControlValue(f, contract, partyBName) {
     if (f.built_in) {
       if (f.key === "year") return state.bootstrap ? state.bootstrap.current_year : "";
       if (f.key === "status") return "草稿";
-      if (f.key === "party_b") return "";
+      if (f.key === "party_b") return partyBName || "";
       return f.default_value || "";
     }
     return f.default_value || "";

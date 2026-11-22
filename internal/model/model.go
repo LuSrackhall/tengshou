@@ -174,17 +174,28 @@ type ContractDetail struct {
 }
 
 // Signature is a retained handwritten signature image and its metadata.
+// ContractID and ContentSHA256 tie a signature to the contract and to the
+// exact content version it was collected for (B5).
 type Signature struct {
-	ID         string    `json:"id"`
-	PartyID    string    `json:"party_id,omitempty"`
-	SignerName string    `json:"signer_name"`
-	AssetPath  string    `json:"asset_path"` // path relative to the data directory
-	SHA256     string    `json:"sha256"`
-	WidthPx    int       `json:"width_px"`
-	HeightPx   int       `json:"height_px"`
-	CapturedAt time.Time `json:"captured_at"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	PartyID       string    `json:"party_id,omitempty"`
+	ContractID    string    `json:"contract_id,omitempty"`
+	SignerName    string    `json:"signer_name"`
+	AssetPath     string    `json:"asset_path"` // path relative to the data directory
+	SHA256        string    `json:"sha256"`
+	ContentSHA256 string    `json:"content_sha256,omitempty"`
+	Source        string    `json:"source,omitempty"`
+	SessionID     string    `json:"session_id,omitempty"`
+	WidthPx       int       `json:"width_px"`
+	HeightPx      int       `json:"height_px"`
+	CapturedAt    time.Time `json:"captured_at"`
+	CreatedAt     time.Time `json:"created_at"`
 }
+
+// Signature sources.
+const (
+	SignatureSourceLANQR = "lan_qr"
+)
 
 // Template is a versioned HTML contract template.
 type Template struct {
@@ -236,6 +247,8 @@ type ListFilter struct {
 	Status string
 	// Year limits contracts to one contract year; 0 means all years.
 	Year int
+	// ContractID limits signature assets to one contract; empty means all.
+	ContractID string
 }
 
 // Normalize clamps pagination to safe bounds.

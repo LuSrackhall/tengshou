@@ -3,10 +3,10 @@
 让村里的签合同变成录台账：合同数据录一次，程序产出合同 PDF 与自有台账；
 外部表格格式通过只读数据接口交给用户侧 AI agent 处理，核心不做平台适配。
 
-当前仓库处于 **B2 数据底座**：在 B1 工程地基上加入动态字段、合同/相对方
-档案、Excel 录入与台账导出、年度视图与变更记录。模板管理与签名页按 bead 后续交付。
+当前仓库处于 **B5 局域网扫码手写签名**：在 B2 数据底座上加入手机扫码手写签名，
+签名作为数据关联合同与内容版本，落盘透明底黑墨 PNG，可直接排入 PDF 打印。
 
-## 当前能力（B2）
+## 当前能力（B2 + B5）
 
 - **合同台账**：本地 Web 界面（`/app/`）内置表格录入、年度切换与跨年查询、
   搜索、状态筛选；合同编号稳定唯一（`HT-YYYY-NNNN` 或自定义）且创建后不可修改。
@@ -14,17 +14,23 @@
   台账/模板），无需重启或发版；旧数据保留；新增字段立即用于表单、Excel、模板占位符。
 - **相对方档案**：名称、类型、证件号、电话、地址、备注 + 自定义字段；合同录入时
   输入新名称自动建档；被合同引用时禁止删除。
+- **局域网扫码手写签名（B5）**：合同行「扫码签名」生成一次性短时二维码；手机在
+  同一局域网浏览器手写、清除重写、提交，无需装 App、不经过公网；签名透明底黑墨
+  落盘，关联合同与内容版本（`content_sha256`），模板用
+  `{{with signaturePath .Signatures .PartyB}}` 定位到 PDF；令牌复用 / 过期被拒绝，
+  非局域网来源不可达。细节见 [docs/b5-signature.md](docs/b5-signature.md)。
 - **Excel 入口**：按当前字段定义生成录入模板（表头动态生成）；导入支持列名映射、
   逐行预览、新增/更新合并、错误行报告；台账导出使用同一套列定义，可导出后再导回。
 - **变更记录**：谁在何时改了什么（字段级 diff），操作者取系统用户或 `config.json`
-  的 `operator`。
+  的 `operator`；签名采集也写入变更记录。
 - **Wails v3 桌面壳**：`cmd/tengshou`，窗口加载 `/app/` 台账界面。
 - **内嵌 Go 本地服务**：默认监听 `0.0.0.0:8765`；局域网测试页公开，只读数据接口
-  需令牌；应用写入接口只允许本机（回环）并校验请求头 / Origin。
-- **SQLite 持久化**：纯 Go 驱动，内置迁移（v3）；B1 旧库自动补合同编号与年度。
-- **HTML → PDF**：模板 + 合同数据生成带页码的 A4 PDF（中文、分页、图片）。
+  需令牌；应用写入接口只允许本机（回环）并校验请求头 / Origin；`/sign/*` 签名页
+  只接受局域网来源。
+- **SQLite 持久化**：纯 Go 驱动，内置迁移（v4）；B1 旧库自动补合同编号与年度。
+- **HTML → PDF**：模板 + 合同数据生成带页码的 A4 PDF（中文、分页、图片、签名）。
 - **只读数据接口**：`/api/v1/*`，供 B6 MCP 连接器与用户侧 agent 取数；
-  新增 `/api/v1/fields` 暴露字段定义。
+  新增 `/api/v1/fields` 暴露字段定义，签名资产可按合同查询。
 - **备份约定**：`VACUUM INTO` 备份到 `<data>/backups/`（含字段定义与数据）。
 - **构建与发布**：`scripts/build.sh`、`scripts/build-windows.ps1`；GitHub Actions。
 
@@ -80,7 +86,7 @@ go run ./cmd/tengshou-cli backup --data-dir ./data
 
 ```
 <data>/
-  config.json     # 服务端口、API 令牌、字体、页边距
+  config.json     # 服务端口、API 令牌、字体、页边距、签名有效期
   tengshou.db     # SQLite 数据库（WAL）
   assets/         # 签名图片等模板资源
   templates/      # 用户 HTML 模板
@@ -89,6 +95,9 @@ go run ./cmd/tengshou-cli backup --data-dir ./data
   logs/           # JSON 日志（启动时按大小轮转）
   fonts/          # 可选：用户自带中文字体（优先于系统字体）
 ```
+
+签名二维码有效期由 `config.json` 的 `signature.ttl_minutes` 控制（默认 10 分钟，
+范围 1–120）；签名会话是内存态的，重启服务后旧二维码自动失效。
 
 ## 中文字体
 
@@ -135,8 +144,9 @@ cmd/tengshou-cli/       无界面命令行
 internal/app/           资源装配
 internal/config/        配置与数据目录
 internal/store/         SQLite、迁移、只读查询
-internal/httpapi/       本地 HTTP 服务、台账界面与应用接口
-internal/service/       可写业务层：字段、档案、合同、Excel、变更记录
+internal/httpapi/       本地 HTTP 服务、台账界面、签名页与应用接口
+internal/sign/          一次性签名会话与手写 PNG 归一化
+internal/service/       可写业务层：字段、档案、合同、签名、Excel、变更记录
 internal/xlsx/          Excel 模板生成、台账导出与解析
 internal/pdfdoc/        HTML 解析 → 排版 → PDF
 internal/demo/          示例数据与签名 PNG 生成
@@ -148,8 +158,9 @@ internal/model/         稳定数据结构（对外 JSON 契约）
 - 不做云服务、多租户、跨单位协同；全部数据留在本机。
 - 不代替上级办文 / 采购流程，不做公章法定电子认证（只处理图片落位）。
 - 不内置外部台账模板引擎；外部格式经只读数据接口交给用户侧 agent。
-- B2 不包含签名采集页、模板编辑器、MCP 连接器；分别在 B5 / B3 / B6 交付。
-- Excel 导入只接受 `.xlsx`，单次最多 10000 行；手机扫码填表由 D7 边界决定。
+- B2 不包含模板编辑器与 MCP 连接器；分别在 B3 / B6 交付；B5 已交付签名采集页。
+- 手机扫码页 B5 只做手写签名；手机填表 / 信息采集由 D7 边界决定。
+- Excel 导入只接受 `.xlsx`，单次最多 10000 行。
 - Windows 安装包、代码签名与 Microsoft Store 上架属于 B10；B1 只保证
   Windows 构建链在 CI 上可用。
 

@@ -56,7 +56,7 @@
 | `field_definitions` | 可配置字段定义（实体、键、类型、必填、默认值、台账/模板开关、内置、归档、排序） |
 | `change_log` | 追加式变更记录（谁、何时、改了什么、字段级 diff） |
 | `templates` | HTML 模板，按 `(name, version)` 唯一，记录引用的变量 |
-| `signature_assets` | 签名图片元数据（路径、SHA-256、尺寸、采集时间） |
+| `signature_assets` | 签名图片元数据（路径、SHA-256、尺寸、采集时间、合同与内容版本关联） |
 | `output_documents` | 已生成 PDF（合同、模板版本、路径、摘要、页数） |
 | `schema_migrations` | 迁移记录 |
 | `app_meta` | 应用元数据键值 |
@@ -67,7 +67,10 @@
   映射为一等列；用户字段存 `data_json`。两者都由 `field_definitions` 驱动表单、
   Excel 与模板，运行时新增字段无需迁移表结构。
 - **签名与模板解耦**：签名是独立资产，合同只引用；同内容换模板重出 PDF
-  不需要重新签名（对应需求「同内容换壳」）。
+  不需要重新签名（对应需求「同内容换壳」）。签名记录同时保存采集时的
+  `content_sha256`，可判断它对应哪一版合同内容。
+- **签名采集与流程解耦**：签名是数据而非流程步骤；手机扫码页只负责采集，
+  合同是否生效、什么时候出 PDF 由业务决定。
 - **迁移文件嵌入二进制**：`internal/store/migrations/*.sql` 按版本顺序执行，
   空库 / 旧库都能升级；迁移在事务内完成并记录。
 
@@ -97,14 +100,18 @@
 
 ## 本地服务与安全
 
-- 默认绑定 `0.0.0.0:8765`，供同一局域网手机打开测试页；`--loopback` 或
+- 默认绑定 `0.0.0.0:8765`，供同一局域网手机打开测试页 / 签名页；`--loopback` 或
   `allow_lan=false` 时只绑定 `127.0.0.1`。
 - 测试页与 `/api/v1/health` 公开；数据端点要求
   `Authorization: Bearer <token>`（或 `X-Api-Token`）。
 - 令牌首次运行自动生成并写入 `config.json`（0600）。
 - 服务只注册 GET 路由；路由层天然拒绝其它方法，事务层另有 `PRAGMA query_only`
   的只读连接，双重保证无写入面。
-- 响应带 `nosniff`、`no-referrer`、`X-Frame-Options: DENY`、测试页 CSP。
+- **B5 签名页**是唯一对局域网开放的写入口：`/sign/<token>` 使用一次性短时令牌，
+  路由守卫拒绝公网来源（只接受回环 / 私网 / 链路本地地址），提交要求 JSON +
+  `X-Tengshou-Sign` 头（强制预检），CSP 禁止外部资源。应用写接口 `/app/api/*`
+  仍只允许回环。
+- 响应带 `nosniff`、`no-referrer`、`X-Frame-Options: DENY`、页面 CSP。
 - HTTP 服务设置读写 / 空闲超时与最大请求头，避免慢连接占用。
 
 ## 配置与日志
@@ -134,7 +141,7 @@
 | --- | --- |
 | B2 数据底座 / 动态字段 | 已交付：`field_definitions` + `/app/` + service + xlsx |
 | B3 模板管理 | `templates` 已有版本与变量提取；增加编辑 / 预览 / 发布 API（应用内） |
-| B5 局域网签名页 | `httpapi` 增加签名采集路由（需单独评估写权限与 CSRF） |
+| B5 局域网签名页 | 已交付：`internal/sign` + `/sign/<token>` + 一次性令牌；签名关联合同与内容版本，`signaturePath` 模板占位 |
 | B6 MCP 连接器 | 直接消费 `/api/v1/*` 与 `/api/v1/schema`，只读 |
 | B9 备份恢复 | `store.Backup` 已有；恢复 = 校验 + 原子替换 + 重启 |
 | B10 Windows 打包 | `scripts/build-windows.ps1` + CI 产物；补安装器 / 签名 |
@@ -144,5 +151,5 @@
 - HTML 子集有限：不支持 CSS 文件 / 选择器、浮动布局、页眉页脚自定义、
   行内图片（图片需独立成段或块级）。
 - 字体依赖系统或用户提供；不内置字体文件（许可与体积原因）。
-- 测试页只做连通性验证，不展示数据；签名页在 B5。
+- 测试页只做连通性验证，不展示数据；签名页见 [b5-signature.md](b5-signature.md)。
 - Windows 产物尚未在干净 Windows 环境实机验证（B1 验收允许后置到 B10 前）。

@@ -48,7 +48,7 @@
 <p style="margin-top:10mm">甲方（盖章）：{{.PartyA.Name}}</p>
 <p>法定代表人或委托代理人：{{default "—" .PartyA.Data.legal_representative}}</p>
 <p style="margin-top:8mm">乙方（签字）：</p>
-<p><img src="{{.Data.signature}}" style="width:45mm"></p>
+{{with signaturePath .Signatures .PartyB}}<p><img src="{{.}}" style="width:45mm"></p>{{else}}<p><img src="{{.Data.signature}}" style="width:45mm"></p>{{end}}
 
 <p style="margin-top:10mm">签署日期：{{cnDate .Contract.SignedOn}}</p>
 </body>

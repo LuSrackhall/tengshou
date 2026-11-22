@@ -45,6 +45,8 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 			"字段扩展数据放在 data 对象中，键名由字段定义（/api/v1/fields）决定。",
 			"合同编号 contract_no 稳定唯一，创建后不可修改。",
 			"合同详情中的模板不包含 HTML 正文；模板正文由 /api/v1/templates/{id} 返回。",
+			"签名资产通过 contract_id 与 content_sha256 关联合同和采集时的内容版本。",
+			"局域网签名页使用一次性短时令牌，仅接受局域网来源；令牌不写入数据库。",
 		},
 		Resources: []resourceDoc{
 			{
@@ -138,14 +140,18 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 			},
 			{
 				Name:        "signature_asset",
-				Path:        "/api/v1/signature-assets",
-				Description: "留存的手写签名图片元数据（不返回图片内容）。",
+				Path:        "/api/v1/signature-assets?contract_id={id}",
+				Description: "留存的手写签名图片元数据（不返回图片内容），关联合同与采集时的内容版本。",
 				Fields: []fieldDoc{
 					{"id", "string", "稳定标识"},
 					{"party_id", "string", "签名所属相对方"},
+					{"contract_id", "string", "采集时关联的合同（B5 起）"},
 					{"signer_name", "string", "签名人姓名"},
 					{"asset_path", "string", "相对于数据目录的图片路径"},
 					{"sha256", "string", "图片摘要，用于校验留存"},
+					{"content_sha256", "string", "采集时合同内容版本摘要"},
+					{"source", "string", "采集渠道，例如 lan_qr"},
+					{"session_id", "string", "签名会话标识"},
 					{"width_px", "integer", "像素宽"},
 					{"height_px", "integer", "像素高"},
 					{"captured_at", "string", "采集时间"},

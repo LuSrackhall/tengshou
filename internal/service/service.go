@@ -27,11 +27,12 @@ import (
 
 // Service owns the writable business rules. It is safe for concurrent use.
 type Service struct {
-	st    *store.Store
-	rd    *store.Reader
-	actor string
-	now   func() time.Time
-	mu    sync.Mutex // serializes writes that allocate contract numbers
+	st      *store.Store
+	rd      *store.Reader
+	actor   string
+	dataDir string
+	now     func() time.Time
+	mu      sync.Mutex // serializes writes that allocate contract numbers
 }
 
 // New constructs a Service. An empty actor falls back to the OS user name.
@@ -60,6 +61,13 @@ func OSUser() string {
 
 // Actor returns the name recorded in change-log entries.
 func (s *Service) Actor() string { return s.actor }
+
+// SetDataDir configures the data directory used for binary assets such as
+// captured signature images. It is called once at startup, before serving.
+func (s *Service) SetDataDir(dir string) { s.dataDir = dir }
+
+// DataDir returns the configured data directory ("" when unset).
+func (s *Service) DataDir() string { return s.dataDir }
 
 // Now returns the service clock.
 func (s *Service) Now() time.Time { return s.now() }

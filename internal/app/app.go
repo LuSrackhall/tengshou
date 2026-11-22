@@ -55,13 +55,15 @@ func Open(dataDir string) (*App, error) {
 		closer.Close()
 		return nil, err
 	}
+	svc := service.New(st, reader, cfg.Operator)
+	svc.SetDataDir(paths.Root)
 	return &App{
 		Paths:     paths,
 		Config:    cfg,
 		Logger:    logger,
 		Store:     st,
 		Reader:    reader,
-		Service:   service.New(st, reader, cfg.Operator),
+		Service:   svc,
 		logCloser: closer,
 	}, nil
 }

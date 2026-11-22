@@ -19,6 +19,7 @@ import (
 
 	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/service"
+	"github.com/LuSrackhall/tengshou/internal/sign"
 	"github.com/LuSrackhall/tengshou/internal/store"
 	"github.com/LuSrackhall/tengshou/internal/version"
 )
@@ -30,6 +31,12 @@ type Options struct {
 	Logger  *slog.Logger
 	Config  config.Config
 	Version string
+	// Sign overrides the signature session manager (tests inject a fake
+	// clock). Nil uses the config TTL and the system clock.
+	Sign *sign.Manager
+	// LANHosts overrides the LAN IPv4 addresses used in signing URLs. Nil
+	// detects the machine's interfaces.
+	LANHosts []string
 }
 
 // Server owns the local HTTP service.
@@ -37,6 +44,7 @@ type Server struct {
 	opts Options
 	mux  *http.ServeMux
 	srv  *http.Server
+	sign *sign.Manager
 
 	mu   sync.RWMutex
 	urls []string
@@ -44,9 +52,13 @@ type Server struct {
 
 // New constructs the server and its routes.
 func New(opts Options) *Server {
-	s := &Server{opts: opts, mux: http.NewServeMux()}
+	s := &Server{opts: opts, mux: http.NewServeMux(), sign: opts.Sign}
+	if s.sign == nil {
+		ttl := time.Duration(opts.Config.Signature.TTLMinutes) * time.Minute
+		s.sign = sign.NewManager(ttl, nil)
+	}
 	s.routes()
-	handler := s.withLogging(s.withRecover(s.withSecurityHeaders(s.withAppGuard(s.mux))))
+	handler := s.withLogging(s.withRecover(s.withSecurityHeaders(s.withSignGuard(s.withAppGuard(s.mux)))))
 	s.srv = &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -202,6 +214,17 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /app/api/v1/excel/preview", s.handleAppExcelPreview)
 	m.HandleFunc("POST /app/api/v1/excel/commit", s.handleAppExcelCommit)
 	m.HandleFunc("GET /app/api/v1", s.handleAppAPIRoot)
+
+	// B5 LAN signature capture. Signing sessions are created from the
+	// loopback-only app surface; the phone page itself is LAN-only and
+	// token-gated (see withSignGuard and signapi.go).
+	m.HandleFunc("POST /app/api/v1/signature-sessions", s.handleAppCreateSignatureSession)
+	m.HandleFunc("GET /app/api/v1/signature-sessions/{id}", s.handleAppGetSignatureSession)
+	m.HandleFunc("DELETE /app/api/v1/signature-sessions/{id}", s.handleAppCancelSignatureSession)
+	m.HandleFunc("GET /app/api/v1/signature-sessions/{id}/qr.png", s.handleAppSignatureQR)
+	m.HandleFunc("GET /sign/{token}", s.handleSignPage)
+	m.HandleFunc("GET /sign/{token}/status", s.handleSignStatus)
+	m.HandleFunc("POST /sign/{token}/submit", s.handleSignSubmit)
 }
 
 // auth enforces bearer-token access for data endpoints. The test page and
@@ -319,12 +342,53 @@ func (s *Server) withRecover(next http.Handler) http.Handler {
 	})
 }
 
+// withSignGuard keeps the phone signing surface on the local network. Even if
+// the service port were forwarded by mistake, requests from public addresses
+// are rejected before the token is inspected.
+func (s *Server) withSignGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/sign/") {
+			if !isLANRemote(r.RemoteAddr) {
+				writeError(w, http.StatusForbidden, "lan_only", "签名页只允许在同一局域网内访问")
+				return
+			}
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isLANRemote accepts loopback, RFC1918/ULA private and link-local addresses.
+// Requests without a socket address (in-process desktop webview) are allowed,
+// but the phone page is never loaded that way.
+func isLANRemote(remote string) bool {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return true
+	}
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
 func (s *Server) withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
-		if strings.HasPrefix(r.URL.Path, "/app/") && !strings.HasPrefix(r.URL.Path, "/app/api/") {
+		if strings.HasPrefix(r.URL.Path, "/sign/") {
+			// The signing page is self-contained: inline styles/script, no
+			// external resources, no form posts, no framing.
+			w.Header().Set("Content-Security-Policy",
+				"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "+
+					"img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+		} else if strings.HasPrefix(r.URL.Path, "/app/") && !strings.HasPrefix(r.URL.Path, "/app/api/") {
 			w.Header().Set("Content-Security-Policy",
 				"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
 					"img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")

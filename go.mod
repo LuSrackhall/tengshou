@@ -4,6 +4,7 @@ go 1.26.1
 
 require (
 	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tdewolff/canvas v0.0.0-20261118111642-891200a8cf2b
 	github.com/wailsapp/wails/v3 v3.0.0
 	github.com/xuri/excelize/v2 v2.11.1

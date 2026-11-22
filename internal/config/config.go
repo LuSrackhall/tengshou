@@ -88,12 +88,19 @@ type Log struct {
 	MaxSizeMB int `json:"max_size_mb"`
 }
 
+// Signature controls the LAN QR-code signature capture sessions.
+type Signature struct {
+	// TTLMinutes is how long a signing QR code stays valid.
+	TTLMinutes int `json:"ttl_minutes"`
+}
+
 // Config is the application configuration persisted as config.json.
 type Config struct {
-	Version int  `json:"version"`
-	HTTP    HTTP `json:"http"`
-	PDF     PDF  `json:"pdf"`
-	Log     Log  `json:"log"`
+	Version   int       `json:"version"`
+	HTTP      HTTP      `json:"http"`
+	PDF       PDF       `json:"pdf"`
+	Log       Log       `json:"log"`
+	Signature Signature `json:"signature"`
 	// Operator is the name recorded in the change log. Empty means the OS user.
 	Operator string `json:"operator,omitempty"`
 }
@@ -182,6 +189,9 @@ func Default() Config {
 		Log: Log{
 			Level:     "info",
 			MaxSizeMB: 10,
+		},
+		Signature: Signature{
+			TTLMinutes: 10,
 		},
 	}
 }
@@ -276,6 +286,9 @@ func (c *Config) normalize(paths Paths) error {
 	}
 	if c.Log.MaxSizeMB <= 0 {
 		c.Log.MaxSizeMB = 10
+	}
+	if c.Signature.TTLMinutes <= 0 || c.Signature.TTLMinutes > 120 {
+		c.Signature.TTLMinutes = 10
 	}
 	return nil
 }

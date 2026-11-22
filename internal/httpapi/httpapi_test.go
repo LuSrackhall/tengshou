@@ -15,19 +15,34 @@ import (
 	"github.com/LuSrackhall/tengshou/internal/httpapi"
 	"github.com/LuSrackhall/tengshou/internal/model"
 	"github.com/LuSrackhall/tengshou/internal/service"
+	"github.com/LuSrackhall/tengshou/internal/sign"
 	"github.com/LuSrackhall/tengshou/internal/store"
 )
 
 const token = "test-token"
 
 type fixture struct {
-	server  *httptest.Server
-	handler http.Handler
-	partyID string
-	service *service.Service
+	server     *httptest.Server
+	handler    http.Handler
+	partyID    string
+	partyBID   string
+	contractID string
+	dataDir    string
+	service    *service.Service
+}
+
+type fixtureOptions struct {
+	allowLAN bool
+	lanHosts []string
+	sign     *sign.Manager
 }
 
 func newFixture(t *testing.T) *fixture {
+	t.Helper()
+	return newFixtureWithOptions(t, fixtureOptions{})
+}
+
+func newFixtureWithOptions(t *testing.T, opts fixtureOptions) *fixture {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -69,20 +84,31 @@ func newFixture(t *testing.T) *fixture {
 	}
 
 	cfg := config.Default()
-	cfg.HTTP.AllowLAN = false
-	cfg.HTTP.Bind = "127.0.0.1"
 	cfg.HTTP.Token = token
+	cfg.HTTP.Port = 8765
+	if opts.allowLAN {
+		cfg.HTTP.AllowLAN = true
+		cfg.HTTP.Bind = "0.0.0.0"
+	} else {
+		cfg.HTTP.AllowLAN = false
+		cfg.HTTP.Bind = "127.0.0.1"
+	}
 	svc := service.New(st, reader, "tester")
+	dataDir := t.TempDir()
+	svc.SetDataDir(dataDir)
 	server := httpapi.New(httpapi.Options{
-		Reader:  reader,
-		Service: svc,
-		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Config:  cfg,
-		Version: "test",
+		Reader:   reader,
+		Service:  svc,
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config:   cfg,
+		Version:  "test",
+		Sign:     opts.sign,
+		LANHosts: opts.lanHosts,
 	})
 	ts := httptest.NewServer(server.Handler())
 	t.Cleanup(ts.Close)
-	return &fixture{server: ts, handler: server.Handler(), partyID: partyA.ID, service: svc}
+	return &fixture{server: ts, handler: server.Handler(), partyID: partyA.ID,
+		partyBID: partyB.ID, contractID: contract.ID, dataDir: dataDir, service: svc}
 }
 
 func (f *fixture) get(t *testing.T, path string, auth bool) (*http.Response, []byte) {

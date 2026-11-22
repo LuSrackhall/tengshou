@@ -99,23 +99,24 @@ const contractColumns = `id, contract_no, year, title, type, template_id, party_
 
 func scanSignature(sc scanner) (model.Signature, error) {
 	var sig model.Signature
-	var partyID sql.NullString
-	var signerName, assetPath, sha string
+	var partyID, contractID sql.NullString
+	var signerName, assetPath, sha, contentSHA, source, sessionID string
 	var w, h int
 	var capturedAt, createdAt string
-	if err := sc.Scan(&sig.ID, &partyID, &signerName, &assetPath, &sha, &w, &h,
-		&capturedAt, &createdAt); err != nil {
+	if err := sc.Scan(&sig.ID, &partyID, &contractID, &signerName, &assetPath, &sha,
+		&contentSHA, &source, &sessionID, &w, &h, &capturedAt, &createdAt); err != nil {
 		return sig, err
 	}
-	sig.PartyID = partyID.String
+	sig.PartyID, sig.ContractID = partyID.String, contractID.String
 	sig.SignerName, sig.AssetPath, sig.SHA256 = signerName, assetPath, sha
+	sig.ContentSHA256, sig.Source, sig.SessionID = contentSHA, source, sessionID
 	sig.WidthPx, sig.HeightPx = w, h
 	sig.CapturedAt, sig.CreatedAt = parseTime(capturedAt), parseTime(createdAt)
 	return sig, nil
 }
 
-const signatureColumns = `id, party_id, signer_name, asset_path, sha256,
-	width_px, height_px, captured_at, created_at`
+const signatureColumns = `id, party_id, contract_id, signer_name, asset_path, sha256,
+	content_sha256, source, session_id, width_px, height_px, captured_at, created_at`
 
 func scanDocument(sc scanner) (model.OutputDocument, error) {
 	var d model.OutputDocument
@@ -342,7 +343,7 @@ func (r *Reader) GetContractDetail(ctx context.Context, id string) (model.Contra
 			return detail, err
 		}
 	}
-	sigs, err := r.listSignaturesForParties(ctx, c.PartyAID, c.PartyBID)
+	sigs, err := r.listSignaturesForContract(ctx, c.ID, c.PartyAID, c.PartyBID)
 	if err != nil {
 		return detail, err
 	}
@@ -355,24 +356,32 @@ func (r *Reader) GetContractDetail(ctx context.Context, id string) (model.Contra
 	return detail, nil
 }
 
-func (r *Reader) listSignaturesForParties(ctx context.Context, partyIDs ...string) ([]model.Signature, error) {
+// listSignaturesForContract returns signatures explicitly linked to the
+// contract plus legacy party signatures that predate contract linking (B1/B2
+// rows have no contract_id).
+func (r *Reader) listSignaturesForContract(ctx context.Context, contractID string, partyIDs ...string) ([]model.Signature, error) {
 	ids := []string{}
 	for _, id := range partyIDs {
 		if id != "" {
 			ids = append(ids, id)
 		}
 	}
-	if len(ids) == 0 {
-		return []model.Signature{}, nil
+	where := "contract_id = ?"
+	args := []any{contractID}
+	if contractID == "" {
+		where = "1=0"
+		args = nil
 	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
+	if len(ids) > 0 {
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+		where += " OR (contract_id IS NULL AND source = '' AND party_id IN (" + placeholders + "))"
+		for _, id := range ids {
+			args = append(args, id)
+		}
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+signatureColumns+` FROM signature_assets WHERE party_id IN (`+placeholders+`)
-		 ORDER BY created_at DESC, id`, args...)
+		`SELECT `+signatureColumns+` FROM signature_assets WHERE `+where+`
+		 ORDER BY captured_at DESC, created_at DESC, id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -471,6 +480,10 @@ func (r *Reader) ListSignatures(ctx context.Context, f model.ListFilter) (model.
 	if q := strings.TrimSpace(f.Query); q != "" {
 		where = append(where, "(signer_name LIKE ? OR party_id LIKE ?)")
 		args = append(args, "%"+q+"%", "%"+q+"%")
+	}
+	if contractID := strings.TrimSpace(f.ContractID); contractID != "" {
+		where = append(where, "contract_id = ?")
+		args = append(args, contractID)
 	}
 	clause := strings.Join(where, " AND ")
 	var total int

@@ -130,6 +130,9 @@ func ExecuteTemplate(source string, data TemplateData) (string, error) {
 			}
 			return value
 		},
+		// signaturePath resolves the latest retained signature for a party so
+		// templates can place it with <img src="{{signaturePath .Signatures .PartyB}}">.
+		"signaturePath": signaturePath,
 	}
 	t, err := template.New("contract").Funcs(funcs).Option("missingkey=error").Parse(source)
 	if err != nil {
@@ -140,6 +143,46 @@ func ExecuteTemplate(source string, data TemplateData) (string, error) {
 		return "", fmt.Errorf("execute template: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// signaturePath returns the asset path of the newest signature for a party.
+// party may be a *model.Party, a model.Party or a party id string; nil means
+// "any party". It returns "" when no signature is available so templates can
+// use {{with}} to omit the image block.
+func signaturePath(sigs []model.Signature, party any) string {
+	partyID := ""
+	switch p := party.(type) {
+	case *model.Party:
+		if p != nil {
+			partyID = p.ID
+		}
+	case model.Party:
+		partyID = p.ID
+	case string:
+		partyID = p
+	}
+	best := -1
+	for i, sig := range sigs {
+		if strings.TrimSpace(sig.AssetPath) == "" {
+			continue
+		}
+		if partyID != "" && sig.PartyID != partyID {
+			continue
+		}
+		if best < 0 {
+			best = i
+			continue
+		}
+		cur := sigs[best]
+		if sig.CapturedAt.After(cur.CapturedAt) ||
+			(sig.CapturedAt.Equal(cur.CapturedAt) && sig.CreatedAt.After(cur.CreatedAt)) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return ""
+	}
+	return sigs[best].AssetPath
 }
 
 func isEmpty(v any) bool {

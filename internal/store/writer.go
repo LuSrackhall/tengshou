@@ -200,15 +200,20 @@ func (s *Store) PutSignature(ctx context.Context, sig *model.Signature) error {
 		sig.CapturedAt = sig.CreatedAt
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO signature_assets (id, party_id, signer_name, asset_path, sha256,
-			width_px, height_px, captured_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO signature_assets (id, party_id, contract_id, signer_name, asset_path,
+			sha256, content_sha256, source, session_id, width_px, height_px,
+			captured_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
-			party_id = excluded.party_id, signer_name = excluded.signer_name,
+			party_id = excluded.party_id, contract_id = excluded.contract_id,
+			signer_name = excluded.signer_name,
 			asset_path = excluded.asset_path, sha256 = excluded.sha256,
+			content_sha256 = excluded.content_sha256, source = excluded.source,
+			session_id = excluded.session_id,
 			width_px = excluded.width_px, height_px = excluded.height_px,
 			captured_at = excluded.captured_at`,
-		sig.ID, nullString(sig.PartyID), sig.SignerName, sig.AssetPath, sig.SHA256,
+		sig.ID, nullString(sig.PartyID), nullString(sig.ContractID), sig.SignerName,
+		sig.AssetPath, sig.SHA256, sig.ContentSHA256, sig.Source, sig.SessionID,
 		sig.WidthPx, sig.HeightPx, formatTime(sig.CapturedAt), formatTime(sig.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("put signature: %w", err)

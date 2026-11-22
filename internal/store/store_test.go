@@ -42,8 +42,8 @@ func TestMigrationsOnEmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 3 {
-		t.Fatalf("schema version = %d, want 3", version)
+	if version != 4 {
+		t.Fatalf("schema version = %d, want 4", version)
 	}
 	// Re-opening is idempotent.
 	st2, err := store.Open(st.Path())
@@ -51,7 +51,7 @@ func TestMigrationsOnEmptyDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	if v, _ := st2.SchemaVersion(); v != 3 {
+	if v, _ := st2.SchemaVersion(); v != 4 {
 		t.Fatalf("version after reopen = %d", v)
 	}
 }
@@ -85,7 +85,7 @@ func TestMigrationFromOldDatabase(t *testing.T) {
 		t.Fatalf("migrate old db: %v", err)
 	}
 	defer reopened.Close()
-	if v, _ := reopened.SchemaVersion(); v != 3 {
+	if v, _ := reopened.SchemaVersion(); v != 4 {
 		t.Fatalf("version = %d", v)
 	}
 	db2, err := sql.Open("sqlite", "file:"+path)
@@ -285,6 +285,21 @@ func TestMigrationUpgradesB1Database(t *testing.T) {
 		INSERT INTO contracts (id, title, status, signed_on, data_json, created_at, updated_at)
 		VALUES ('legacy-1', '老合同', 'active', '2024-05-01', '{"rent":800}',
 		        '2024-05-01T09:00:00Z', '2024-05-01T09:00:00Z');
+		CREATE TABLE signature_assets (
+			id TEXT PRIMARY KEY,
+			party_id TEXT,
+			signer_name TEXT NOT NULL DEFAULT '',
+			asset_path TEXT NOT NULL,
+			sha256 TEXT NOT NULL,
+			width_px INTEGER NOT NULL DEFAULT 0,
+			height_px INTEGER NOT NULL DEFAULT 0,
+			captured_at TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+		INSERT INTO signature_assets (id, party_id, signer_name, asset_path, sha256,
+			width_px, height_px, captured_at, created_at)
+		VALUES ('sig-legacy', NULL, '张三', 'assets/sig.png', 'abc', 10, 5,
+		        '2024-05-01T09:00:00Z', '2024-05-01T09:00:00Z');
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -315,5 +330,12 @@ func TestMigrationUpgradesB1Database(t *testing.T) {
 	dup := model.Contract{ID: "legacy-2", ContractNo: "LEGACY-legacy-1", Year: 2024, Title: "重复"}
 	if err := st.PutContract(ctx, &dup); !errors.Is(err, store.ErrDuplicateContractNo) {
 		t.Fatalf("duplicate number error = %v", err)
+	}
+	sigs, err := reader.ListSignatures(ctx, model.ListFilter{})
+	if err != nil || sigs.Total != 1 {
+		t.Fatalf("legacy signature = %+v err=%v", sigs, err)
+	}
+	if sigs.Items[0].ContractID != "" || sigs.Items[0].ContentSHA256 != "" {
+		t.Fatalf("legacy signature should have empty B5 links: %+v", sigs.Items[0])
 	}
 }

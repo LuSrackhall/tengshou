@@ -14,10 +14,11 @@ import (
 	"github.com/LuSrackhall/tengshou/internal/store"
 )
 
-//go:embed web/index.html
+//go:embed web/index.html web/sign.html
 var webFS embed.FS
 
 var indexTemplate = template.Must(template.ParseFS(webFS, "web/index.html"))
+var signPageTemplate = template.Must(template.ParseFS(webFS, "web/sign.html"))
 
 type pageData struct {
 	Version       string
@@ -197,7 +198,11 @@ func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListSignatures(w http.ResponseWriter, r *http.Request) {
-	items, err := s.opts.Reader.ListSignatures(r.Context(), filter(r))
+	f := filter(r)
+	if id := strings.TrimSpace(r.URL.Query().Get("contract_id")); id != "" {
+		f.ContractID = id
+	}
+	items, err := s.opts.Reader.ListSignatures(r.Context(), f)
 	if err != nil {
 		s.internalError(w, "list signatures", err)
 		return

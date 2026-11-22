@@ -3,6 +3,12 @@ package service_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -552,4 +558,115 @@ func newWorkbook(t *testing.T, header []string, rows [][]string) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+func TestSignatureRetentionLinksContractAndContent(t *testing.T) {
+	svc, rd, _ := openService(t)
+	dir := t.TempDir()
+	svc.SetDataDir(dir)
+	ctx := context.Background()
+
+	party := mustParty(t, svc, "张三")
+	contract := mustContract(t, svc, service.ContractInput{
+		Year: 2026, Title: "房屋租赁合同", PartyBID: party.ID, Amount: 1200,
+		Data: map[string]any{},
+	})
+	digest, err := service.ContentSHA256(contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(digest) != 64 {
+		t.Fatalf("content digest = %q", digest)
+	}
+	// Changing any content field changes the version digest.
+	changed := contract
+	changed.Title = "房屋租赁合同（修订）"
+	changedDigest, err := service.ContentSHA256(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changedDigest == digest {
+		t.Fatal("content digest ignored a title change")
+	}
+
+	img := image.NewNRGBA(image.Rect(0, 0, 600, 200))
+	for y := 60; y < 90; y++ {
+		for x := 80; x < 520; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{0, 0, 0, 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	sig, err := svc.SaveSignature(ctx, service.SignatureInput{
+		PartyID:       party.ID,
+		ContractID:    contract.ID,
+		SignerName:    party.Name,
+		ContentSHA256: digest,
+		Source:        model.SignatureSourceLANQR,
+		SessionID:     "ssn_test",
+		ImagePNG:      buf.Bytes(),
+		SHA256:        hex.EncodeToString(sum[:]),
+		WidthPx:       600,
+		HeightPx:      200,
+	})
+	if err != nil {
+		t.Fatalf("save signature: %v", err)
+	}
+	if sig.ContractID != contract.ID || sig.ContentSHA256 != digest ||
+		sig.Source != model.SignatureSourceLANQR || sig.SessionID != "ssn_test" {
+		t.Fatalf("signature links = %+v", sig)
+	}
+	stored, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(sig.AssetPath)))
+	if err != nil {
+		t.Fatalf("signature file missing: %v", err)
+	}
+	if !bytes.Equal(stored, buf.Bytes()) {
+		t.Fatal("stored signature differs from submitted bytes")
+	}
+
+	// The signature is queryable by contract and appears in contract detail.
+	list, err := rd.ListSignatures(ctx, model.ListFilter{ContractID: contract.ID})
+	if err != nil || list.Total != 1 || list.Items[0].ID != sig.ID {
+		t.Fatalf("list by contract = %+v err=%v", list, err)
+	}
+	detail, err := rd.GetContractDetail(ctx, contract.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Signatures) != 1 || detail.Signatures[0].ContentSHA256 != digest {
+		t.Fatalf("contract detail signatures = %+v", detail.Signatures)
+	}
+
+	// The audit log records the capture against the contract.
+	logs, err := rd.ListChangeLogs(ctx, store.ChangeFilter{Entity: "contract", EntityID: contract.ID, Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entry := range logs.Items {
+		if strings.Contains(entry.Summary, "手写签名") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing signature change-log entry: %+v", logs.Items)
+	}
+
+	// A missing contract is rejected before any file is written.
+	if _, err := svc.SaveSignature(ctx, service.SignatureInput{
+		ContractID: "ctr_missing", SignerName: "张三",
+		ImagePNG: buf.Bytes(), SHA256: hex.EncodeToString(sum[:]),
+	}); err == nil {
+		t.Fatal("missing contract should be rejected")
+	}
+	// A digest that does not match the bytes is rejected too.
+	if _, err := svc.SaveSignature(ctx, service.SignatureInput{
+		ContractID: contract.ID, SignerName: "张三",
+		ImagePNG: buf.Bytes(), SHA256: strings.Repeat("0", 64),
+	}); err == nil {
+		t.Fatal("mismatched digest should be rejected")
+	}
 }

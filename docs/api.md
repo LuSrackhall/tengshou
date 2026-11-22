@@ -61,7 +61,7 @@ X-Api-Token: <token>
 | GET | `/api/v1/contracts/{id}` | 合同详情（相对方、签名、模板版本、PDF 记录） |
 | GET | `/api/v1/templates?q=&limit=&offset=` | 模板列表（不含 HTML 正文） |
 | GET | `/api/v1/templates/{id}` | 模板详情（含 HTML） |
-| GET | `/api/v1/signature-assets?q=&limit=&offset=` | 签名图片元数据（不含图片内容） |
+| GET | `/api/v1/signature-assets?q=&contract_id=&limit=&offset=` | 签名图片元数据（含合同、内容版本关联；不含图片内容） |
 | GET | `/api/v1/documents?contract_id=&limit=&offset=` | 已生成 PDF 记录 |
 
 ### 示例
@@ -111,9 +111,13 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 ## 应用写入接口（仅本机）
 
 台账界面使用 `/app/api/v1/*`：字段、档案、合同 CRUD，变更记录，Excel 模板 /
-台账下载与导入预览/提交。该接口**只接受回环地址**，写请求必须带
-`X-Tengshou-App: 1`；跨站 Origin 会被拒绝。它不面向外部 agent，契约也不承诺稳定。
-字段、合并与验收细节见 [b2-data.md](b2-data.md)。
+台账下载与导入预览/提交，以及签名会话（B5）。该接口**只接受回环地址**，写请求
+必须带 `X-Tengshou-App: 1`；跨站 Origin 会被拒绝。它不面向外部 agent，契约也不
+承诺稳定。字段、合并与验收细节见 [b2-data.md](b2-data.md)；签名流程、安全边界
+与端点见 [b5-signature.md](b5-signature.md)。
+
+签名会话响应中的 `urls` 是手机可访问的局域网签名页地址，`qr_url` 是二维码
+PNG。二维码中的一次性 token 只出现在 URL 里，不出现在 JSON 响应中。
 
 ## 稳定性
 
@@ -126,4 +130,6 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 - 只读：无写接口；写操作在桌面应用内完成。
 - 默认仅监听局域网，不对公网暴露；无外部服务器依赖。
 - 测试页不展示合同数据；数据接口需要令牌。
+- 手机签名页（`/sign/<token>`）是唯一面向局域网的写入口：一次性短时令牌、
+  仅接受私网来源、提交只接受 PNG；它不携带任何合同数据接口权限。
 - 签名图片目前只返回元数据（路径、摘要、尺寸），不提供图片下载。

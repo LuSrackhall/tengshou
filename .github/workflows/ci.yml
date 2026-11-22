@@ -23,13 +23,10 @@ jobs:
       - name: 安装中文字体
         run: |
           sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk
-          FONT="$(find /usr/share/fonts -iname 'NotoSansCJK-Regular.ttc' | head -1)"
-          if [ -z "$FONT" ]; then
-            echo "未找到 Noto CJK 字体，PDF 中文测试无法执行" >&2
-            exit 1
-          fi
-          echo "TENGHSHOU_FONT=$FONT" >> "$GITHUB_ENV"
+          sudo apt-get install -y fonts-arphic-uming
+          # Noto CJK 的 CFF 集合无法被当前 PDF 子集化器处理；用 AR PL UMing
+          # （TrueType，含拉丁与中文）跑测试。
+          echo "TENGHSHOU_FONT=/usr/share/fonts/truetype/arphic/uming.ttc" >> "$GITHUB_ENV"
       - name: 静态检查
         run: go vet ./internal/... ./cmd/tengshou-cli
       - name: 单元与集成测试

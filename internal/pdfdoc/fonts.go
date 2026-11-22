@@ -43,6 +43,9 @@ const safeFontFeatures = "-ccmp,-locl,-vert,-vrt2,-fwid,-hwid,-pwid,-twid,-jp78,
 //  2. <data>/fonts (user supplied)
 //  3. platform system fonts known to cover Chinese
 func LoadFont(opts FontOptions) (*canvas.FontFamily, FontSpec, error) {
+	if opts.Path == "" {
+		opts.Path = os.Getenv("TENGHSHOU_FONT")
+	}
 	if opts.Path != "" {
 		family, spec, err := loadCandidate(opts.Path, opts.Index)
 		if err != nil {

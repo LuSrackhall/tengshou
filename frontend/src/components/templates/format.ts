@@ -1,5 +1,4 @@
 // 模板域的展示与文件工具：逐条对应存量 app.js 的同名逻辑。
-import type { DownloadedFile } from "../../api/client";
 import type { Placement, Template } from "../../api/types";
 
 /** 与 app.js fmtDate 一致：zh-CN、24 小时制，无效时间原样返回。 */
@@ -52,7 +51,8 @@ export function base64ToBytes(base64: string): Uint8Array {
   return out;
 }
 
-function saveBlob(blob: Blob, filename: string): void {
+/** 以指定文件名保存 Blob（模板域本地工具，导出口径与本域下载命名一致）。 */
+export function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -69,14 +69,6 @@ export function downloadBytes(bytes: Uint8Array, filename: string): void {
   const copy = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(copy).set(bytes);
   saveBlob(new Blob([copy], { type: "application/pdf" }), filename);
-}
-
-/** 下载接口返回的二进制（原件、生成结果）。 */
-export function saveDownloadedFile(
-  file: DownloadedFile,
-  fallbackName: string,
-): void {
-  saveBlob(file.blob, file.filename || fallbackName);
 }
 
 /** 新标定位置 id；与 app.js newPlacementID 的前缀与随机段一致。 */

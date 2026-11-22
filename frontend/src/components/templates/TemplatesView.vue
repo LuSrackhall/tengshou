@@ -39,7 +39,7 @@ import {
   converterLabel,
   formatDateTime,
   readFileBase64,
-  saveDownloadedFile,
+  saveBlob,
   templateSourceName,
 } from "./format";
 
@@ -247,8 +247,10 @@ async function rerender(template: Template): Promise<void> {
 
 async function downloadSource(template: Template): Promise<void> {
   try {
+    // 迁移前固定用「名称-v版本.ext」作为下载名（app.js downloadAsset 的
+    // source 分支）；接口响应头里的 template-source.* 只是服务端默认名。
     const file = await downloadTemplateSource(template.id);
-    saveDownloadedFile(file, templateSourceName(template));
+    saveBlob(file.blob, templateSourceName(template));
   } catch (error) {
     toast(errorMessage(error), true);
   }

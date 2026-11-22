@@ -1,10 +1,13 @@
-// app.js ↔ Vue 迁移期桥（相对方、合同与公章域共用）。
+// app.js ↔ Vue 迁移期桥（相对方、合同、公章与新手引导域共用）。
 //
 // 相对方域的跨域动作只有一个：借用合同表单（「以此档案新建合同」与历史
 // 合同的查看/续签），另外写入后需要触发 app.js 的整体刷新。合同表单已迁到
 // Vue（components/contracts/），因此这些入口改为派发
-// tengshou:open-contract-form，由台账岛打开表单；app.js 的引导步骤同样经该
-// 事件打开新建表单。
+// tengshou:open-contract-form，由台账岛打开表单；引导岛的合同新建步骤与
+// app.js 的模板页同样经该事件打开新建表单。
+//
+// 新手引导已迁到 Vue（components/onboarding/）：深链需要切换主 tab（走
+// app.js 的 switchTab），并派发模板导入 / 标定编辑器 / 合同表单事件。
 //
 // 反向调用（Vue → app.js）：toast、整体刷新、扫码签名、批量生成、Excel 导入
 // 与合同详情里的签名摘要仍由 app.js 实现，统一经 window.__tengshouApp 调用；
@@ -44,6 +47,8 @@ export interface BatchGenerateOptions {
 export interface AppBridge {
   toast(message: string, isError?: boolean): void;
   refreshAfterWrite(): Promise<void>;
+  /** 切换主 tab（引导步骤深链：模板页 / 合同台账 / 字段页）。 */
+  switchTab(tab: string): void;
   /** 扫码签名对话框仍由 app.js 渲染。 */
   openSignatureDialog(contract: Contract): void;
   /** 批量生成对话框仍由 app.js 渲染；失败会自行 toast。 */
@@ -73,9 +78,12 @@ declare global {
 
 export const DATA_CHANGED_EVENT = "tengshou:data-changed";
 export const CHANGE_EVENT = "tengshou:change";
+// app.js 的 switchTab 切换后派发；已迁移域据此在重新显示时刷新
+// （等价于迁移前 switchTab 内联的 loadXxx 调用）。
+export const TAB_CHANGE_EVENT = "tengshou:tab-change";
 export const OPEN_CONTRACT_FORM_EVENT = "tengshou:open-contract-form";
-// 模板域（阶段 1 迁出 app.js）：引导与引导自检仍由 app.js 渲染，需要打开
-// 模板标定编辑器或导入流程；模板岛监听这两个事件后接管。
+// 模板域（阶段 1 迁出 app.js）：新手引导与模板页都需要打开标定编辑器或
+// 导入流程；模板岛监听这两个事件后接管。
 export const OPEN_TEMPLATE_EDITOR_EVENT = "tengshou:open-template-editor";
 export const OPEN_TEMPLATE_IMPORT_EVENT = "tengshou:open-template-import";
 
@@ -139,6 +147,11 @@ export function toast(message: string, isError = false): void {
 /** 本地写入后让 app.js 重载自己的缓存并派发 data-changed。 */
 export async function refreshAfterWrite(): Promise<void> {
   await window.__tengshouApp?.refreshAfterWrite();
+}
+
+/** 切换主 tab：走 app.js 的 switchTab，保持 active class 与页面刷新一致。 */
+export function switchTab(tab: string): void {
+  window.__tengshouApp?.switchTab(tab);
 }
 
 /** 打开合同表单（新建/编辑/续签）：由台账岛监听事件后打开 Vue 弹窗。 */
@@ -212,6 +225,21 @@ export function subscribeDataChanged(
   };
   window.addEventListener(DATA_CHANGED_EVENT, listener);
   return () => window.removeEventListener(DATA_CHANGED_EVENT, listener);
+}
+
+/** 订阅主 tab 切换（detail.tab）；返回取消订阅函数。 */
+export function subscribeTabChanged(
+  handler: (tab: string) => void,
+): () => void {
+  const listener = (event: Event): void => {
+    const raw = (event as CustomEvent<unknown>).detail;
+    if (!isRecord(raw) || typeof raw.tab !== "string" || raw.tab === "") {
+      return;
+    }
+    handler(raw.tab);
+  };
+  window.addEventListener(TAB_CHANGE_EVENT, listener);
+  return () => window.removeEventListener(TAB_CHANGE_EVENT, listener);
 }
 
 /** 订阅「打开合同表单」事件；返回取消订阅函数。 */

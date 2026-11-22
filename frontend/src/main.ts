@@ -2,6 +2,7 @@ import { createApp } from "vue";
 import LiveStatusBadge from "./components/LiveStatusBadge.vue";
 import ContractsView from "./components/contracts/ContractsView.vue";
 import FieldsView from "./components/fields/FieldsView.vue";
+import OnboardingView from "./components/onboarding/OnboardingView.vue";
 import PartiesView from "./components/parties/PartiesView.vue";
 import SealsView from "./components/seals/SealsView.vue";
 import TemplatesView from "./components/templates/TemplatesView.vue";
@@ -55,4 +56,12 @@ if (sealsHost) {
 const templatesHost = document.getElementById("view-templates");
 if (templatesHost) {
   createApp(TemplatesView).mount(templatesHost);
+}
+
+// 新手引导（阶段 1 迁出 app.js）：<section id="view-onboarding"> 保留为宿主。
+// 五步引导、完成/跳过/重新打开、本机自检与模板体检都由 OnboardingView 渲染；
+// 深链经 bridge 切换主 tab 并派发 tengshou:open-* 事件。
+const onboardingHost = document.getElementById("view-onboarding");
+if (onboardingHost) {
+  createApp(OnboardingView).mount(onboardingHost);
 }

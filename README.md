@@ -3,11 +3,12 @@
 让村里的签合同变成录台账：合同数据录一次，程序产出合同 PDF 与自有台账；
 外部表格格式通过只读数据接口交给用户侧 AI agent 处理，核心不做平台适配。
 
-当前仓库处于 **B13 公章图片管理与 PDF 落位**：在 B5 签名能力之上加入公章图片
-导入、单位/合同关联与模板落位；同一枚公章可被多份合同复用，换模板重出时按新
-模板的位置重新落位。
+当前仓库处于 **B6 MCP 数据连接器（读 + 写）**：用户侧 agent 可经本机 stdio
+MCP 查询合同、相对方、动态字段、签名状态与模板版本，并新建字段、档案与合同
+草稿；连接器只走回环 HTTP，不直接打开数据库。B13 公章图片管理（导入、关联与
+模板落位）与 B5 局域网签名同在上述能力之内。
 
-## 当前能力（B2 + B5 + B13）
+## 当前能力（B2 + B5 + B13 + B6）
 
 - **合同台账**：本地 Web 界面（`/app/`）内置表格录入、年度切换与跨年查询、
   搜索、状态筛选；合同编号稳定唯一（`HT-YYYY-NNNN` 或自定义）且创建后不可修改。
@@ -37,6 +38,11 @@
 - **HTML → PDF**：模板 + 合同数据生成带页码的 A4 PDF（中文、分页、图片、签名）。
 - **只读数据接口**：`/api/v1/*`，供 B6 MCP 连接器与用户侧 agent 取数；
   新增 `/api/v1/fields` 暴露字段定义，签名资产可按合同查询。
+- **MCP 数据连接器（B6）**：`tengshou-cli mcp` 以 stdio 启动，经本机回环
+  HTTP 读取合同 / 相对方 / 动态字段 / 签名状态 / 模板版本；写工具仅限新建
+  字段、相对方档案与合同草稿，复用同一 `internal/service` 校验，并以
+  `tengshou-mcp` 记入变更记录；`config.json` 的 `mcp.write_enabled` 可关闭
+  写入。注册方式、工具 schema 与安全边界见 [docs/mcp.md](docs/mcp.md)。
 - **备份约定**：`VACUUM INTO` 备份到 `<data>/backups/`（含字段定义与数据）。
 - **构建与发布**：`scripts/build.sh`、`scripts/build-windows.ps1`；GitHub Actions。
 
@@ -54,6 +60,13 @@ go run ./cmd/tengshou-cli demo --data-dir ./data
 go run ./cmd/tengshou-cli serve --data-dir ./data
 # 电脑浏览器打开 http://127.0.0.1:8765/app/
 # 终端会列出本机 / 局域网地址与只读数据接口令牌
+```
+
+启动 MCP 连接器（桌面应用或 `serve` 运行后，在 Claude Code / Claude Desktop
+中注册；详见 [docs/mcp.md](docs/mcp.md)）：
+
+```bash
+go run ./cmd/tengshou-cli mcp --data-dir ./data
 ```
 
 启动桌面应用：
@@ -154,6 +167,7 @@ internal/httpapi/       本地 HTTP 服务、台账界面、签名页与应用�
 internal/sign/          一次性签名会话与手写 PNG 归一化
 internal/seal/          公章图片校验、白底透明化与裁剪
 internal/service/       可写业务层：字段、档案、合同、签名、Excel、变更记录
+internal/mcp/           B6 MCP stdio 连接器与回环 HTTP 客户端
 internal/xlsx/          Excel 模板生成、台账导出与解析
 internal/pdfdoc/        HTML 解析 → 排版 → PDF
 internal/demo/          示例数据与签名 PNG 生成
@@ -164,8 +178,10 @@ internal/model/         稳定数据结构（对外 JSON 契约）
 
 - 不做云服务、多租户、跨单位协同；全部数据留在本机。
 - 不代替上级办文 / 采购流程；公章只作为图片落到 PDF 指定位置，不承担其它用途。
-- 不内置外部台账模板引擎；外部格式经只读数据接口交给用户侧 agent。
-- B2 不包含模板编辑器与 MCP 连接器；分别在 B3 / B6 交付；B5 已交付签名采集页。
+- 不内置外部台账模板引擎；外部格式经只读数据接口 / MCP 交给用户侧 agent，
+  由 agent 自行填写。
+- 模板编辑器属 B3；B6 MCP 连接器已交付：只读数据 + 新建字段 / 档案 / 合同
+  草稿，不含删除、修改或批量破坏性写接口。
 - 手机扫码页 B5 只做手写签名；手机填表 / 信息采集由 D7 边界决定。
 - Excel 导入只接受 `.xlsx`，单次最多 10000 行。
 - Windows 安装包、代码签名与 Microsoft Store 上架属于 B10；B1 只保证

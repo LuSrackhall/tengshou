@@ -41,11 +41,15 @@
 ┌───────────────┴──────────────┐   ┌───────────────▼───────────┐
 │ cmd/tengshou-cli             │   │ internal/demo             │
 │  demo / serve / render /     │   │  示例数据 + 签名 PNG      │
-│  backup                      │   └───────────────────────────┘
+│  backup / mcp                │   └───────────────────────────┘
 └──────────────────────────────┘
 ```
 
 `internal/app` 负责装配：配置 → 日志 → 数据库 → 只读连接 → PDF 生成器（懒加载）。
+
+`tengshou-cli mcp` 是 B6 的 stdio MCP 连接器：不打开 SQLite，经回环 HTTP
+读取 `/api/v1`、写入 `/app/api/v1`；写工具受 `mcp.write_enabled` 控制，变更
+记录 actor 为 `tengshou-mcp`。连接器自身不监听端口、不接受非回环地址。
 
 ## 数据模型
 
@@ -111,12 +115,16 @@
   路由守卫拒绝公网来源（只接受回环 / 私网 / 链路本地地址），提交要求 JSON +
   `X-Tengshou-Sign` 头（强制预检），CSP 禁止外部资源。应用写接口 `/app/api/*`
   仍只允许回环。
+- **B6 MCP 写工具**复用 `/app/api/v1`：带 `X-Tengshou-MCP: 1` 的写请求在
+  `mcp.write_enabled=false` 时返回 403，并以 actor=tengshou-mcp 记入变更记录；
+  连接器只接受回环地址，自身不监听端口。详见 [mcp.md](mcp.md)。
 - 响应带 `nosniff`、`no-referrer`、`X-Frame-Options: DENY`、页面 CSP。
 - HTTP 服务设置读写 / 空闲超时与最大请求头，避免慢连接占用。
 
 ## 配置与日志
 
-- `config.json`：HTTP 端口 / 绑定 / 令牌、PDF 字体与页边距、日志级别与大小。
+- `config.json`：HTTP 端口 / 绑定 / 令牌、PDF 字体与页边距、日志级别与大小、
+  签名有效期、MCP 写开关（`mcp.write_enabled`，默认开）。
 - 环境变量：`TENGHSHOU_DATA_DIR`、`TENGHSHOU_FONT`。
 - 日志：`log/slog` JSON 输出到 `<data>/logs/tengshou.log` 并镜像 stderr；
   启动时超过大小阈值轮转为 `.1`。
@@ -142,7 +150,7 @@
 | B2 数据底座 / 动态字段 | 已交付：`field_definitions` + `/app/` + service + xlsx |
 | B3 模板管理 | `templates` 已有版本与变量提取；增加编辑 / 预览 / 发布 API（应用内） |
 | B5 局域网签名页 | 已交付：`internal/sign` + `/sign/<token>` + 一次性令牌；签名关联合同与内容版本，`signaturePath` 模板占位 |
-| B6 MCP 连接器 | 直接消费 `/api/v1/*` 与 `/api/v1/schema`，只读 |
+| B6 MCP 连接器 | 已交付：`tengshou-cli mcp` stdio 服务 + `internal/mcp`；读 `/api/v1`，写经 `/app/api/v1`，不直接开库；见 [mcp.md](mcp.md) |
 | B9 备份恢复 | `store.Backup` 已有；恢复 = 校验 + 原子替换 + 重启 |
 | B10 Windows 打包 | `scripts/build-windows.ps1` + CI 产物；补安装器 / 签名 |
 

@@ -12,6 +12,13 @@
 # Gas City / Claude machine-local files
 .claude/
 
+# Gas City rig 脚手架与本地产物（机器本地，不入库；.gc/scripts 会读 schemas/build）
+/.gc/
+/schemas/
+/worktrees/
+/plans/
+.playwright-cli/
+
 # OS
 .DS_Store
 

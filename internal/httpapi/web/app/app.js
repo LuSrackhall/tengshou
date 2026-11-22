@@ -21,8 +21,6 @@ const state = {
   year: "",
   contractQ: "",
   status: "",
-  fieldEntity: "contract",
-  showArchivedFields: false,
   changelog: [],
   tab: "contracts",
   /* 实时同步游标：最近一条变更记录的 id（服务端用它补发之后的事件）。 */
@@ -38,11 +36,6 @@ const state = {
 if (typeof pdfjsLib !== "undefined") {
   pdfjsLib.GlobalWorkerOptions.workerSrc = "/app/vendor/pdf.worker.min.js";
 }
-
-const TYPE_LABELS = {
-  text: "文本", longtext: "长文本", number: "数字", money: "金额", date: "日期",
-  select: "单选", bool: "是/否", image: "图片路径", party: "相对方", status: "状态",
-};
 
 const ENTITY_LABELS = {
   contract: "合同", party: "相对方", field: "字段", seal: "公章", template: "模板",
@@ -3155,152 +3148,11 @@ function clampNumber(v, min, max) {
   return v;
 }
 
-/* ---------- 字段管理 ---------- */
-
-function renderFields() {
-  const table = $("#fieldTable");
-  const entity = state.fieldEntity;
-  const fields = state.fields[entity].filter((f) => state.showArchivedFields || !f.archived);
-  $("#fieldSummary").textContent =
-    `${entity === "contract" ? "合同" : "相对方"}字段 ${fields.filter((f) => !f.archived).length} 个` +
-    (fields.some((f) => f.archived) ? ` · 已归档 ${fields.filter((f) => f.archived).length} 个` : "");
-  const head = ["名称", "键", "类型", "必填", "默认值", "台账", "模板", "排序", "说明", "操作"]
-    .map((h) => `<th>${h}</th>`).join("");
-  const rows = fields.map((f) => `
-    <tr data-id="${esc(f.id)}" class="${f.archived ? "archived-row" : ""}">
-      <td>${esc(f.label)}${f.built_in ? ` <span class="badge">内置</span>` : ""}${f.archived ? ` <span class="badge archived">已归档</span>` : ""}</td>
-      <td class="mono">${esc(f.key)}</td>
-      <td>${esc(TYPE_LABELS[f.type] || f.type)}</td>
-      <td>${f.required ? "是" : "否"}</td>
-      <td>${esc(f.default_value || "—")}</td>
-      <td>${f.in_ledger ? "是" : "否"}</td>
-      <td>${f.in_template ? "是" : "否"}</td>
-      <td class="row-num">${f.sort_order}</td>
-      <td class="wrap">${esc(f.note || "")}</td>
-      <td><div class="actions">
-        <button type="button" data-action="edit">编辑</button>
-        ${!f.built_in && !f.archived ? `<button type="button" class="danger" data-action="archive">归档</button>` : ""}
-        ${!f.built_in && f.archived ? `<button type="button" data-action="restore">恢复</button>` : ""}
-      </div></td>
-    </tr>`).join("");
-  table.innerHTML = `<thead><tr>${head}</tr></thead>
-    <tbody>${rows || `<tr><td class="empty" colspan="10">还没有字段。</td></tr>`}</tbody>`;
-  $$("#fieldTable tbody tr[data-id]").forEach((tr) => {
-    tr.addEventListener("click", (e) => {
-      const button = e.target.closest("button[data-action]");
-      const field = state.fields[entity].find((f) => f.id === tr.dataset.id);
-      if (!field) return;
-      if (button && button.dataset.action === "archive") {
-        e.stopPropagation();
-        archiveField(field);
-        return;
-      }
-      if (button && button.dataset.action === "restore") {
-        e.stopPropagation();
-        restoreField(field);
-        return;
-      }
-      openFieldForm(field);
-    });
-  });
-}
-
-function openFieldForm(field) {
-  const isEdit = !!field;
-  const entity = field ? field.entity : state.fieldEntity;
-  const modal = openModal(isEdit ? `编辑字段 · ${field.label}` : "新建字段");
-  const types = Object.keys(TYPE_LABELS).filter((t) => t !== "party" && t !== "status");
-  const type = field ? field.type : "text";
-  const optionsText = field && field.options ? field.options.join("\n") : "";
-  modal.body.innerHTML = `
-    <div id="fieldErrors"></div>
-    <div class="form-grid">
-      <div class="field"><label for="fieldLabel">字段名称<span class="req">*</span></label>
-        <input id="fieldLabel" type="text" value="${esc(field ? field.label : "")}" placeholder="例如：平方数"></div>
-      <div class="field"><label for="fieldKey">字段键<span class="req">*</span></label>
-        <input id="fieldKey" type="text" class="mono" value="${esc(field ? field.key : "")}"
-          placeholder="area_sqm" ${isEdit ? "disabled" : ""}>
-        <span class="help">小写字母、数字、下划线；用于数据键与模板占位符，创建后不可修改。</span></div>
-      <div class="field"><label for="fieldType">类型</label>
-        <select id="fieldType" ${isEdit && field.built_in ? "disabled" : ""}>
-          ${types.map((t) => `<option value="${t}"${t === type ? " selected" : ""}>${TYPE_LABELS[t]}</option>`).join("")}
-          ${field && (type === "party" || type === "status") ? `<option value="${type}" selected>${TYPE_LABELS[type]}</option>` : ""}
-        </select></div>
-      <div class="field"><label for="fieldSort">排序</label>
-        <input id="fieldSort" type="number" value="${field ? field.sort_order : ""}" placeholder="留空自动排到最后"></div>
-      <div class="field"><label for="fieldDefault">默认值</label>
-        <input id="fieldDefault" type="text" value="${esc(field ? field.default_value || "" : "")}"></div>
-      <div class="field full" id="fieldOptionsWrap"><label for="fieldOptions">选项（单选字段，每行一个）</label>
-        <textarea id="fieldOptions" placeholder="每行一个选项">${esc(optionsText)}</textarea></div>
-      <div class="field full"><label for="fieldNote">说明</label>
-        <input id="fieldNote" type="text" value="${esc(field ? field.note || "" : "")}"></div>
-      <div class="field full">
-        <div class="check-row"><input id="fieldRequired" type="checkbox" ${field && field.required ? "checked" : ""}> 必填</div>
-        <div class="check-row"><input id="fieldLedger" type="checkbox" ${!field || field.in_ledger ? "checked" : ""}> 出现在应用内台账表格</div>
-        <div class="check-row"><input id="fieldTemplate" type="checkbox" ${!field || field.in_template ? "checked" : ""}> 用于模板占位符</div>
-      </div>
-    </div>`;
-  const typeSelect = $("#fieldType", modal.body);
-  const optionsWrap = $("#fieldOptionsWrap", modal.body);
-  const syncOptions = () => { optionsWrap.style.display = typeSelect.value === "select" ? "" : "none"; };
-  typeSelect.addEventListener("change", syncOptions);
-  syncOptions();
-  footerButton(modal, "取消", "", closeModal);
-  const save = footerButton(modal, "保存", "primary", async () => {
-    save.disabled = true;
-    $("#fieldErrors", modal.body).innerHTML = "";
-    const input = {
-      entity,
-      key: $("#fieldKey", modal.body).value.trim(),
-      label: $("#fieldLabel", modal.body).value.trim(),
-      type: typeSelect.value,
-      required: $("#fieldRequired", modal.body).checked,
-      default_value: $("#fieldDefault", modal.body).value.trim(),
-      options: $("#fieldOptions", modal.body).value.split(/\n+/).map((s) => s.trim()).filter(Boolean),
-      in_ledger: $("#fieldLedger", modal.body).checked,
-      in_template: $("#fieldTemplate", modal.body).checked,
-      note: $("#fieldNote", modal.body).value.trim(),
-    };
-    const sortRaw = $("#fieldSort", modal.body).value.trim();
-    if (sortRaw !== "") input.sort_order = Number(sortRaw);
-    try {
-      await api(isEdit
-        ? `/app/api/v1/fields/${encodeURIComponent(field.id)}`
-        : "/app/api/v1/fields",
-        { method: isEdit ? "PUT" : "POST", body: input });
-      closeModal();
-      toast("字段已保存");
-      await refreshAfterWrite();
-    } catch (err) {
-      save.disabled = false;
-      $("#fieldErrors", modal.body).innerHTML = fieldErrorsHTML(err);
-    }
-  });
-}
-
-async function restoreField(field) {
-  try {
-    await api(`/app/api/v1/fields/${encodeURIComponent(field.id)}`, {
-      method: "PUT",
-      body: { archived: false },
-    });
-    toast("字段已恢复");
-    await refreshAfterWrite();
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
-async function archiveField(field) {
-  if (!window.confirm(`确定归档字段「${field.label}」吗？字段会从录入和 Excel 中隐藏，已录数据保留。`)) return;
-  try {
-    await api(`/app/api/v1/fields/${encodeURIComponent(field.id)}/archive`, { method: "POST", body: {} });
-    toast("字段已归档");
-    await refreshAfterWrite();
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
+/* ---------- 字段管理 ----------
+   字段页已迁到 Vue（frontend/src/components/fields/）：渲染、新建/编辑弹窗、
+   归档与恢复都由 Vue 负责。app.js 只保留 loadFields() 与 state.fields，供
+   未迁移的合同表单与模板标定读取；字段变更仍经 refreshAfterWrite() 派发
+   tengshou:data-changed。 */
 
 /* ---------- 变更记录 ---------- */
 
@@ -4024,7 +3876,7 @@ function setLiveStatus(mode, detail) {
   window.dispatchEvent(new CustomEvent("tengshou:live-status", { detail: live }));
 }
 
-// 迁移期数据变更广播：Vue 域（目前是相对方档案）监听后重取自己的数据。
+// 迁移期数据变更广播：Vue 域（相对方档案、字段管理）监听后重取自己的数据。
 // 与 tengshou:change（单条变更）配对使用，退役时随 app.js 一起删除。
 function notifyDataChanged(entities) {
   window.dispatchEvent(new CustomEvent("tengshou:data-changed", { detail: { entities } }));
@@ -4191,7 +4043,6 @@ async function flushRealtimeRefresh() {
     }
   }
   if (entities.has("contract") || needFields) renderContracts();
-  if (needFields) renderFields();
   if (entities.has("seal")) renderSeals();
   if (entities.has("template")) renderTemplates();
   if (state.tab === "changelog") {
@@ -4245,10 +4096,9 @@ async function refreshAfterWrite() {
     renderMeta();
   }
   renderContracts();
-  renderFields();
   renderSeals();
   renderTemplates();
-  // Vue 域（相对方档案）不复用这里的 DOM，但需要知道数据已经变了。
+  // Vue 域（相对方档案、字段管理）不复用这里的 DOM，但需要知道数据已经变了。
   notifyDataChanged(["field", "party", "contract", "seal", "template"]);
   if (state.tab === "onboarding") {
     loadOnboarding();
@@ -4353,7 +4203,6 @@ function bindEvents() {
       contracts,
     }).catch((err) => toast(err.message, true));
   });
-  $("#newFieldBtn").addEventListener("click", () => openFieldForm(null));
   $("#downloadTemplateBtn").addEventListener("click", () => downloadWorkbook("template"));
   $("#exportLedgerBtn").addEventListener("click", () => downloadWorkbook("ledger"));
   $("#importBtn").addEventListener("click", () => {
@@ -4364,17 +4213,6 @@ function bindEvents() {
   $("#importFile").addEventListener("change", (e) => {
     const file = e.target.files && e.target.files[0];
     if (file) openImport(file);
-  });
-  $$("#fieldEntityTabs button").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.fieldEntity = button.dataset.entity;
-      $$("#fieldEntityTabs button").forEach((b) => b.classList.toggle("active", b === button));
-      renderFields();
-    });
-  });
-  $("#showArchivedFields").addEventListener("change", (e) => {
-    state.showArchivedFields = e.target.checked;
-    renderFields();
   });
   $("#changeEntityFilter").addEventListener("change", () => {
     loadChangelog().catch((err) => toast(err.message, true));
@@ -4410,7 +4248,6 @@ async function boot() {
     await loadContracts();
     renderMeta();
     renderContracts();
-    renderFields();
     renderSeals();
     renderTemplates();
   } catch (err) {

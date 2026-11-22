@@ -63,10 +63,15 @@ X-Api-Token: <token>
 | GET | `/api/v1/parties/{id}` | 相对方详情 |
 | GET | `/api/v1/contracts?q=&status=&year=&limit=&offset=` | 合同列表；`year` 省略即跨年查询 |
 | GET | `/api/v1/contracts/{id}` | 合同详情（相对方、签名、公章关联、模板版本、PDF 记录） |
-| GET | `/api/v1/templates?q=&limit=&offset=` | 模板列表（不含 HTML 正文） |
-| GET | `/api/v1/templates/{id}` | 模板详情（含 HTML） |
+| GET | `/api/v1/templates?q=&limit=&offset=` | 模板版本列表（不含 HTML 正文；PDF 模板含 kind / 页数 / 位置映射元数据） |
+| GET | `/api/v1/templates/{id}` | 模板详情（HTML 模板含正文；PDF 模板含 placements 标定位置） |
 | GET | `/api/v1/signature-assets?q=&contract_id=&limit=&offset=` | 签名图片元数据（含合同、内容版本关联；不含图片内容） |
 | GET | `/api/v1/documents?contract_id=&limit=&offset=` | 已生成 PDF 记录 |
+
+PDF 模板（`kind=pdf`）由用户 Word 文档转换而来。`placements` 中的坐标是 PDF 点、
+页面左上角原点（已应用页面旋转），字段绑定键形如 `contract.contract_no`、
+`contract.data.<键>`、`party_b.name`。每个版本一行，合同通过 `template_id` 引用
+具体版本；生成接口在本机应用写入面，详见 [b3-templates.md](b3-templates.md)。
 
 ### 示例
 

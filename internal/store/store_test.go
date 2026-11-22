@@ -42,8 +42,8 @@ func TestMigrationsOnEmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 5 {
-		t.Fatalf("schema version = %d, want 5", version)
+	if version != 6 {
+		t.Fatalf("schema version = %d, want 6", version)
 	}
 	// Re-opening is idempotent.
 	st2, err := store.Open(st.Path())
@@ -51,7 +51,7 @@ func TestMigrationsOnEmptyDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	if v, _ := st2.SchemaVersion(); v != 5 {
+	if v, _ := st2.SchemaVersion(); v != 6 {
 		t.Fatalf("version after reopen = %d", v)
 	}
 }
@@ -85,7 +85,7 @@ func TestMigrationFromOldDatabase(t *testing.T) {
 		t.Fatalf("migrate old db: %v", err)
 	}
 	defer reopened.Close()
-	if v, _ := reopened.SchemaVersion(); v != 5 {
+	if v, _ := reopened.SchemaVersion(); v != 6 {
 		t.Fatalf("version = %d", v)
 	}
 	db2, err := sql.Open("sqlite", "file:"+path)
@@ -300,6 +300,17 @@ func TestMigrationUpgradesB1Database(t *testing.T) {
 			width_px, height_px, captured_at, created_at)
 		VALUES ('sig-legacy', NULL, '张三', 'assets/sig.png', 'abc', 10, 5,
 		        '2024-05-01T09:00:00Z', '2024-05-01T09:00:00Z');
+		CREATE TABLE templates (
+			id             TEXT PRIMARY KEY,
+			name           TEXT NOT NULL,
+			version        INTEGER NOT NULL DEFAULT 1,
+			html           TEXT NOT NULL,
+			variables_json TEXT NOT NULL DEFAULT '[]',
+			is_active      INTEGER NOT NULL DEFAULT 1,
+			created_at     TEXT NOT NULL,
+			updated_at     TEXT NOT NULL,
+			UNIQUE (name, version)
+		);
 	`)
 	if err != nil {
 		t.Fatal(err)

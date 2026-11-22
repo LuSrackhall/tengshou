@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/tdewolff/canvas"
+
 	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/logging"
 	"github.com/LuSrackhall/tengshou/internal/pdfdoc"
@@ -57,7 +59,7 @@ func Open(dataDir string) (*App, error) {
 	}
 	svc := service.New(st, reader, cfg.Operator)
 	svc.SetDataDir(paths.Root)
-	return &App{
+	a := &App{
 		Paths:     paths,
 		Config:    cfg,
 		Logger:    logger,
@@ -65,7 +67,17 @@ func Open(dataDir string) (*App, error) {
 		Reader:    reader,
 		Service:   svc,
 		logCloser: closer,
-	}, nil
+	}
+	// PDF template overlays share the HTML generator's CJK font, so a single
+	// font resolution serves both pipelines.
+	svc.SetFontLoader(func() (*canvas.FontFamily, error) {
+		gen, err := a.Generator()
+		if err != nil {
+			return nil, err
+		}
+		return gen.Font, nil
+	})
+	return a, nil
 }
 
 // Generator returns a lazily created PDF generator. Font resolution happens

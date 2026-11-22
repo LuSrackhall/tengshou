@@ -156,6 +156,16 @@ func scanDocument(sc scanner) (model.OutputDocument, error) {
 const documentColumns = `id, contract_id, template_id, template_version,
 	file_path, sha256, page_count, created_at`
 
+// GetDocument returns one generated document record by id.
+func (r *Reader) GetDocument(ctx context.Context, id string) (model.OutputDocument, error) {
+	d, err := scanDocument(r.db.QueryRowContext(ctx,
+		`SELECT `+documentColumns+` FROM output_documents WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.OutputDocument{}, ErrNotFound
+	}
+	return d, err
+}
+
 // ListParties returns parties matching f.
 func (r *Reader) ListParties(ctx context.Context, f model.ListFilter) (model.List[model.Party], error) {
 	f.Normalize()
@@ -445,6 +455,16 @@ func (r *Reader) listDocumentsForContract(ctx context.Context, contractID string
 	return out, rows.Err()
 }
 
+// templateColumns selects template metadata without the HTML body. The empty
+// literal keeps the scan order identical to GetTemplate, which includes html.
+const templateColumns = `id, name, version, kind, '', variables_json, is_active,
+	source_path, pdf_path, mapping_json, page_count, converter,
+	source_sha256, pdf_sha256, created_at, updated_at`
+
+const templateColumnsFull = `id, name, version, kind, html, variables_json, is_active,
+	source_path, pdf_path, mapping_json, page_count, converter,
+	source_sha256, pdf_sha256, created_at, updated_at`
+
 // ListTemplates returns template metadata (HTML omitted).
 func (r *Reader) ListTemplates(ctx context.Context, f model.ListFilter) (model.List[model.Template], error) {
 	f.Normalize()
@@ -454,13 +474,17 @@ func (r *Reader) ListTemplates(ctx context.Context, f model.ListFilter) (model.L
 		where = append(where, "name LIKE ?")
 		args = append(args, "%"+q+"%")
 	}
+	if kind := strings.TrimSpace(f.Kind); kind != "" {
+		where = append(where, "kind = ?")
+		args = append(args, kind)
+	}
 	clause := strings.Join(where, " AND ")
 	var total int
 	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM templates WHERE `+clause, args...).Scan(&total); err != nil {
 		return model.List[model.Template]{}, err
 	}
-	query := `SELECT id, name, version, '', variables_json, is_active, created_at, updated_at
-		FROM templates WHERE ` + clause + ` ORDER BY name, version DESC LIMIT ? OFFSET ?`
+	query := `SELECT ` + templateColumns + ` FROM templates WHERE ` + clause +
+		` ORDER BY name, version DESC LIMIT ? OFFSET ?`
 	rows, err := r.db.QueryContext(ctx, query, append(args, f.Limit, f.Offset)...)
 	if err != nil {
 		return model.List[model.Template]{}, err
@@ -479,22 +503,41 @@ func (r *Reader) ListTemplates(ctx context.Context, f model.ListFilter) (model.L
 
 func scanTemplate(sc scanner) (model.Template, error) {
 	var t model.Template
-	var variablesJSON, createdAt, updatedAt string
+	var kind, variablesJSON, sourcePath, pdfPath, mappingJSON, converter string
+	var sourceSHA, pdfSHA, createdAt, updatedAt string
 	var active int
-	if err := sc.Scan(&t.ID, &t.Name, &t.Version, &t.HTML, &variablesJSON, &active,
-		&createdAt, &updatedAt); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &t.Version, &kind, &t.HTML, &variablesJSON, &active,
+		&sourcePath, &pdfPath, &mappingJSON, &t.PageCount, &converter,
+		&sourceSHA, &pdfSHA, &createdAt, &updatedAt); err != nil {
 		return t, err
 	}
+	t.Kind, t.SourcePath, t.PDFPath = kind, sourcePath, pdfPath
+	t.Converter, t.SourceSHA256, t.PDFSHA256 = converter, sourceSHA, pdfSHA
 	t.Variables = parseJSONStrings(variablesJSON)
+	t.Placements = parsePlacements(mappingJSON)
 	t.IsActive = active != 0
 	t.CreatedAt, t.UpdatedAt = parseTime(createdAt), parseTime(updatedAt)
 	return t, nil
 }
 
-// GetTemplate returns one template including its HTML.
+func parsePlacements(raw string) []model.Placement {
+	if raw == "" {
+		return []model.Placement{}
+	}
+	var mapping templateMapping
+	if err := json.Unmarshal([]byte(raw), &mapping); err != nil {
+		return []model.Placement{}
+	}
+	if mapping.Placements == nil {
+		return []model.Placement{}
+	}
+	return mapping.Placements
+}
+
+// GetTemplate returns one template including its HTML and placements.
 func (r *Reader) GetTemplate(ctx context.Context, id string) (model.Template, error) {
-	t, err := scanTemplate(r.db.QueryRowContext(ctx, `SELECT id, name, version, html, variables_json,
-		is_active, created_at, updated_at FROM templates WHERE id = ?`, id))
+	t, err := scanTemplate(r.db.QueryRowContext(ctx, `SELECT `+templateColumnsFull+
+		` FROM templates WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Template{}, ErrNotFound
 	}
@@ -716,8 +759,8 @@ func (r *Reader) SchemaVersion(ctx context.Context) (int, error) {
 
 // ListTemplateVersions returns every version of a template name.
 func (r *Reader) ListTemplateVersions(ctx context.Context, name string) ([]model.Template, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, name, version, '', variables_json, is_active, created_at, updated_at
-		FROM templates WHERE name = ? ORDER BY version DESC`, name)
+	rows, err := r.db.QueryContext(ctx, `SELECT `+templateColumns+
+		` FROM templates WHERE name = ? ORDER BY version DESC`, name)
 	if err != nil {
 		return nil, err
 	}
@@ -731,6 +774,74 @@ func (r *Reader) ListTemplateVersions(ctx context.Context, name string) ([]model
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// LatestTemplateVersionOfKind returns the newest version of a template family.
+func (r *Reader) LatestTemplateVersionOfKind(ctx context.Context, name, kind string) (model.Template, error) {
+	t, err := scanTemplate(r.db.QueryRowContext(ctx, `SELECT `+templateColumns+
+		` FROM templates WHERE name = ? AND kind = ? ORDER BY version DESC LIMIT 1`, name, kind))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Template{}, ErrNotFound
+	}
+	return t, err
+}
+
+// MaxTemplateVersion returns the highest version number used by a template
+// family (both HTML and PDF kinds share the (name, version) uniqueness rule).
+func (r *Reader) MaxTemplateVersion(ctx context.Context, name string) (int, error) {
+	var v int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM templates WHERE name = ?`, name).Scan(&v)
+	return v, err
+}
+
+// TemplateUsage summarizes how widely a template family is referenced. It
+// backs the change-impact warning shown before a new version is saved.
+func (r *Reader) TemplateUsage(ctx context.Context, id string) (model.TemplateUsage, error) {
+	tpl, err := r.GetTemplate(ctx, id)
+	if err != nil {
+		return model.TemplateUsage{}, err
+	}
+	usage := model.TemplateUsage{
+		TemplateID: tpl.ID, Name: tpl.Name, Version: tpl.Version,
+	}
+	for _, q := range []struct {
+		sql  string
+		args []any
+		dst  *int
+	}{
+		{`SELECT COUNT(*) FROM contracts WHERE template_id = ?`, []any{tpl.ID}, &usage.VersionContracts},
+		{`SELECT COUNT(*) FROM contracts c JOIN templates t ON c.template_id = t.id
+			WHERE t.name = ? AND t.kind = ?`, []any{tpl.Name, tpl.Kind}, &usage.FamilyContracts},
+		{`SELECT COUNT(*) FROM output_documents d JOIN templates t ON d.template_id = t.id
+			WHERE t.name = ? AND t.kind = ?`, []any{tpl.Name, tpl.Kind}, &usage.Documents},
+		{`SELECT COUNT(*) FROM templates WHERE name = ? AND kind = ?`, []any{tpl.Name, tpl.Kind}, &usage.FamilyVersions},
+		{`SELECT COALESCE(MAX(version), 0) FROM templates WHERE name = ? AND kind = ?`, []any{tpl.Name, tpl.Kind}, &usage.LatestVersion},
+	} {
+		if err := r.db.QueryRowContext(ctx, q.sql, q.args...).Scan(q.dst); err != nil {
+			return usage, err
+		}
+	}
+	usage.OtherVersionContracts = usage.FamilyContracts - usage.VersionContracts
+	if usage.OtherVersionContracts < 0 {
+		usage.OtherVersionContracts = 0
+	}
+	return usage, nil
+}
+
+// TemplateReferenceCounts returns how many contracts and output documents
+// point at one exact template version. Deleting a referenced version would
+// detach those records, so the service refuses it.
+func (r *Reader) TemplateReferenceCounts(ctx context.Context, id string) (contracts, documents int, err error) {
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM contracts WHERE template_id = ?`, id).Scan(&contracts); err != nil {
+		return 0, 0, err
+	}
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM output_documents WHERE template_id = ?`, id).Scan(&documents); err != nil {
+		return 0, 0, err
+	}
+	return contracts, documents, nil
 }
 
 // VerifyReadOnly asserts the connection rejects writes. Intended for tests.

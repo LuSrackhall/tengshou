@@ -15,7 +15,7 @@ import (
 	"github.com/LuSrackhall/tengshou/internal/store"
 )
 
-const maxAppBody = 32 << 20 // 32 MiB, enough for a base64-encoded workbook
+const maxAppBody = 64 << 20 // 64 MiB: base64 workbook or Word template upload
 
 func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -34,6 +34,17 @@ func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 			"/app/api/v1/seals/{id}",
 			"/app/api/v1/seals/{id}/image",
 			"/app/api/v1/seals/{id}/attach",
+			"/app/api/v1/templates",
+			"/app/api/v1/templates/import",
+			"/app/api/v1/templates/{id}",
+			"/app/api/v1/templates/{id}/mapping",
+			"/app/api/v1/templates/{id}/usage",
+			"/app/api/v1/templates/{id}/pdf",
+			"/app/api/v1/templates/{id}/source",
+			"/app/api/v1/templates/{id}/preview",
+			"/app/api/v1/templates/{id}/generate",
+			"/app/api/v1/converters",
+			"/app/api/v1/documents/{id}/file",
 			"/app/api/v1/excel/template",
 			"/app/api/v1/excel/ledger",
 			"/app/api/v1/excel/preview",
@@ -462,10 +473,16 @@ func (s *Server) writeServiceError(w http.ResponseWriter, msg string, err error)
 		switch businessErr.Code {
 		case "not_found":
 			status = http.StatusNotFound
-		case "conflict", "immutable", "in_use", "duplicate", "ambiguous_party":
+		case "conflict", "immutable", "in_use", "duplicate", "ambiguous_party",
+			"preview_required", "missing_asset", "invalid_template":
 			status = http.StatusConflict
-		case "import_errors":
+		case "import_errors", "converter_unavailable", "convert_failed",
+			"invalid_pdf", "invalid_kind", "too_many_placements":
 			status = http.StatusUnprocessableEntity
+		case "file_too_large":
+			status = http.StatusRequestEntityTooLarge
+		case "font_unavailable":
+			status = http.StatusServiceUnavailable
 		}
 		writeError(w, status, businessErr.Code, businessErr.Message)
 		return

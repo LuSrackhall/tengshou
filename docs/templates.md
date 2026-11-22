@@ -1,5 +1,9 @@
 # HTML 合同模板说明
 
+> 这是 B1/B2 的内置 HTML 排版模板格式。B3 起，面向用户的主路径是
+> **导入 Word → PDF 页面标定 → 套印生成**，见 [b3-templates.md](b3-templates.md)。
+> HTML 模板继续供示例、MCP/高级用户与 B4 的“同内容换壳”使用。
+
 模板是普通 HTML 文件，先用 Go `html/template` 渲染数据，再经腾手的排版器
 生成 A4 PDF。模板中的文字会自动进行 HTML 转义，不会注入执行。
 

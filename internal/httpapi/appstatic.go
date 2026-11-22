@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-//go:embed web/app/index.html web/app/app.js web/app/app.css
+//go:embed web/app/index.html web/app/app.js web/app/app.css web/app/vendor/pdfjs/pdf.min.js web/app/vendor/pdfjs/pdf.worker.min.js
 var appFS embed.FS
 
 func (s *Server) handleAppIndex(w http.ResponseWriter, r *http.Request) {

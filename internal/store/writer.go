@@ -133,7 +133,7 @@ func guessYear(date string, now time.Time) int {
 	return now.Year()
 }
 
-// PutTemplate inserts or updates a template.
+// PutTemplate inserts or updates a template version.
 func (s *Store) PutTemplate(ctx context.Context, t *model.Template) error {
 	if t == nil {
 		return fmt.Errorf("template is nil")
@@ -151,8 +151,23 @@ func (s *Store) PutTemplate(ctx context.Context, t *model.Template) error {
 	if t.Version <= 0 {
 		t.Version = 1
 	}
-	if t.HTML == "" {
-		return fmt.Errorf("template html is required")
+	if t.Kind == "" {
+		t.Kind = model.TemplateKindHTML
+	}
+	switch t.Kind {
+	case model.TemplateKindHTML:
+		if t.HTML == "" {
+			return fmt.Errorf("template html is required")
+		}
+	case model.TemplateKindPDF:
+		if t.PDFPath == "" {
+			return fmt.Errorf("template pdf path is required")
+		}
+		if t.PageCount <= 0 {
+			return fmt.Errorf("template page count is required")
+		}
+	default:
+		return fmt.Errorf("invalid template kind %q", t.Kind)
 	}
 	now := model.Now()
 	if t.CreatedAt.IsZero() {
@@ -163,19 +178,80 @@ func (s *Store) PutTemplate(ctx context.Context, t *model.Template) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO templates (id, name, version, html, variables_json, is_active, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (id) DO UPDATE SET
-			name = excluded.name, version = excluded.version, html = excluded.html,
-			variables_json = excluded.variables_json, is_active = excluded.is_active,
-			updated_at = excluded.updated_at`,
-		t.ID, t.Name, t.Version, t.HTML, string(vars), boolInt(t.IsActive),
-		formatTime(t.CreatedAt), formatTime(t.UpdatedAt))
+	mapping, err := json.Marshal(templateMapping{
+		Version:    1,
+		Placements: nonNilPlacements(t.Placements),
+	})
 	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO templates (id, name, version, kind, html, variables_json, is_active,
+			source_path, pdf_path, mapping_json, page_count, converter,
+			source_sha256, pdf_sha256, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET
+			name = excluded.name, version = excluded.version, kind = excluded.kind,
+			html = excluded.html,
+			variables_json = excluded.variables_json, is_active = excluded.is_active,
+			source_path = excluded.source_path, pdf_path = excluded.pdf_path,
+			mapping_json = excluded.mapping_json, page_count = excluded.page_count,
+			converter = excluded.converter, source_sha256 = excluded.source_sha256,
+			pdf_sha256 = excluded.pdf_sha256, updated_at = excluded.updated_at`,
+		t.ID, t.Name, t.Version, t.Kind, t.HTML, string(vars), boolInt(t.IsActive),
+		t.SourcePath, t.PDFPath, string(mapping), t.PageCount, t.Converter,
+		t.SourceSHA256, t.PDFSHA256, formatTime(t.CreatedAt), formatTime(t.UpdatedAt))
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return fmt.Errorf("%w: %s v%d", ErrDuplicateTemplateVersion, t.Name, t.Version)
+		}
 		return fmt.Errorf("put template: %w", err)
 	}
 	return nil
+}
+
+// DeleteTemplate removes one template version. Contracts and output documents
+// referencing it have their template_id set to NULL by the schema, so callers
+// must check references first when that would lose information.
+func (s *Store) DeleteTemplate(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM templates WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete template: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeactivateOtherTemplateVersions marks every other version of a template
+// family inactive. It is called after a new version is persisted so the UI can
+// treat is_active as "the current version".
+func (s *Store) DeactivateOtherTemplateVersions(ctx context.Context, name, exceptID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE templates SET is_active = 0 WHERE name = ? AND id <> ?`, name, exceptID)
+	if err != nil {
+		return fmt.Errorf("deactivate template versions: %w", err)
+	}
+	return nil
+}
+
+// templateMapping is the persisted shape of templates.mapping_json. The
+// version field leaves room for future changes to the coordinate semantics.
+type templateMapping struct {
+	Version    int               `json:"version"`
+	Placements []model.Placement `json:"placements"`
+}
+
+func nonNilPlacements(v []model.Placement) []model.Placement {
+	if v == nil {
+		return []model.Placement{}
+	}
+	return v
 }
 
 // PutSignature inserts or updates a signature asset record.

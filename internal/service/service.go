@@ -21,8 +21,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/LuSrackhall/tengshou/internal/doctopdf"
 	"github.com/LuSrackhall/tengshou/internal/model"
 	"github.com/LuSrackhall/tengshou/internal/store"
+	"github.com/tdewolff/canvas"
 )
 
 // Service owns the writable business rules. It is safe for concurrent use.
@@ -33,6 +35,17 @@ type Service struct {
 	dataDir string
 	now     func() time.Time
 	mu      sync.Mutex // serializes writes that allocate contract numbers
+
+	// converters turns imported Word documents into PDF (B3). Callers may
+	// replace the chain, e.g. in tests.
+	converters *doctopdf.Chain
+	// fontLoader lazily resolves the CJK font used for template overlays.
+	// It is injected by the app layer so the font is shared with the HTML
+	// generator.
+	fontLoader func() (*canvas.FontFamily, error)
+	fontOnce   sync.Once
+	font       *canvas.FontFamily
+	fontErr    error
 }
 
 // New constructs a Service. An empty actor falls back to the OS user name.
@@ -42,10 +55,11 @@ func New(st *store.Store, rd *store.Reader, actor string) *Service {
 		actor = OSUser()
 	}
 	return &Service{
-		st:    st,
-		rd:    rd,
-		actor: actor,
-		now:   func() time.Time { return model.Now() },
+		st:         st,
+		rd:         rd,
+		actor:      actor,
+		now:        func() time.Time { return model.Now() },
+		converters: doctopdf.DefaultChain(),
 	}
 }
 

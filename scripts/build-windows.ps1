@@ -31,7 +31,7 @@ Write-Host "构建 tengshou.exe ..."
 go build -trimpath -ldflags $LdFlags -o "$Out/tengshou.exe" ./cmd/tengshou
 
 Write-Host "构建 tengshou-cli.exe ..."
-go build -trimpath -ldflags "-s -w" -o "$Out/tengshou-cli.exe" ./cmd/tengshou-cli
+go build -trimpath -ldflags $LdFlags -o "$Out/tengshou-cli.exe" ./cmd/tengshou-cli
 
 $Zip = "$Out/tengshou-windows-$GoArch.zip"
 if (Test-Path $Zip) { Remove-Item $Zip }

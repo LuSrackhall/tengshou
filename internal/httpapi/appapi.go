@@ -585,6 +585,7 @@ func (s *Server) handleAppMCPStatus(w http.ResponseWriter, r *http.Request) {
 		configFile = filepath.Join(dataDir, "config.json")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		"version":              s.version(),
 		"write_enabled":        s.mcpWriteEnabled(),
 		"read_enabled":         true,
 		"read_tools":           mcpspec.ReadToolCount,

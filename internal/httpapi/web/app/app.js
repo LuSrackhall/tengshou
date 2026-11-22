@@ -1338,6 +1338,7 @@ async function openTemplateEditor(template) {
           <div id="tplPlacementList" class="tpl-list"></div>
           <div id="tplSelectedPanel"></div>
           <h3>预览与生成</h3>
+          <div id="tplUsage" class="tpl-status">正在统计影响范围…</div>
           <div class="field"><label for="tplContract">合同</label>
             <select id="tplContract"><option value="">（正在加载合同…）</option></select></div>
           <div class="tpl-add" style="grid-template-columns:1fr 1fr">
@@ -1354,6 +1355,7 @@ async function openTemplateEditor(template) {
   bindTemplateEditorEvents(editor);
   renderPlacementList(editor);
   updateTemplatePreviewStatus(editor);
+  loadTemplateUsage(editor).catch(() => {});
   loadEditorContracts(editor).catch(() => {});
   try {
     await loadTemplateEditorPDF(editor);
@@ -1757,6 +1759,18 @@ function syncTemplateAddSealControls(editor) {
   $("#tplAddPartyWrap", editor.modal.body).style.display = kind === "seal" ? "" : "none";
 }
 
+async function loadTemplateUsage(editor) {
+  const el = $("#tplUsage", editor.modal.body);
+  try {
+    const u = await api(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/usage`);
+    if (!el) return;
+    el.textContent = `影响范围：${u.family_contracts} 份合同使用该模板系列` +
+      `（其中 ${u.other_version_contracts} 份仍用旧版本）· 已生成 ${u.documents} 份 PDF`;
+  } catch (err) {
+    if (el) el.textContent = "影响范围统计失败：" + err.message;
+  }
+}
+
 async function loadEditorContracts(editor) {
   const select = $("#tplContract", editor.modal.body);
   try {
@@ -1810,6 +1824,7 @@ async function saveTemplateMapping(editor) {
   await loadTemplates();
   renderTemplates();
   await loadBootstrapAndMeta();
+  loadTemplateUsage(editor).catch(() => {});
   const warnings = res.warnings || [];
   toast(`已保存为 v${item.version}`);
   if (warnings.length) setTimeout(() => toast(warnings.join("；")), 350);
@@ -1940,6 +1955,7 @@ async function generateTemplatePDF(editor) {
   await loadTemplates();
   renderTemplates();
   await loadBootstrapAndMeta();
+  loadTemplateUsage(editor).catch(() => {});
 }
 
 async function renderPDFPagesInto(container, bytes, scale) {

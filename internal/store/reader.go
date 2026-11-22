@@ -140,26 +140,62 @@ func scanSeal(sc scanner) (model.Seal, error) {
 func scanDocument(sc scanner) (model.OutputDocument, error) {
 	var d model.OutputDocument
 	var contractID, templateID sql.NullString
-	var filePath, sha string
+	var filePath, sha, contentSHA, signatureSnapshot, operator, kind, status, errorMessage string
+	var batchID, sourceDocumentID string
 	var pageCount int
 	var createdAt string
 	if err := sc.Scan(&d.ID, &contractID, &templateID, &d.TemplateVersion,
-		&filePath, &sha, &pageCount, &createdAt); err != nil {
+		&filePath, &sha, &pageCount, &contentSHA, &signatureSnapshot,
+		&operator, &kind, &status, &errorMessage, &batchID, &sourceDocumentID,
+		&createdAt); err != nil {
 		return d, err
 	}
 	d.ContractID, d.TemplateID = contractID.String, templateID.String
 	d.FilePath, d.SHA256, d.PageCount = filePath, sha, pageCount
+	d.ContentSHA256 = contentSHA
+	d.Signatures = parseDocumentSignatures(signatureSnapshot)
+	d.Operator, d.Kind, d.Status = operator, kind, status
+	d.ErrorMessage, d.BatchID, d.SourceDocumentID = errorMessage, batchID, sourceDocumentID
 	d.CreatedAt = parseTime(createdAt)
 	return d, nil
 }
 
+func parseDocumentSignatures(raw string) []model.DocumentSignatureSnapshot {
+	out := []model.DocumentSignatureSnapshot{}
+	if raw == "" {
+		return out
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil || out == nil {
+		return []model.DocumentSignatureSnapshot{}
+	}
+	return out
+}
+
 const documentColumns = `id, contract_id, template_id, template_version,
-	file_path, sha256, page_count, created_at`
+	file_path, sha256, page_count, content_sha256, signature_snapshot,
+	operator, kind, status, error_message, batch_id, source_document_id, created_at`
 
 // GetDocument returns one generated document record by id.
 func (r *Reader) GetDocument(ctx context.Context, id string) (model.OutputDocument, error) {
 	d, err := scanDocument(r.db.QueryRowContext(ctx,
 		`SELECT `+documentColumns+` FROM output_documents WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.OutputDocument{}, ErrNotFound
+	}
+	return d, err
+}
+
+// LatestSuccessfulDocument returns the newest successful PDF of a contract.
+// Regenerate flows use it as the default source document.
+//
+// created_at has second precision, so several documents can share a timestamp;
+// rowid gives strict insertion order. Ordering by id would pick a random row
+// within the same second and make regenerate point at an older document.
+func (r *Reader) LatestSuccessfulDocument(ctx context.Context, contractID string) (model.OutputDocument, error) {
+	d, err := scanDocument(r.db.QueryRowContext(ctx,
+		`SELECT `+documentColumns+` FROM output_documents
+		 WHERE contract_id = ? AND status = ? ORDER BY rowid DESC LIMIT 1`,
+		contractID, model.DocumentStatusSuccess))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.OutputDocument{}, ErrNotFound
 	}
@@ -439,7 +475,7 @@ func (r *Reader) listSignaturesForContract(ctx context.Context, contractID strin
 func (r *Reader) listDocumentsForContract(ctx context.Context, contractID string) ([]model.OutputDocument, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+documentColumns+` FROM output_documents WHERE contract_id = ?
-		 ORDER BY created_at DESC, id`, contractID)
+		 ORDER BY created_at DESC, rowid DESC`, contractID)
 	if err != nil {
 		return nil, err
 	}
@@ -728,14 +764,33 @@ func (r *Reader) SealContractIDs(ctx context.Context, sealID string) ([]string, 
 	return out, rows.Err()
 }
 
-// ListDocuments returns rendered document metadata.
+// ListDocuments returns rendered document metadata. It can be filtered by
+// contract (contract_id), template version (template_id), batch (batch_id) and
+// status (success/failed) — the B4 generation-history query surface.
 func (r *Reader) ListDocuments(ctx context.Context, f model.ListFilter) (model.List[model.OutputDocument], error) {
 	f.Normalize()
 	where := []string{"1=1"}
 	args := []any{}
-	if f.Query != "" {
+	contractID := strings.TrimSpace(f.ContractID)
+	if contractID == "" {
+		contractID = strings.TrimSpace(f.Query)
+	}
+	if contractID != "" {
 		where = append(where, "contract_id = ?")
-		args = append(args, f.Query)
+		args = append(args, contractID)
+	}
+	if templateID := strings.TrimSpace(f.TemplateID); templateID != "" {
+		where = append(where, "template_id = ?")
+		args = append(args, templateID)
+	}
+	if batchID := strings.TrimSpace(f.BatchID); batchID != "" {
+		where = append(where, "batch_id = ?")
+		args = append(args, batchID)
+	}
+	switch status := strings.TrimSpace(f.Status); status {
+	case model.DocumentStatusSuccess, model.DocumentStatusFailed:
+		where = append(where, "status = ?")
+		args = append(args, status)
 	}
 	clause := strings.Join(where, " AND ")
 	var total int
@@ -743,7 +798,7 @@ func (r *Reader) ListDocuments(ctx context.Context, f model.ListFilter) (model.L
 		return model.List[model.OutputDocument]{}, err
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT `+documentColumns+` FROM output_documents WHERE `+clause+
-		` ORDER BY created_at DESC, id LIMIT ? OFFSET ?`, append(args, f.Limit, f.Offset)...)
+		` ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`, append(args, f.Limit, f.Offset)...)
 	if err != nil {
 		return model.List[model.OutputDocument]{}, err
 	}
@@ -771,7 +826,7 @@ func (r *Reader) Stats(ctx context.Context) (model.Stats, error) {
 		{`SELECT COUNT(*) FROM templates`, &s.Templates},
 		{`SELECT COUNT(*) FROM signature_assets`, &s.Signatures},
 		{`SELECT COUNT(*) FROM seal_assets`, &s.Seals},
-		{`SELECT COUNT(*) FROM output_documents`, &s.Documents},
+		{`SELECT COUNT(*) FROM output_documents WHERE status = 'success'`, &s.Documents},
 		{`SELECT COUNT(*) FROM field_definitions WHERE archived = 0`, &s.Fields},
 	} {
 		if err := r.db.QueryRowContext(ctx, q.sql).Scan(q.dst); err != nil {
@@ -860,7 +915,7 @@ func (r *Reader) TemplateUsage(ctx context.Context, id string) (model.TemplateUs
 		{`SELECT COUNT(*) FROM contracts c JOIN templates t ON c.template_id = t.id
 			WHERE t.name = ? AND t.kind = ?`, []any{tpl.Name, tpl.Kind}, &usage.FamilyContracts},
 		{`SELECT COUNT(*) FROM output_documents d JOIN templates t ON d.template_id = t.id
-			WHERE t.name = ? AND t.kind = ?`, []any{tpl.Name, tpl.Kind}, &usage.Documents},
+			WHERE t.name = ? AND t.kind = ? AND d.status = 'success'`, []any{tpl.Name, tpl.Kind}, &usage.Documents},
 		{`SELECT COUNT(*) FROM templates WHERE name = ? AND kind = ?`, []any{tpl.Name, tpl.Kind}, &usage.FamilyVersions},
 		{`SELECT COALESCE(MAX(version), 0) FROM templates WHERE name = ? AND kind = ?`, []any{tpl.Name, tpl.Kind}, &usage.LatestVersion},
 	} {
@@ -884,7 +939,7 @@ func (r *Reader) TemplateReferenceCounts(ctx context.Context, id string) (contra
 		return 0, 0, err
 	}
 	if err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM output_documents WHERE template_id = ?`, id).Scan(&documents); err != nil {
+		`SELECT COUNT(*) FROM output_documents WHERE template_id = ? AND status = 'success'`, id).Scan(&documents); err != nil {
 		return 0, 0, err
 	}
 	return contracts, documents, nil

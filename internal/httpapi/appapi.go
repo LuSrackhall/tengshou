@@ -48,8 +48,12 @@ func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 			"/app/api/v1/templates/{id}/pdf",
 			"/app/api/v1/templates/{id}/source",
 			"/app/api/v1/templates/{id}/preview",
+			"/app/api/v1/templates/{id}/preflight",
 			"/app/api/v1/templates/{id}/generate",
+			"/app/api/v1/templates/{id}/batch/preview",
+			"/app/api/v1/templates/{id}/batch/generate",
 			"/app/api/v1/converters",
+			"/app/api/v1/documents",
 			"/app/api/v1/documents/{id}/file",
 			"/app/api/v1/excel/template",
 			"/app/api/v1/excel/ledger",
@@ -303,6 +307,28 @@ func (s *Server) handleAppDeleteContract(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+// handleAppListDocuments is the B4 generation-history query surface. Filters:
+// contract_id, template_id, batch_id, status (success|failed), limit, offset.
+func (s *Server) handleAppListDocuments(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := filter(r)
+	f.ContractID = strings.TrimSpace(q.Get("contract_id"))
+	f.TemplateID = strings.TrimSpace(q.Get("template_id"))
+	f.BatchID = strings.TrimSpace(q.Get("batch_id"))
+	if status := strings.TrimSpace(q.Get("status")); status == model.DocumentStatusSuccess ||
+		status == model.DocumentStatusFailed {
+		f.Status = status
+	} else {
+		f.Status = ""
+	}
+	items, err := s.opts.Reader.ListDocuments(r.Context(), f)
+	if err != nil {
+		s.internalError(w, "list documents", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (s *Server) handleAppChangeLog(w http.ResponseWriter, r *http.Request) {
@@ -761,11 +787,13 @@ func (s *Server) writeServiceError(w http.ResponseWriter, msg string, err error)
 		case "not_found":
 			status = http.StatusNotFound
 		case "conflict", "immutable", "in_use", "duplicate", "ambiguous_party",
-			"preview_required", "missing_asset", "invalid_template":
+			"preview_required", "missing_asset", "invalid_template", "content_changed":
 			status = http.StatusConflict
 		case "import_errors", "converter_unavailable", "convert_failed",
 			"invalid_pdf", "invalid_kind", "too_many_placements",
-			"invalid_backup", "confirm_required":
+			"invalid_backup", "confirm_required",
+			"missing_signature", "missing_field", "missing_party", "missing_seal",
+			"preflight_failed", "too_many_contracts":
 			status = http.StatusUnprocessableEntity
 		case "file_too_large", "backup_too_large":
 			status = http.StatusRequestEntityTooLarge

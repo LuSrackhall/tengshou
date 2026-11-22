@@ -66,10 +66,11 @@ pdfcpu 使用 `api.PDFMultiWatermarkForReadSeeker` + `api.AddWatermarks`：套�
   - `party_a.data.<动态字段键>` / `party_b.data.<动态字段键>`。
 - 图片类型字段不能作为文字绑定（会提示改用签名/公章位置）。
 - 签名位置绑定 `party_a` / `party_b`，取该方最新的一份签名；没有签名时不跨方
-  借用，预览里显示占位框并在最终生成时给出警告。
+  借用。预览里显示占位框；最终生成时缺少签名会**阻断**并提示先扫码采集（B4，
+  见 [b4-generation.md](b4-generation.md)）。
 - 公章位置有两种来源：
   - `contract`（默认）：优先取合同显式关联的公章，其次取甲/乙双方名下的公章；
-  - `seal`：固定某一枚公章图片。
+  - `seal`：固定某一枚公章图片。位置绑定存在但没有可用公章图片时，生成会被阻断。
 - 文字默认 10.5pt、自动换行；超出框高时逐步缩小字号（最低 4pt），仍放不下时
   返回 `text_overflow` 警告。日期自动显示为「2026年1月1日」，金额显示为
   「1,200.00」。
@@ -83,7 +84,8 @@ pdfcpu 使用 `api.PDFMultiWatermarkForReadSeeker` + `api.AddWatermarks`：套�
   生成新的资产目录和新版本，需要重新标定。
 - 合同通过 `contracts.template_id` 引用**具体版本**；`output_documents` 同时记录
   模板版本。因此模板更新不会改变已生成 PDF，旧合同重出时仍按旧版本渲染，新合同
-  默认使用最新版本。
+  默认使用最新版本。B4 起生成记录还包含内容指纹、签名快照、操作人、初次/整改
+  与失败原因，详见 [b4-generation.md](b4-generation.md)。
 - 删除版本前检查引用：被合同或 PDF 记录引用的版本不允许删除；未被引用的版本
   删除时同时清理独占的资产文件。
 - 模板变更影响范围在保存/导入响应中返回（`usage`）：合同数、历史 PDF 数、仍使用

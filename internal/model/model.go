@@ -311,16 +311,61 @@ type Template struct {
 	UpdatedAt  time.Time   `json:"updated_at"`
 }
 
-// OutputDocument records a rendered PDF.
+// Output document kinds (B4): initial generation and re-output after a
+// template version change / an intentional reissue.
+const (
+	DocumentKindInitial    = "initial"
+	DocumentKindRegenerate = "regenerate"
+)
+
+// Output document statuses. Failed attempts keep the error so the UI can show
+// a retry entry; they never point at a file.
+const (
+	DocumentStatusSuccess = "success"
+	DocumentStatusFailed  = "failed"
+)
+
+// DocumentSignatureSnapshot pins the signatures used for one generated PDF.
+// It lets users later see which signature asset was stamped into which output
+// and whether it was collected for the same contract content version.
+type DocumentSignatureSnapshot struct {
+	SignatureID   string `json:"signature_id"`
+	PartyID       string `json:"party_id,omitempty"`
+	SignerName    string `json:"signer_name,omitempty"`
+	SHA256        string `json:"sha256"`
+	ContentSHA256 string `json:"content_sha256,omitempty"`
+}
+
+// OutputDocument records one PDF generation attempt (B4): who ran it, when,
+// with which template version, over which contract content version, and which
+// signatures were stamped. Successful rows point at a file under outputs/;
+// failed rows keep the error message for retry.
 type OutputDocument struct {
-	ID              string    `json:"id"`
-	ContractID      string    `json:"contract_id,omitempty"`
-	TemplateID      string    `json:"template_id,omitempty"`
-	TemplateVersion int       `json:"template_version"`
-	FilePath        string    `json:"file_path"` // path relative to the data directory
-	SHA256          string    `json:"sha256"`
-	PageCount       int       `json:"page_count"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID              string `json:"id"`
+	ContractID      string `json:"contract_id,omitempty"`
+	TemplateID      string `json:"template_id,omitempty"`
+	TemplateVersion int    `json:"template_version"`
+	FilePath        string `json:"file_path"` // path relative to the data directory
+	SHA256          string `json:"sha256"`
+	PageCount       int    `json:"page_count"`
+	// ContentSHA256 is the contract content digest at generation time.
+	ContentSHA256 string `json:"content_sha256,omitempty"`
+	// Signatures snapshots the signature assets used by signature placements.
+	Signatures []DocumentSignatureSnapshot `json:"signatures"`
+	// Operator is the audit actor (desktop user or tengshou-mcp).
+	Operator string `json:"operator,omitempty"`
+	// Kind is initial (first output) or regenerate (reissue after a template
+	// version change or an explicit regeneration).
+	Kind string `json:"kind"`
+	// Status is success or failed.
+	Status string `json:"status"`
+	// ErrorMessage carries the failure reason for failed attempts.
+	ErrorMessage string `json:"error_message,omitempty"`
+	// BatchID groups documents produced by one batch run.
+	BatchID string `json:"batch_id,omitempty"`
+	// SourceDocumentID points at the document replaced by a regenerate.
+	SourceDocumentID string    `json:"source_document_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // TemplateUsage summarizes how widely a template family is referenced. It is
@@ -369,8 +414,13 @@ type ListFilter struct {
 	Status string
 	// Year limits contracts to one contract year; 0 means all years.
 	Year int
-	// ContractID limits signature assets to one contract; empty means all.
+	// ContractID limits signature assets or output documents to one contract;
+	// empty means all.
 	ContractID string
+	// TemplateID limits output documents to one template version.
+	TemplateID string
+	// BatchID limits output documents to one batch run.
+	BatchID string
 	// PartyID limits seal assets to one party; empty means all.
 	PartyID string
 	// Kind limits templates to html or pdf; empty means both.

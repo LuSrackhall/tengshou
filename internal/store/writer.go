@@ -297,7 +297,8 @@ func (s *Store) PutSignature(ctx context.Context, sig *model.Signature) error {
 	return nil
 }
 
-// PutOutputDocument inserts or updates a rendered document record.
+// PutOutputDocument inserts or updates a rendered document record. Successful
+// rows must point at a file; failed attempts keep only the error message.
 func (s *Store) PutOutputDocument(ctx context.Context, d *model.OutputDocument) error {
 	if d == nil {
 		return fmt.Errorf("document is nil")
@@ -309,22 +310,49 @@ func (s *Store) PutOutputDocument(ctx context.Context, d *model.OutputDocument) 
 		}
 		d.ID = id
 	}
-	if d.FilePath == "" || d.SHA256 == "" {
-		return fmt.Errorf("document file_path and sha256 are required")
+	if d.Status == "" {
+		d.Status = model.DocumentStatusSuccess
+	}
+	if d.Kind == "" {
+		d.Kind = model.DocumentKindInitial
+	}
+	switch d.Status {
+	case model.DocumentStatusSuccess:
+		if d.FilePath == "" || d.SHA256 == "" {
+			return fmt.Errorf("document file_path and sha256 are required")
+		}
+	case model.DocumentStatusFailed:
+	default:
+		return fmt.Errorf("invalid document status %q", d.Status)
+	}
+	if d.Signatures == nil {
+		d.Signatures = []model.DocumentSignatureSnapshot{}
+	}
+	signatureJSON, err := json.Marshal(d.Signatures)
+	if err != nil {
+		return fmt.Errorf("encode signature snapshot: %w", err)
 	}
 	if d.CreatedAt.IsZero() {
 		d.CreatedAt = model.Now()
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO output_documents (id, contract_id, template_id, template_version,
-			file_path, sha256, page_count, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			file_path, sha256, page_count, content_sha256, signature_snapshot,
+			operator, kind, status, error_message, batch_id, source_document_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			contract_id = excluded.contract_id, template_id = excluded.template_id,
 			template_version = excluded.template_version, file_path = excluded.file_path,
-			sha256 = excluded.sha256, page_count = excluded.page_count`,
+			sha256 = excluded.sha256, page_count = excluded.page_count,
+			content_sha256 = excluded.content_sha256,
+			signature_snapshot = excluded.signature_snapshot,
+			operator = excluded.operator, kind = excluded.kind, status = excluded.status,
+			error_message = excluded.error_message, batch_id = excluded.batch_id,
+			source_document_id = excluded.source_document_id`,
 		d.ID, nullString(d.ContractID), nullString(d.TemplateID), d.TemplateVersion,
-		d.FilePath, d.SHA256, d.PageCount, formatTime(d.CreatedAt))
+		d.FilePath, d.SHA256, d.PageCount, d.ContentSHA256, string(signatureJSON),
+		d.Operator, d.Kind, d.Status, d.ErrorMessage, d.BatchID, d.SourceDocumentID,
+		formatTime(d.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("put output document: %w", err)
 	}

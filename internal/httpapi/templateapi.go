@@ -30,8 +30,29 @@ type templatePreviewRequest struct {
 }
 
 type templateGenerateRequest struct {
-	ContractID    string `json:"contract_id"`
-	PreviewSHA256 string `json:"preview_sha256"`
+	ContractID          string `json:"contract_id"`
+	PreviewSHA256       string `json:"preview_sha256"`
+	Kind                string `json:"kind"`
+	SourceDocumentID    string `json:"source_document_id"`
+	AllowStaleSignature bool   `json:"allow_stale_signature"`
+}
+
+type templatePreflightRequest struct {
+	ContractID string `json:"contract_id"`
+}
+
+type templateBatchPreviewRequest struct {
+	ContractIDs []string `json:"contract_ids"`
+	Year        int      `json:"year"`
+	Status      string   `json:"status"`
+	Limit       int      `json:"limit"`
+	Sample      bool     `json:"sample"`
+}
+
+type templateBatchGenerateRequest struct {
+	Items               []service.BatchGenerateItemInput `json:"items"`
+	Kind                string                           `json:"kind"`
+	AllowStaleSignature bool                             `json:"allow_stale_signature"`
 }
 
 func (s *Server) handleAppListTemplates(w http.ResponseWriter, r *http.Request) {
@@ -249,7 +270,14 @@ func (s *Server) handleAppGenerateContract(w http.ResponseWriter, r *http.Reques
 	if !s.readAppJSON(w, r, &in) {
 		return
 	}
-	res, err := svc.GenerateContractPDF(r.Context(), r.PathValue("id"), in.ContractID, in.PreviewSHA256)
+	res, err := svc.GenerateContractDocument(r.Context(), service.GenerateInput{
+		TemplateID:          r.PathValue("id"),
+		ContractID:          in.ContractID,
+		PreviewSHA256:       in.PreviewSHA256,
+		Kind:                in.Kind,
+		SourceDocumentID:    in.SourceDocumentID,
+		AllowStaleSignature: in.AllowStaleSignature,
+	})
 	if err != nil {
 		s.writeServiceError(w, "generate contract pdf", err)
 		return
@@ -257,6 +285,87 @@ func (s *Server) handleAppGenerateContract(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{
 		"item": res.Document, "usage": res.Usage, "warnings": res.Warnings,
 	})
+}
+
+// handleAppPreflightGeneration reports whether one contract can be generated
+// with the selected template version (required fields, party data, signatures
+// and seals) and returns the preview digest generation must echo.
+func (s *Server) handleAppPreflightGeneration(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appService(w)
+	if !ok {
+		return
+	}
+	var in templatePreflightRequest
+	if !s.readAppJSON(w, r, &in) {
+		return
+	}
+	res, err := svc.PreflightContractGeneration(r.Context(), r.PathValue("id"), in.ContractID)
+	if err != nil {
+		s.writeServiceError(w, "preflight generation", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleAppBatchPreviewGeneration reports per-contract readiness for a batch
+// run and optionally returns one sample-data PDF of the template version.
+func (s *Server) handleAppBatchPreviewGeneration(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appService(w)
+	if !ok {
+		return
+	}
+	var in templateBatchPreviewRequest
+	if !s.readAppJSON(w, r, &in) {
+		return
+	}
+	res, err := svc.PreflightBatchGeneration(r.Context(), service.BatchPreviewInput{
+		TemplateID:  r.PathValue("id"),
+		ContractIDs: in.ContractIDs,
+		Year:        in.Year,
+		Status:      in.Status,
+		Limit:       in.Limit,
+		Sample:      in.Sample,
+	})
+	if err != nil {
+		s.writeServiceError(w, "batch preview", err)
+		return
+	}
+	payload := map[string]any{
+		"template":              res.Template,
+		"items":                 res.Items,
+		"summary":               res.Summary,
+		"sample_preview_sha256": res.SamplePreviewSHA256,
+		"warnings":              res.Warnings,
+	}
+	if len(res.SamplePDF) > 0 {
+		payload["pdf_base64"] = base64.StdEncoding.EncodeToString(res.SamplePDF)
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// handleAppBatchGenerate renders several contracts with one template version.
+// Failures are reported per contract; the request only fails when the template
+// itself or the input is unusable.
+func (s *Server) handleAppBatchGenerate(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appService(w)
+	if !ok {
+		return
+	}
+	var in templateBatchGenerateRequest
+	if !s.readAppJSON(w, r, &in) {
+		return
+	}
+	res, err := svc.GenerateContractBatch(r.Context(), service.BatchGenerateInput{
+		TemplateID:          r.PathValue("id"),
+		Items:               in.Items,
+		Kind:                in.Kind,
+		AllowStaleSignature: in.AllowStaleSignature,
+	})
+	if err != nil {
+		s.writeServiceError(w, "batch generate", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) handleAppConverters(w http.ResponseWriter, r *http.Request) {
@@ -282,6 +391,10 @@ func (s *Server) handleAppDocumentFile(w http.ResponseWriter, r *http.Request) {
 	name := filepath.Base(doc.FilePath)
 	if name == "" || name == "." {
 		name = "contract"
+	}
+	if doc.Status == model.DocumentStatusFailed || strings.TrimSpace(doc.FilePath) == "" {
+		writeError(w, http.StatusNotFound, "not_found", "这次生成没有输出文件（失败记录）")
+		return
 	}
 	// Keep the quoted fallback filename ASCII-safe; filename* carries the
 	// real name for browsers that understand it.

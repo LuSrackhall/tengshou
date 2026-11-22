@@ -456,3 +456,64 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   padding: 10px 12px; border-radius: 8px; overflow-x: auto;
   white-space: pre-wrap; word-break: break-all;
 }
+
+/* ---------- 合同 PDF 生成、整改重出与批量生成（B4） ---------- */
+
+.select-col { width: 34px; text-align: center; }
+.select-col input { width: 16px; height: 16px; }
+
+.gen-panel {
+  margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line);
+  display: grid; gap: 12px;
+}
+.gen-panel h3 { font-size: 15px; }
+.gen-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.gen-row .field { flex: 1; min-width: 240px; }
+.gen-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.gen-history { display: grid; gap: 8px; }
+.gen-history-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.gen-history-table th, .gen-history-table td {
+  text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top;
+}
+.gen-history-table th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+.gen-history-table td.wrap { white-space: normal; word-break: break-all; }
+.gen-history-table .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.gen-history-table .row-actions button { min-height: 24px; padding: 1px 8px; font-size: 12px; }
+.gen-badge {
+  display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 11.5px;
+  border: 1px solid var(--line); white-space: nowrap;
+}
+.gen-badge.success {
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: var(--accent-soft);
+}
+.gen-badge.failed {
+  color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+.gen-chip { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.gen-chip.ok { color: var(--accent); }
+.gen-chip.warn { color: var(--warn); }
+
+.batch-contract-list {
+  max-height: 250px; overflow: auto; border: 1px solid var(--line);
+  border-radius: 10px; padding: 4px; display: grid; gap: 2px;
+}
+.batch-contract-row {
+  display: grid; grid-template-columns: 20px minmax(120px, auto) 1fr auto;
+  gap: 10px; align-items: center; padding: 6px 8px; border-radius: 7px;
+  font-size: 13px; cursor: pointer;
+}
+.batch-contract-row:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.batch-contract-row input { width: 16px; height: 16px; }
+.batch-contract-row .grow {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.batch-contract-row .mono { font-size: 12px; }
+
+.pdf-overlay {
+  position: fixed; inset: 0; z-index: 80;
+  background: color-mix(in srgb, var(--card) 97%, transparent);
+  display: flex; flex-direction: column;
+}
+.pdf-overlay .tpl-preview-pages { flex: 1; }

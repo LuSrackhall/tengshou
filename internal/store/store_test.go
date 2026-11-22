@@ -42,8 +42,8 @@ func TestMigrationsOnEmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 6 {
-		t.Fatalf("schema version = %d, want 6", version)
+	if version != store.LatestSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", version, store.LatestSchemaVersion())
 	}
 	// Re-opening is idempotent.
 	st2, err := store.Open(st.Path())
@@ -51,7 +51,7 @@ func TestMigrationsOnEmptyDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	if v, _ := st2.SchemaVersion(); v != 6 {
+	if v, _ := st2.SchemaVersion(); v != store.LatestSchemaVersion() {
 		t.Fatalf("version after reopen = %d", v)
 	}
 }
@@ -85,7 +85,7 @@ func TestMigrationFromOldDatabase(t *testing.T) {
 		t.Fatalf("migrate old db: %v", err)
 	}
 	defer reopened.Close()
-	if v, _ := reopened.SchemaVersion(); v != 6 {
+	if v, _ := reopened.SchemaVersion(); v != store.LatestSchemaVersion() {
 		t.Fatalf("version = %d", v)
 	}
 	db2, err := sql.Open("sqlite", "file:"+path)
@@ -311,6 +311,16 @@ func TestMigrationUpgradesB1Database(t *testing.T) {
 			updated_at     TEXT NOT NULL,
 			UNIQUE (name, version)
 		);
+		CREATE TABLE output_documents (
+			id               TEXT PRIMARY KEY,
+			contract_id      TEXT,
+			template_id      TEXT,
+			template_version INTEGER NOT NULL DEFAULT 0,
+			file_path        TEXT NOT NULL,
+			sha256           TEXT NOT NULL,
+			page_count       INTEGER NOT NULL DEFAULT 0,
+			created_at       TEXT NOT NULL
+		);
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -348,5 +358,36 @@ func TestMigrationUpgradesB1Database(t *testing.T) {
 	}
 	if sigs.Items[0].ContractID != "" || sigs.Items[0].ContentSHA256 != "" {
 		t.Fatalf("legacy signature should have empty B5 links: %+v", sigs.Items[0])
+	}
+}
+
+// TestLatestSuccessfulDocumentUsesInsertionOrder pins the regenerate source to
+// the most recently inserted document. created_at is second-precision, so the
+// ids are chosen to make the old ORDER BY created_at DESC, id DESC pick the
+// wrong row: only rowid ordering returns the second document.
+func TestLatestSuccessfulDocumentUsesInsertionOrder(t *testing.T) {
+	st, _ := openStore(t)
+	ctx := context.Background()
+	contract := model.Contract{Title: "B4 排序测试"}
+	if err := st.PutContract(ctx, &contract); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	first := model.OutputDocument{ID: "doc_z", ContractID: contract.ID, FilePath: "outputs/first.pdf",
+		SHA256: "a", Status: model.DocumentStatusSuccess, CreatedAt: at}
+	second := model.OutputDocument{ID: "doc_a", ContractID: contract.ID, FilePath: "outputs/second.pdf",
+		SHA256: "b", Status: model.DocumentStatusSuccess, CreatedAt: at}
+	for _, d := range []*model.OutputDocument{&first, &second} {
+		if err := st.PutOutputDocument(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reader := mustReader(t, st)
+	got, err := reader.LatestSuccessfulDocument(ctx, contract.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != second.ID {
+		t.Fatalf("latest = %s, want %s (insertion order; id order would pick %s)", got.ID, second.ID, first.ID)
 	}
 }

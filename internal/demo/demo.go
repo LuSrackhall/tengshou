@@ -16,10 +16,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/LuSrackhall/tengshou/internal/config"
+	"github.com/LuSrackhall/tengshou/internal/app"
 	"github.com/LuSrackhall/tengshou/internal/model"
 	"github.com/LuSrackhall/tengshou/internal/pdfdoc"
-	"github.com/LuSrackhall/tengshou/internal/store"
+	"github.com/LuSrackhall/tengshou/internal/service"
 )
 
 //go:embed assets/contract_basic.html
@@ -27,19 +27,28 @@ var assets embed.FS
 
 // Result summarizes a generated demo.
 type Result struct {
-	Contract  model.Contract
-	PartyA    model.Party
-	PartyB    model.Party
-	Signature model.Signature
-	Template  model.Template
-	Document  model.OutputDocument
-	PDFPath   string
-	FontPath  string
+	Contract           model.Contract
+	HistoricalContract model.Contract
+	PartyA             model.Party
+	PartyB             model.Party
+	Signature          model.Signature
+	Template           model.Template
+	Document           model.OutputDocument
+	Fields             []model.FieldDefinition
+	PDFPath            string
+	FontPath           string
 }
 
-// Run seeds one contract (parties, signature image, HTML template), renders it
-// to PDF and records the output. It is idempotent: fixed demo ids are upserted.
-func Run(ctx context.Context, st *store.Store, gen *pdfdoc.Generator, paths config.Paths, now time.Time) (Result, error) {
+// Run seeds the demo dataset entirely through the product's own service layer:
+// every sample field is created with CreateField, every party and contract goes
+// through SaveParty / SaveContract, so there are no hard-coded sample columns.
+// It is idempotent: records are matched by contract number and archive name.
+func Run(ctx context.Context, a *app.App, now time.Time) (Result, error) {
+	gen, err := a.Generator()
+	if err != nil {
+		return Result{}, err
+	}
+	paths := a.Paths
 	if err := paths.EnsureDirs(); err != nil {
 		return Result{}, err
 	}
@@ -54,8 +63,35 @@ func Run(ctx context.Context, st *store.Store, gen *pdfdoc.Generator, paths conf
 		}
 	}
 
-	partyA := model.Party{
-		ID:      "demo-party-a",
+	svc := a.Service
+	contractFields := []service.FieldInput{
+		fieldInput(model.FieldEntityContract, "address", "房屋地址", model.FieldTypeText, "租赁房屋的坐落位置"),
+		fieldInput(model.FieldEntityContract, "area_sqm", "平方数", model.FieldTypeNumber, "建筑面积（平方米）"),
+		fieldInput(model.FieldEntityContract, "usage", "用途", model.FieldTypeText, "房屋用途"),
+		fieldInput(model.FieldEntityContract, "rent", "月租金", model.FieldTypeMoney, "每月租金（元）"),
+		fieldInput(model.FieldEntityContract, "deposit", "押金", model.FieldTypeMoney, "押金金额（元）"),
+		fieldInput(model.FieldEntityContract, "pay_method", "付款方式", model.FieldTypeLongText, "租金支付周期与方式"),
+		fieldInput(model.FieldEntityContract, "clause_1", "第一条", model.FieldTypeLongText, "租赁期限条款正文"),
+		fieldInput(model.FieldEntityContract, "clause_2", "第二条", model.FieldTypeLongText, "房屋使用与维修条款正文"),
+		fieldInput(model.FieldEntityContract, "clause_3", "第三条", model.FieldTypeLongText, "费用承担条款正文"),
+		fieldInput(model.FieldEntityContract, "clause_4", "第四条", model.FieldTypeLongText, "违约责任条款正文"),
+		imageFieldInput(model.FieldEntityContract, "signature", "签名图片", "assets/signatures/demo-signature.png"),
+	}
+	partyFields := []service.FieldInput{
+		fieldInput(model.FieldEntityParty, "legal_representative", "法定代表人", model.FieldTypeText, ""),
+		fieldInput(model.FieldEntityParty, "contact_phone", "联系电话", model.FieldTypeText, ""),
+		fieldInput(model.FieldEntityParty, "emergency_contact", "紧急联系人", model.FieldTypeText, ""),
+	}
+	createdFields := []model.FieldDefinition{}
+	for _, in := range append(append([]service.FieldInput{}, contractFields...), partyFields...) {
+		field, err := ensureField(ctx, svc, in)
+		if err != nil {
+			return Result{}, err
+		}
+		createdFields = append(createdFields, field)
+	}
+
+	partyA, err := upsertParty(ctx, svc, service.PartyInput{
 		Kind:    model.PartyOrganization,
 		Name:    "幸福村股份经济合作社",
 		Address: "幸福村村民委员会办公楼",
@@ -63,9 +99,11 @@ func Run(ctx context.Context, st *store.Store, gen *pdfdoc.Generator, paths conf
 			"legal_representative": "李国强",
 			"contact_phone":        "13800000001",
 		},
+	})
+	if err != nil {
+		return Result{}, err
 	}
-	partyB := model.Party{
-		ID:       "demo-party-b",
+	partyB, err := upsertParty(ctx, svc, service.PartyInput{
 		Kind:     model.PartyPerson,
 		Name:     "张三",
 		IDNumber: "11010119900101001X",
@@ -74,11 +112,8 @@ func Run(ctx context.Context, st *store.Store, gen *pdfdoc.Generator, paths conf
 		Data: map[string]any{
 			"emergency_contact": "李四 13800000003",
 		},
-	}
-	if err := st.PutParty(ctx, &partyA); err != nil {
-		return Result{}, err
-	}
-	if err := st.PutParty(ctx, &partyB); err != nil {
+	})
+	if err != nil {
 		return Result{}, err
 	}
 
@@ -99,7 +134,7 @@ func Run(ctx context.Context, st *store.Store, gen *pdfdoc.Generator, paths conf
 		CapturedAt: now,
 		CreatedAt:  now,
 	}
-	if err := st.PutSignature(ctx, &signature); err != nil {
+	if err := a.Store.PutSignature(ctx, &signature); err != nil {
 		return Result{}, err
 	}
 
@@ -111,13 +146,15 @@ func Run(ctx context.Context, st *store.Store, gen *pdfdoc.Generator, paths conf
 		Variables: pdfdoc.ExtractVariables(string(templateHTML)),
 		IsActive:  true,
 	}
-	if err := st.PutTemplate(ctx, &template); err != nil {
+	if err := a.Store.PutTemplate(ctx, &template); err != nil {
 		return Result{}, err
 	}
 
-	contract := model.Contract{
-		ID:         "demo-contract-1",
+	mainInput := service.ContractInput{
+		ContractNo: "DEMO-2026-001",
+		Year:       2026,
 		Title:      "幸福村 3 组 12 号房屋租赁合同",
+		Type:       "房屋租赁",
 		TemplateID: template.ID,
 		PartyAID:   partyA.ID,
 		PartyBID:   partyB.ID,
@@ -125,9 +162,10 @@ func Run(ctx context.Context, st *store.Store, gen *pdfdoc.Generator, paths conf
 		SignedOn:   "2026-11-22",
 		ValidFrom:  "2026-12-01",
 		ValidTo:    "2027-11-30",
+		Amount:     1200,
 		Data: map[string]any{
 			"address":    "幸福村 3 组 12 号",
-			"area":       "120 平方米",
+			"area_sqm":   120,
 			"usage":      "居住",
 			"rent":       1200,
 			"deposit":    2400,
@@ -136,11 +174,38 @@ func Run(ctx context.Context, st *store.Store, gen *pdfdoc.Generator, paths conf
 			"clause_2":   "乙方应爱护房屋及附属设施，不得擅自改变房屋结构。因乙方使用不当造成损坏的，由乙方负责修复或赔偿。乙方需要装修的，应事先取得甲方书面同意。",
 			"clause_3":   "租赁期间的水费、电费、燃气费、网络费等由乙方承担；房屋本体及原有设施的维修费用由甲方承担。双方应本着诚实信用原则履行本合同。",
 			"clause_4":   "任何一方违反本合同约定，应当承担违约责任并赔偿对方因此遭受的损失。本合同未尽事宜，双方可另行协商签订补充协议，补充协议与本合同具有同等法律效力。",
-			"signed_on":  "2026-11-22",
-			"signature":  "assets/signatures/demo-signature.png",
+			"signature":  sigRel,
 		},
+		Source: "demo",
 	}
-	if err := st.PutContract(ctx, &contract); err != nil {
+	contract, _, err := upsertContract(ctx, svc, mainInput)
+	if err != nil {
+		return Result{}, err
+	}
+
+	historicalInput := service.ContractInput{
+		ContractNo: "DEMO-2025-001",
+		Year:       2025,
+		Title:      "幸福村 2 组 8 号房屋租赁合同（2025 年）",
+		Type:       "房屋租赁",
+		TemplateID: template.ID,
+		PartyAID:   partyA.ID,
+		PartyBID:   partyB.ID,
+		Status:     model.ContractActive,
+		SignedOn:   "2025-01-05",
+		ValidFrom:  "2025-01-10",
+		ValidTo:    "2025-12-31",
+		Amount:     1000,
+		Data: map[string]any{
+			"address":  "幸福村 2 组 8 号",
+			"area_sqm": 96,
+			"usage":    "居住",
+			"rent":     1000,
+		},
+		Source: "demo",
+	}
+	historical, _, err := upsertContract(ctx, svc, historicalInput)
+	if err != nil {
 		return Result{}, err
 	}
 
@@ -168,19 +233,91 @@ func Run(ctx context.Context, st *store.Store, gen *pdfdoc.Generator, paths conf
 		PageCount:       res.PageCount,
 		CreatedAt:       now,
 	}
-	if err := st.PutOutputDocument(ctx, &document); err != nil {
+	if err := a.Store.PutOutputDocument(ctx, &document); err != nil {
 		return Result{}, err
 	}
 	return Result{
-		Contract:  contract,
-		PartyA:    partyA,
-		PartyB:    partyB,
-		Signature: signature,
-		Template:  template,
-		Document:  document,
-		PDFPath:   outPath,
-		FontPath:  res.FontPath,
+		Contract:           contract,
+		HistoricalContract: historical,
+		PartyA:             partyA,
+		PartyB:             partyB,
+		Signature:          signature,
+		Template:           template,
+		Document:           document,
+		Fields:             createdFields,
+		PDFPath:            outPath,
+		FontPath:           res.FontPath,
 	}, nil
+}
+
+func fieldInput(entity, key, label, fieldType, note string) service.FieldInput {
+	inLedger := true
+	inTemplate := true
+	return service.FieldInput{
+		Entity:     entity,
+		Key:        key,
+		Label:      label,
+		Type:       fieldType,
+		InLedger:   &inLedger,
+		InTemplate: &inTemplate,
+		Note:       &note,
+	}
+}
+
+func imageFieldInput(entity, key, label, note string) service.FieldInput {
+	inLedger := false
+	inTemplate := true
+	return service.FieldInput{
+		Entity:     entity,
+		Key:        key,
+		Label:      label,
+		Type:       model.FieldTypeImage,
+		InLedger:   &inLedger,
+		InTemplate: &inTemplate,
+		Note:       &note,
+	}
+}
+
+func ensureField(ctx context.Context, svc *service.Service, in service.FieldInput) (model.FieldDefinition, error) {
+	fields, err := svc.ListFields(ctx, in.Entity, true)
+	if err != nil {
+		return model.FieldDefinition{}, err
+	}
+	for _, field := range fields {
+		if field.Key == in.Key {
+			return field, nil
+		}
+	}
+	return svc.CreateField(ctx, in)
+}
+
+func upsertParty(ctx context.Context, svc *service.Service, in service.PartyInput) (model.Party, error) {
+	list, err := svc.ListParties(ctx, model.ListFilter{Limit: 50, Query: in.Name})
+	if err != nil {
+		return model.Party{}, err
+	}
+	for _, party := range list.Items {
+		if party.Name == in.Name {
+			in.ID = party.ID
+			break
+		}
+	}
+	party, _, err := svc.SaveParty(ctx, in)
+	return party, err
+}
+
+func upsertContract(ctx context.Context, svc *service.Service, in service.ContractInput) (model.Contract, []string, error) {
+	list, err := svc.ListContracts(ctx, model.ListFilter{Limit: 50, Query: in.ContractNo})
+	if err != nil {
+		return model.Contract{}, nil, err
+	}
+	for _, contract := range list.Items {
+		if contract.ContractNo == in.ContractNo {
+			in.ID = contract.ID
+			break
+		}
+	}
+	return svc.SaveContract(ctx, in)
 }
 
 // ensureSignature writes a generated handwritten-style signature PNG if it

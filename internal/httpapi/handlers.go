@@ -79,6 +79,7 @@ func (s *Server) handleAPIRoot(w http.ResponseWriter, r *http.Request) {
 		"schema":    "/api/v1/schema",
 		"resources": []string{
 			"/api/v1/stats",
+			"/api/v1/fields",
 			"/api/v1/parties",
 			"/api/v1/parties/{id}",
 			"/api/v1/contracts",
@@ -88,6 +89,35 @@ func (s *Server) handleAPIRoot(w http.ResponseWriter, r *http.Request) {
 			"/api/v1/signature-assets",
 			"/api/v1/documents",
 		},
+	})
+}
+
+func (s *Server) handleListFields(w http.ResponseWriter, r *http.Request) {
+	entity := strings.TrimSpace(r.URL.Query().Get("entity"))
+	if entity != "" {
+		fields, err := s.opts.Reader.ListFieldDefinitions(r.Context(), entity, false)
+		if err != nil {
+			s.internalError(w, "list fields", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, model.List[model.FieldDefinition]{
+			Items: fields, Total: len(fields), Limit: len(fields), Offset: 0,
+		})
+		return
+	}
+	contractFields, err := s.opts.Reader.ListFieldDefinitions(r.Context(), model.FieldEntityContract, false)
+	if err != nil {
+		s.internalError(w, "list contract fields", err)
+		return
+	}
+	partyFields, err := s.opts.Reader.ListFieldDefinitions(r.Context(), model.FieldEntityParty, false)
+	if err != nil {
+		s.internalError(w, "list party fields", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"contract": contractFields,
+		"party":    partyFields,
 	})
 }
 
@@ -194,6 +224,10 @@ func filter(r *http.Request) model.ListFilter {
 		Offset: intParam(r, "offset", 0),
 		Query:  strings.TrimSpace(r.URL.Query().Get("q")),
 		Status: strings.TrimSpace(r.URL.Query().Get("status")),
+		Year:   intParam(r, "year", 0),
+	}
+	if f.Year < 0 {
+		f.Year = 0
 	}
 	f.Normalize()
 	return f

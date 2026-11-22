@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>腾手 · 合同台账</title>
+<link rel="stylesheet" href="/app/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <h1>腾手</h1>
+    <span class="tagline">合同数据录一次，台账、模板与导出共用</span>
+  </div>
+  <nav class="tabs" id="tabs" aria-label="功能页">
+    <button type="button" data-tab="contracts" class="active">合同台账</button>
+    <button type="button" data-tab="parties">相对方档案</button>
+    <button type="button" data-tab="fields">字段</button>
+    <button type="button" data-tab="changelog">变更记录</button>
+  </nav>
+  <div class="meta" id="meta"></div>
+</header>
+
+<main>
+  <section id="view-contracts" class="view active" aria-label="合同台账">
+    <div class="toolbar">
+      <label class="inline">年度
+        <select id="yearSelect"></select>
+      </label>
+      <input id="contractSearch" type="search" placeholder="搜索编号 / 名称 / 相对方" autocomplete="off">
+      <select id="statusFilter" aria-label="合同状态">
+        <option value="">全部状态</option>
+        <option value="draft">草稿</option>
+        <option value="active">生效</option>
+        <option value="archived">归档</option>
+      </select>
+      <span class="spacer"></span>
+      <button type="button" id="newContractBtn" class="primary">新建合同</button>
+      <button type="button" id="downloadTemplateBtn">Excel 模板</button>
+      <button type="button" id="importBtn">导入 Excel</button>
+      <button type="button" id="exportLedgerBtn">导出台账</button>
+    </div>
+    <div id="contractSummary" class="summary"></div>
+    <div class="table-wrap">
+      <table id="contractTable" class="data-table"></table>
+    </div>
+  </section>
+
+  <section id="view-parties" class="view" aria-label="相对方档案">
+    <div class="toolbar">
+      <input id="partySearch" type="search" placeholder="搜索名称 / 证件号 / 电话" autocomplete="off">
+      <span class="spacer"></span>
+      <button type="button" id="newPartyBtn" class="primary">新建相对方</button>
+    </div>
+    <div id="partySummary" class="summary"></div>
+    <div class="table-wrap">
+      <table id="partyTable" class="data-table"></table>
+    </div>
+  </section>
+
+  <section id="view-fields" class="view" aria-label="字段管理">
+    <div class="toolbar">
+      <div class="segmented" id="fieldEntityTabs">
+        <button type="button" data-entity="contract" class="active">合同字段</button>
+        <button type="button" data-entity="party">相对方字段</button>
+      </div>
+      <label class="inline"><input type="checkbox" id="showArchivedFields"> 显示已归档</label>
+      <span class="spacer"></span>
+      <button type="button" id="newFieldBtn" class="primary">新建字段</button>
+    </div>
+    <p class="hint">字段是您自己的：新增后立刻可用于录入表单、Excel 导入导出与模板占位符，无需重启或更新软件。旧数据始终保留。</p>
+    <div id="fieldSummary" class="summary"></div>
+    <div class="table-wrap">
+      <table id="fieldTable" class="data-table"></table>
+    </div>
+  </section>
+
+  <section id="view-changelog" class="view" aria-label="变更记录">
+    <div class="toolbar">
+      <select id="changeEntityFilter" aria-label="对象类型">
+        <option value="">全部对象</option>
+        <option value="contract">合同</option>
+        <option value="party">相对方</option>
+        <option value="field">字段</option>
+      </select>
+      <span class="spacer"></span>
+      <button type="button" id="refreshChangelogBtn">刷新</button>
+    </div>
+    <p class="hint">记录谁在何时改了什么。操作者取自本机系统用户，可在 config.json 的 operator 中指定。</p>
+    <div id="changelogSummary" class="summary"></div>
+    <div id="changelogList" class="changelog"></div>
+  </section>
+</main>
+
+<input type="file" id="importFile" accept=".xlsx" hidden>
+<div id="modalRoot"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="/app/app.js"></script>
+</body>
+</html>

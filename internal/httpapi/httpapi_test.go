@@ -14,6 +14,7 @@ import (
 	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/httpapi"
 	"github.com/LuSrackhall/tengshou/internal/model"
+	"github.com/LuSrackhall/tengshou/internal/service"
 	"github.com/LuSrackhall/tengshou/internal/store"
 )
 
@@ -21,7 +22,9 @@ const token = "test-token"
 
 type fixture struct {
 	server  *httptest.Server
+	handler http.Handler
 	partyID string
+	service *service.Service
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -69,15 +72,17 @@ func newFixture(t *testing.T) *fixture {
 	cfg.HTTP.AllowLAN = false
 	cfg.HTTP.Bind = "127.0.0.1"
 	cfg.HTTP.Token = token
+	svc := service.New(st, reader, "tester")
 	server := httpapi.New(httpapi.Options{
 		Reader:  reader,
+		Service: svc,
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Config:  cfg,
 		Version: "test",
 	})
 	ts := httptest.NewServer(server.Handler())
 	t.Cleanup(ts.Close)
-	return &fixture{server: ts, partyID: partyA.ID}
+	return &fixture{server: ts, handler: server.Handler(), partyID: partyA.ID, service: svc}
 }
 
 func (f *fixture) get(t *testing.T, path string, auth bool) (*http.Response, []byte) {
@@ -133,7 +138,7 @@ func TestIndexPage(t *testing.T) {
 
 func TestDataEndpointsRequireToken(t *testing.T) {
 	f := newFixture(t)
-	for _, path := range []string{"/api/v1/parties", "/api/v1/contracts", "/api/v1/templates", "/api/v1/stats", "/api/v1/schema"} {
+	for _, path := range []string{"/api/v1/parties", "/api/v1/contracts", "/api/v1/templates", "/api/v1/stats", "/api/v1/schema", "/api/v1/fields"} {
 		resp, body := f.get(t, path, false)
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("%s without token: status %d body=%s", path, resp.StatusCode, body)

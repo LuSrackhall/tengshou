@@ -13,7 +13,7 @@
 | `.PartyA` | 对象 / 空 | 甲方档案（`Name`、`IDNumber`、`Phone`、`Address`、`Data`） |
 | `.PartyB` | 对象 / 空 | 乙方档案 |
 | `.Signatures` | 数组 | 签名资产元数据（`AssetPath`、`SignerName`、`SHA256`…） |
-| `.Data` | 对象 | 合同扩展字段（租金、地址、条款正文等） |
+| `.Data` | 对象 | 动态字段值，键为字段定义中的 `key`（如 `{{.Data.area_sqm}}`） |
 | `.Now` | 时间 | 生成时间 |
 
 辅助函数：
@@ -34,6 +34,30 @@
 ```
 
 模板采用严格模式：引用不存在的 `.Data` 键会报错，避免生成空白合同。
+
+## 内置字段与动态字段
+
+合同核心字段直接来自 `.Contract`：
+
+| 占位符 | 含义 |
+| --- | --- |
+| `{{.Contract.ContractNo}}` | 合同编号（稳定唯一） |
+| `{{.Contract.Year}}` | 年度 |
+| `{{.Contract.Title}}` | 合同名称 |
+| `{{.Contract.Type}}` | 合同类型 |
+| `{{.Contract.Amount}}` | 金额 |
+| `{{.Contract.SignedOn}}` / `.ValidFrom` / `.ValidTo` | 日期 |
+| `{{.Contract.Status}}` | 状态（draft/active/archived） |
+
+相对方档案使用 `.PartyA` / `.PartyB`（`Name`、`IDNumber`、`Phone`、`Address`、
+`Data.<字段键>`）。用户新增字段后，直接用字段键写入模板，例如：
+
+```html
+<p>建筑面积：{{.Data.area_sqm}} 平方米</p>
+```
+
+字段的「用于模板占位符」开关控制它是否出现在字段说明与表单提示中；模板渲染本身
+按数据键取值。新增字段无需改模板或重启即可生效（模板引用新键后重新生成 PDF）。
 
 ## 支持的 HTML
 

@@ -3,23 +3,30 @@
 让村里的签合同变成录台账：合同数据录一次，程序产出合同 PDF 与自有台账；
 外部表格格式通过只读数据接口交给用户侧 AI agent 处理，核心不做平台适配。
 
-当前仓库处于 **B1 工程地基**：桌面壳、本地服务、SQLite、HTML→PDF 流水线、
-构建与 CI。业务功能（相对方档案、模板管理、签名页等）按 bead 后续交付。
+当前仓库处于 **B2 数据底座**：在 B1 工程地基上加入动态字段、合同/相对方
+档案、Excel 录入与台账导出、年度视图与变更记录。模板管理与签名页按 bead 后续交付。
 
-## 当前能力（B1）
+## 当前能力（B2）
 
-- **Wails v3 桌面壳**：`cmd/tengshou`，窗口直接加载本地 Web UI。
-- **内嵌 Go 本地服务**：默认监听 `0.0.0.0:8765`，同一局域网手机可打开测试页；
-  数据接口需令牌，测试页与健康检查公开。
-- **SQLite 持久化**：纯 Go 驱动（无 cgo），内置迁移；空库 / 旧库均可升级；
-  重启不丢数据。
-- **HTML → PDF**：模板 + 合同数据生成带页码的 A4 PDF，支持中文、表格、
-  分页、图片嵌入（签名图片）。
-- **示例闭环**：一条合同数据 + 一份 HTML 模板 + 一张签名图片 → 一份 PDF。
-- **只读数据接口**：`/api/v1/*`，供 B6 MCP 连接器与用户侧 agent 取数。
-- **备份约定**：`VACUUM INTO` 备份到 `<data>/backups/`。
-- **构建与发布**：`scripts/build.sh`、`scripts/build-windows.ps1`；
-  GitHub Actions 测试 + 多平台构建，打 `v*` 标签时发布 pre-release。
+- **合同台账**：本地 Web 界面（`/app/`）内置表格录入、年度切换与跨年查询、
+  搜索、状态筛选；合同编号稳定唯一（`HT-YYYY-NNNN` 或自定义）且创建后不可修改。
+- **动态字段**：运行时新增/修改/归档字段（名称、类型、必填、默认值、是否出现在
+  台账/模板），无需重启或发版；旧数据保留；新增字段立即用于表单、Excel、模板占位符。
+- **相对方档案**：名称、类型、证件号、电话、地址、备注 + 自定义字段；合同录入时
+  输入新名称自动建档；被合同引用时禁止删除。
+- **Excel 入口**：按当前字段定义生成录入模板（表头动态生成）；导入支持列名映射、
+  逐行预览、新增/更新合并、错误行报告；台账导出使用同一套列定义，可导出后再导回。
+- **变更记录**：谁在何时改了什么（字段级 diff），操作者取系统用户或 `config.json`
+  的 `operator`。
+- **Wails v3 桌面壳**：`cmd/tengshou`，窗口加载 `/app/` 台账界面。
+- **内嵌 Go 本地服务**：默认监听 `0.0.0.0:8765`；局域网测试页公开，只读数据接口
+  需令牌；应用写入接口只允许本机（回环）并校验请求头 / Origin。
+- **SQLite 持久化**：纯 Go 驱动，内置迁移（v3）；B1 旧库自动补合同编号与年度。
+- **HTML → PDF**：模板 + 合同数据生成带页码的 A4 PDF（中文、分页、图片）。
+- **只读数据接口**：`/api/v1/*`，供 B6 MCP 连接器与用户侧 agent 取数；
+  新增 `/api/v1/fields` 暴露字段定义。
+- **备份约定**：`VACUUM INTO` 备份到 `<data>/backups/`（含字段定义与数据）。
+- **构建与发布**：`scripts/build.sh`、`scripts/build-windows.ps1`；GitHub Actions。
 
 ## 快速开始
 
@@ -29,11 +36,12 @@
 go run ./cmd/tengshou-cli demo --data-dir ./data
 ```
 
-启动本地服务与局域网测试页：
+启动本地服务与台账界面：
 
 ```bash
 go run ./cmd/tengshou-cli serve --data-dir ./data
-# 终端会列出本机 / 局域网地址与数据接口令牌
+# 电脑浏览器打开 http://127.0.0.1:8765/app/
+# 终端会列出本机 / 局域网地址与只读数据接口令牌
 ```
 
 启动桌面应用：
@@ -42,6 +50,9 @@ go run ./cmd/tengshou-cli serve --data-dir ./data
 go run ./cmd/tengshou
 # 或先构建：./scripts/build.sh && ./dist/tengshou
 ```
+
+Excel 模板下载、导入与台账导出都在 `/app/` 的「合同台账」页；也可直接访问
+`/app/api/v1/excel/template` 与 `/app/api/v1/excel/ledger`（仅本机）。
 
 重新生成合同 PDF：
 
@@ -124,7 +135,9 @@ cmd/tengshou-cli/       无界面命令行
 internal/app/           资源装配
 internal/config/        配置与数据目录
 internal/store/         SQLite、迁移、只读查询
-internal/httpapi/       本地 HTTP 服务与测试页
+internal/httpapi/       本地 HTTP 服务、台账界面与应用接口
+internal/service/       可写业务层：字段、档案、合同、Excel、变更记录
+internal/xlsx/          Excel 模板生成、台账导出与解析
 internal/pdfdoc/        HTML 解析 → 排版 → PDF
 internal/demo/          示例数据与签名 PNG 生成
 internal/model/         稳定数据结构（对外 JSON 契约）
@@ -135,8 +148,8 @@ internal/model/         稳定数据结构（对外 JSON 契约）
 - 不做云服务、多租户、跨单位协同；全部数据留在本机。
 - 不代替上级办文 / 采购流程，不做公章法定电子认证（只处理图片落位）。
 - 不内置外部台账模板引擎；外部格式经只读数据接口交给用户侧 agent。
-- 本版本（B1）不包含签名采集页、模板编辑器、Excel 导入、MCP 连接器；
-  这些分别在 B5 / B3 / B2 / B6 交付。
+- B2 不包含签名采集页、模板编辑器、MCP 连接器；分别在 B5 / B3 / B6 交付。
+- Excel 导入只接受 `.xlsx`，单次最多 10000 行；手机扫码填表由 D7 边界决定。
 - Windows 安装包、代码签名与 Microsoft Store 上架属于 B10；B1 只保证
   Windows 构建链在 CI 上可用。
 

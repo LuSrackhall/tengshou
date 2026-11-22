@@ -10,16 +10,18 @@ import (
 	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/logging"
 	"github.com/LuSrackhall/tengshou/internal/pdfdoc"
+	"github.com/LuSrackhall/tengshou/internal/service"
 	"github.com/LuSrackhall/tengshou/internal/store"
 )
 
 // App owns the long-lived application resources.
 type App struct {
-	Paths  config.Paths
-	Config config.Config
-	Logger *slog.Logger
-	Store  *store.Store
-	Reader *store.Reader
+	Paths   config.Paths
+	Config  config.Config
+	Logger  *slog.Logger
+	Store   *store.Store
+	Reader  *store.Reader
+	Service *service.Service
 
 	logCloser io.Closer
 
@@ -59,6 +61,7 @@ func Open(dataDir string) (*App, error) {
 		Logger:    logger,
 		Store:     st,
 		Reader:    reader,
+		Service:   service.New(st, reader, cfg.Operator),
 		logCloser: closer,
 	}, nil
 }

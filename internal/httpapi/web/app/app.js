@@ -1319,8 +1319,9 @@ async function openTemplateEditor(template) {
               </select></div>
             <div class="field" id="tplAddFieldWrap"><label for="tplAddField">字段</label>
               <select id="tplAddField">${templateFieldOptionsHTML()}</select></div>
-            <div class="field" id="tplAddPartyWrap" style="display:none"><label for="tplAddParty">签名方</label>
+            <div class="field" id="tplAddPartyWrap" style="display:none"><label for="tplAddParty">签名方 / 公章所属方</label>
               <select id="tplAddParty">
+                <option value="">（自动 / 不限）</option>
                 <option value="party_b">乙方</option>
                 <option value="party_a">甲方</option>
               </select></div>
@@ -1655,6 +1656,10 @@ function addTemplatePlacement(editor) {
     placement.align = "left";
   } else if (kind === "signature") {
     placement.party = $("#tplAddParty", editor.modal.body).value;
+    if (!placement.party) {
+      toast("请选择签名方（甲方或乙方）", true);
+      return;
+    }
     placement.w = 130;
     placement.h = 50;
   } else {
@@ -1756,7 +1761,8 @@ function syncTemplateAddSealControls(editor) {
   const mode = $("#tplAddSealMode", editor.modal.body).value;
   const wrap = $("#tplAddSealWrap", editor.modal.body);
   wrap.style.display = kind === "seal" && mode === "seal" ? "" : "none";
-  $("#tplAddPartyWrap", editor.modal.body).style.display = kind === "seal" ? "" : "none";
+  $("#tplAddPartyWrap", editor.modal.body).style.display =
+    (kind === "signature" || kind === "seal") ? "" : "none";
 }
 
 async function loadTemplateUsage(editor) {

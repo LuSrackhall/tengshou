@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>{{.Contract.Title}}</title></head>
+<body>
+<h1 style="text-align:center;font-size:22pt">{{.Contract.Title}}</h1>
+
+<p style="text-align:center;color:#666">合同编号：{{.Contract.ID}}</p>
+
+<p><strong>甲方（出租方）：</strong>{{.PartyA.Name}}</p>
+<p>统一社会信用代码/身份证号：{{default "—" .PartyA.IDNumber}}</p>
+<p>地址：{{.PartyA.Address}}</p>
+
+<p><strong>乙方（承租方）：</strong>{{.PartyB.Name}}</p>
+<p>身份证号：{{.PartyB.IDNumber}}</p>
+<p>联系电话：{{.PartyB.Phone}}</p>
+<p>联系地址：{{.PartyB.Address}}</p>
+
+<p style="text-indent:8mm">根据《中华人民共和国民法典》及有关法律法规的规定，甲乙双方在平等、自愿、协商一致的基础上，就房屋租赁事宜达成如下协议：</p>
+
+<h2>第一条 租赁房屋基本情况</h2>
+<table style="font-size:10pt">
+  <tr><th style="width:35mm">项目</th><th>内容</th></tr>
+  <tr><td>房屋坐落</td><td>{{.Data.address}}</td></tr>
+  <tr><td>建筑面积</td><td>{{.Data.area}}</td></tr>
+  <tr><td>租赁用途</td><td>{{.Data.usage}}</td></tr>
+  <tr><td>月租金</td><td>{{money .Data.rent}} 元</td></tr>
+  <tr><td>押金</td><td>{{money .Data.deposit}} 元</td></tr>
+  <tr><td>支付方式</td><td>{{.Data.pay_method}}</td></tr>
+</table>
+
+<h2>第二条 租赁期限</h2>
+<p style="text-indent:8mm">{{.Data.clause_1}}</p>
+
+<h2>第三条 房屋使用与维修</h2>
+<p style="text-indent:8mm">{{.Data.clause_2}}</p>
+
+<div class="page-break"></div>
+
+<h2>第四条 费用承担</h2>
+<p style="text-indent:8mm">{{.Data.clause_3}}</p>
+
+<h2>第五条 违约责任</h2>
+<p style="text-indent:8mm">{{.Data.clause_4}}</p>
+
+<h2>第六条 其他约定</h2>
+<p style="text-indent:8mm">本合同自双方签字（盖章）之日起生效。本合同一式两份，甲乙双方各执一份，具有同等法律效力。</p>
+
+<p style="margin-top:10mm">甲方（盖章）：{{.PartyA.Name}}</p>
+<p>法定代表人或委托代理人：{{default "—" .PartyA.Data.legal_representative}}</p>
+<p style="margin-top:8mm">乙方（签字）：</p>
+<p><img src="{{.Data.signature}}" style="width:45mm"></p>
+
+<p style="margin-top:10mm">签署日期：{{cnDate .Data.signed_on}}</p>
+</body>
+</html>

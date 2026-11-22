@@ -29,3 +29,7 @@ dist/
 .env
 *.pem
 *.key
+
+# 腾手本地数据 / 构建产物
+/data/
+*.log

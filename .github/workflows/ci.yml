@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: 测试（Linux）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 安装中文字体
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+          FONT="$(find /usr/share/fonts -iname 'NotoSansCJK-Regular.ttc' | head -1)"
+          if [ -z "$FONT" ]; then
+            echo "未找到 Noto CJK 字体，PDF 中文测试无法执行" >&2
+            exit 1
+          fi
+          echo "TENGHSHOU_FONT=$FONT" >> "$GITHUB_ENV"
+      - name: 静态检查
+        run: go vet ./internal/... ./cmd/tengshou-cli
+      - name: 单元与集成测试
+        run: go test -count=1 ./internal/... ./cmd/tengshou-cli
+
+  cli:
+    name: 构建 CLI（${{ matrix.goos }}/${{ matrix.goarch }}）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 构建
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+          VERSION="${GITHUB_REF_NAME:-0.1.0-dev}"
+          go build -trimpath -ldflags "-s -w \
+            -X github.com/LuSrackhall/tengshou/internal/version.Version=${VERSION} \
+            -X github.com/LuSrackhall/tengshou/internal/version.Commit=${GITHUB_SHA::7}" \
+            -o "dist/tengshou-cli-${GOOS}-${GOARCH}${EXT}" ./cmd/tengshou-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tengshou-cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  desktop:
+    name: 构建桌面壳（${{ matrix.goos }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            goos: darwin
+            goarch: arm64
+            cgo: "1"
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            cgo: "0"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 构建桌面应用
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo }}
+        run: |
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+          VERSION="${GITHUB_REF_NAME:-0.1.0-dev}"
+          LDFLAGS="-s -w -X github.com/LuSrackhall/tengshou/internal/version.Version=${VERSION}"
+          if [ "$GOOS" = "windows" ]; then LDFLAGS="$LDFLAGS -H windowsgui"; fi
+          go build -trimpath -ldflags "$LDFLAGS" -o "dist/tengshou-${GOOS}-${GOARCH}${EXT}" ./cmd/tengshou
+      - name: 打包（Windows）
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/tengshou-windows-amd64.exe -DestinationPath dist/tengshou-windows-amd64.zip
+      - name: 打包（macOS）
+        if: matrix.goos == 'darwin'
+        run: |
+          cd dist
+          tar -czf tengshou-darwin-arm64.tar.gz tengshou-darwin-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tengshou-desktop-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: 发布预发布版
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, cli, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 列出产物
+        run: ls -lh dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          generate_release_notes: true
+          files: dist/*
+          fail_on_unmatched_files: true

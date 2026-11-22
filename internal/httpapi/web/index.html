@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>腾手 · 本地服务</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f7f7f5; --card:#ffffff; --ink:#1f2328; --muted:#5f6670; --line:#e3e4e6; --accent:#1f6f4a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16181b; --card:#1e2125; --ink:#e8e9eb; --muted:#9aa1aa; --line:#30343a; --accent:#6fbf95; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 20px 48px; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: .02em; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border:1px solid var(--line); border-radius:14px; padding:20px 22px; margin-bottom:16px; }
+  .status { display:flex; align-items:center; gap:10px; font-weight:600; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+  h2 { font-size:15px; margin:0 0 10px; color:var(--muted); font-weight:600; letter-spacing:.04em; }
+  ul { margin:0; padding-left:20px; }
+  li { margin:6px 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size:14px; background:color-mix(in srgb, var(--ink) 7%, transparent); padding:1px 6px; border-radius:6px; word-break: break-all; }
+  .note { color:var(--muted); font-size:14px; margin:0; }
+  .tag { display:inline-block; font-size:12px; border:1px solid var(--line); border-radius:999px; padding:1px 10px; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>腾手</h1>
+  <p class="sub">本机合同文书工具 · 本地服务</p>
+
+  <section class="card">
+    <div class="status"><span class="dot"></span>本地服务运行中</div>
+    <p class="note" style="margin-top:8px">版本 {{.Version}} · 数据库结构 v{{.SchemaVersion}}</p>
+  </section>
+
+  <section class="card">
+    <h2>访问地址</h2>
+    <ul>
+      {{range .URLs}}<li><code>{{.}}</code></li>{{end}}
+    </ul>
+    <p class="note" style="margin-top:10px">手机与电脑连接同一 Wi-Fi 后，在浏览器打开局域网地址即可看到本页。</p>
+  </section>
+
+  <section class="card">
+    <h2>数据接口</h2>
+    <p class="note">只读 JSON 接口位于 <code>/api/v1</code>，接口说明见 <code>/api/v1/schema</code>。</p>
+    {{if .TokenRequired}}<p class="note">请求需携带令牌（<code>Authorization: Bearer &lt;token&gt;</code> 或 <code>X-Api-Token</code>）；令牌保存在电脑上的 <code>config.json</code> 中。</p>{{end}}
+  </section>
+
+  <section class="card">
+    <h2>说明</h2>
+    <p class="note">本页仅用于确认服务连通。手写签名页将在后续版本提供；当前版本不通过本页展示任何合同数据。</p>
+    <p class="note"><span class="tag">离线运行</span> <span class="tag">仅局域网</span></p>
+  </section>
+</main>
+</body>
+</html>

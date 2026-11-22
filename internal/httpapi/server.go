@@ -177,6 +177,10 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /app/", s.handleAppIndex)
 	m.HandleFunc("GET /app/app.js", s.handleAppAsset("app.js", "application/javascript; charset=utf-8"))
 	m.HandleFunc("GET /app/app.css", s.handleAppAsset("app.css", "text/css; charset=utf-8"))
+	m.HandleFunc("GET /app/vendor/pdf.min.js",
+		s.handleAppAsset("vendor/pdfjs/pdf.min.js", "application/javascript; charset=utf-8"))
+	m.HandleFunc("GET /app/vendor/pdf.worker.min.js",
+		s.handleAppAsset("vendor/pdfjs/pdf.worker.min.js", "application/javascript; charset=utf-8"))
 	m.HandleFunc("GET /api/v1/health", s.handleHealth)
 	m.HandleFunc("GET /api/v1/schema", s.auth(s.handleSchema))
 	m.HandleFunc("GET /api/v1/stats", s.auth(s.handleStats))
@@ -224,6 +228,21 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /app/api/v1/excel/ledger", s.handleAppExcelLedger)
 	m.HandleFunc("POST /app/api/v1/excel/preview", s.handleAppExcelPreview)
 	m.HandleFunc("POST /app/api/v1/excel/commit", s.handleAppExcelCommit)
+
+	// B3 PDF template management: import a Word file (converted to PDF) or a
+	// PDF, calibrate positions, preview and generate stamped PDFs.
+	m.HandleFunc("GET /app/api/v1/templates", s.handleAppListTemplates)
+	m.HandleFunc("POST /app/api/v1/templates/import", s.handleAppImportTemplate)
+	m.HandleFunc("GET /app/api/v1/templates/{id}", s.handleAppGetTemplate)
+	m.HandleFunc("DELETE /app/api/v1/templates/{id}", s.handleAppDeleteTemplate)
+	m.HandleFunc("PUT /app/api/v1/templates/{id}/mapping", s.handleAppSaveTemplateMapping)
+	m.HandleFunc("GET /app/api/v1/templates/{id}/usage", s.handleAppTemplateUsage)
+	m.HandleFunc("GET /app/api/v1/templates/{id}/pdf", s.handleAppTemplatePDF)
+	m.HandleFunc("GET /app/api/v1/templates/{id}/source", s.handleAppTemplateSource)
+	m.HandleFunc("POST /app/api/v1/templates/{id}/preview", s.handleAppPreviewTemplate)
+	m.HandleFunc("POST /app/api/v1/templates/{id}/generate", s.handleAppGenerateContract)
+	m.HandleFunc("GET /app/api/v1/converters", s.handleAppConverters)
+	m.HandleFunc("GET /app/api/v1/documents/{id}/file", s.handleAppDocumentFile)
 	m.HandleFunc("GET /app/api/v1", s.handleAppAPIRoot)
 
 	// B5 LAN signature capture. Signing sessions are created from the
@@ -414,9 +433,13 @@ func (s *Server) withSecurityHeaders(next http.Handler) http.Handler {
 				"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "+
 					"img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 		} else if strings.HasPrefix(r.URL.Path, "/app/") && !strings.HasPrefix(r.URL.Path, "/app/api/") {
+			// PDF.js renders template pages to canvas in a same-origin worker;
+			// blob: is allowed for its worker/font fallbacks only.
 			w.Header().Set("Content-Security-Policy",
 				"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
-					"img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+					"img-src 'self' data: blob:; font-src 'self' data: blob:; "+
+					"connect-src 'self'; worker-src 'self' blob:; "+
+					"base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 		} else if !strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasPrefix(r.URL.Path, "/app/api/") {
 			w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'")
 		}

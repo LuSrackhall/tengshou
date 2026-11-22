@@ -201,7 +201,7 @@ func (s *Server) handleAppSealImage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	full, err := sealImageFile(svc.DataDir(), seal.AssetPath)
+	full, err := assetFilePath(svc.DataDir(), seal.AssetPath)
 	if err != nil {
 		s.internalError(w, "resolve seal image", err)
 		return
@@ -227,7 +227,7 @@ func (s *Server) handleAppSealImage(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(raw)
 }
 
-func sealImageFile(root, rel string) (string, error) {
+func assetFilePath(root, rel string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		return "", errors.New("data directory is not configured")
 	}

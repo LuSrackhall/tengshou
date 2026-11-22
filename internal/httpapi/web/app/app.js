@@ -11,6 +11,10 @@ const state = {
   seals: [],
   sealTotal: 0,
   sealQ: "",
+  templates: [],
+  templateTotal: 0,
+  templateQ: "",
+  converters: [],
   years: [],
   year: "",
   contractQ: "",
@@ -22,12 +26,18 @@ const state = {
   tab: "contracts",
 };
 
+/* PDF.js renders imported template PDFs. The worker is vendored locally so
+   the desktop app stays fully offline. */
+if (typeof pdfjsLib !== "undefined") {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "/app/vendor/pdf.worker.min.js";
+}
+
 const TYPE_LABELS = {
   text: "文本", longtext: "长文本", number: "数字", money: "金额", date: "日期",
   select: "单选", bool: "是/否", image: "图片路径", party: "相对方", status: "状态",
 };
 
-const ENTITY_LABELS = { contract: "合同", party: "相对方", field: "字段", seal: "公章" };
+const ENTITY_LABELS = { contract: "合同", party: "相对方", field: "字段", seal: "公章", template: "模板" };
 const ACTION_LABELS = { create: "新建", update: "修改", delete: "删除", archive: "归档", import: "导入" };
 
 /* ---------- 基础工具 ---------- */
@@ -110,6 +120,7 @@ function fmtDate(iso) {
 
 function closeModal() {
   stopSignPolling();
+  destroyTemplateEditor();
   if (currentSignSessionId) {
     const id = currentSignSessionId;
     currentSignSessionId = null;
@@ -127,8 +138,9 @@ function openModal(title, opts) {
   const root = document.getElementById("modalRoot");
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
+  const modalClass = ["modal", options.wide ? "wide" : "", options.full ? "full" : ""].filter(Boolean).join(" ");
   backdrop.innerHTML = `
-    <div class="modal ${options.wide ? "wide" : ""}" role="dialog" aria-modal="true">
+    <div class="${modalClass}" role="dialog" aria-modal="true">
       <div class="modal-head"><h2>${esc(title)}</h2>
         <button type="button" class="close" aria-label="关闭">×</button></div>
       <div class="modal-body"></div>
@@ -141,6 +153,7 @@ function openModal(title, opts) {
     el: backdrop,
     body: $(".modal-body", backdrop),
     foot: $(".modal-foot", backdrop),
+    title: $(".modal-head h2", backdrop),
     close: closeModal,
   };
 }
@@ -195,6 +208,23 @@ async function loadSeals() {
   const data = await api("/app/api/v1/seals?" + params.toString());
   state.seals = data.items || [];
   state.sealTotal = data.total || 0;
+}
+
+async function loadTemplates() {
+  const params = new URLSearchParams({ limit: "500", kind: "pdf" });
+  if (state.templateQ) params.set("q", state.templateQ);
+  const data = await api("/app/api/v1/templates?" + params.toString());
+  state.templates = data.items || [];
+  state.templateTotal = data.total || 0;
+}
+
+async function loadConverters() {
+  try {
+    const data = await api("/app/api/v1/converters");
+    state.converters = data.items || [];
+  } catch (_) {
+    state.converters = [];
+  }
 }
 
 async function loadContracts() {
@@ -261,12 +291,13 @@ async function downloadWorkbook(kind) {
 }
 
 async function reloadAll() {
-  await Promise.all([loadFields(), loadParties(), loadContracts(), loadSeals()]);
+  await Promise.all([loadFields(), loadParties(), loadContracts(), loadSeals(), loadTemplates()]);
   renderMeta();
   renderContracts();
   renderParties();
   renderFields();
   renderSeals();
+  renderTemplates();
 }
 
 /* ---------- 顶栏 / 年度 ---------- */
@@ -278,6 +309,7 @@ function renderMeta() {
   meta.innerHTML = `
     <span>操作者：${esc(state.bootstrap.operator || "")}</span>
     <span>合同 ${stats.contracts || 0} 份</span>
+    <span>模板 ${stats.templates || 0} 版</span>
     <span>相对方 ${stats.parties || 0} 个</span>
     <span>公章 ${stats.seals || 0} 枚</span>
     <span>字段 ${stats.fields || 0} 个</span>`;
@@ -1009,6 +1041,954 @@ async function copyText(text) {
   }
 }
 
+/* ---------- 模板管理（Word → PDF 套印，B3） ---------- */
+
+let templateEditor = null;
+
+function templateConverterLabel(converter) {
+  if (converter === "word") return "Microsoft Word";
+  if (converter === "libreoffice") return "LibreOffice";
+  if (converter === "pdf") return "PDF 直接导入";
+  return converter || "—";
+}
+
+function renderTemplates() {
+  const table = $("#templateTable");
+  if (!table) return;
+  const familyNames = new Set(state.templates.map((t) => t.name));
+  $("#templateSummary").textContent =
+    `共 ${familyNames.size} 个模板 · ${state.templateTotal} 个版本` +
+    (state.templateQ ? ` · 搜索「${state.templateQ}」` : "");
+  const head = ["模板名称", "版本", "页数", "转换方式", "标定位置", "状态", "更新时间", "操作"]
+    .map((h) => `<th>${h}</th>`).join("");
+  const rows = state.templates.map((tpl) => {
+    const positions = (tpl.placements || []).length;
+    return `<tr data-id="${esc(tpl.id)}">
+      <td class="wrap">${esc(tpl.name)}</td>
+      <td><span class="badge ${tpl.is_active ? "active" : ""}">v${tpl.version}</span></td>
+      <td class="row-num">${tpl.page_count || 0}</td>
+      <td>${esc(templateConverterLabel(tpl.converter))}</td>
+      <td class="row-num">${positions}</td>
+      <td>${tpl.is_active ? "当前版本" : "历史版本"}</td>
+      <td class="row-num">${esc(fmtDate(tpl.updated_at))}</td>
+      <td><div class="actions">
+        <button type="button" data-action="edit">标定与生成</button>
+        <button type="button" data-action="source">原文件</button>
+        <button type="button" class="danger" data-action="delete">删除</button>
+      </div></td>
+    </tr>`;
+  }).join("");
+  table.innerHTML = `<thead><tr>${head}</tr></thead>
+    <tbody>${rows || `<tr><td class="empty" colspan="8">还没有 PDF 模板。点击「导入模板」选择您的 Word 合同模板（或另存好的 PDF）。</td></tr>`}</tbody>`;
+  $$("#templateTable tbody tr[data-id]").forEach((tr) => {
+    tr.addEventListener("click", (e) => {
+      const button = e.target.closest("button[data-action]");
+      const tpl = state.templates.find((t) => t.id === tr.dataset.id);
+      if (!tpl) return;
+      const action = button ? button.dataset.action : "edit";
+      if (action === "delete") {
+        e.stopPropagation();
+        deleteTemplateVersion(tpl);
+        return;
+      }
+      if (action === "source") {
+        e.stopPropagation();
+        const ext = (String(tpl.source_path || "").match(/\.[a-z0-9]+$/i) || [".docx"])[0];
+        downloadAsset(
+          `/app/api/v1/templates/${encodeURIComponent(tpl.id)}/source`,
+          `${tpl.name}-v${tpl.version}${ext}`);
+        return;
+      }
+      openTemplateEditor(tpl).catch((err) => toast(err.message, true));
+    });
+  });
+}
+
+async function deleteTemplateVersion(tpl) {
+  if (!window.confirm(`确定删除模板「${tpl.name}」v${tpl.version} 吗？已被合同或 PDF 引用的版本会保留。`)) return;
+  try {
+    await api(`/app/api/v1/templates/${encodeURIComponent(tpl.id)}`, { method: "DELETE" });
+    toast(`模板「${tpl.name}」v${tpl.version} 已删除`);
+    await loadTemplates();
+    renderTemplates();
+    await loadBootstrapAndMeta();
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+async function downloadAsset(path, filename) {
+  try {
+    const res = await fetch(path, { headers: { "X-Tengshou-App": "1" } });
+    if (!res.ok) {
+      let message = `下载失败（${res.status}）`;
+      try {
+        const data = await res.json();
+        if (data && data.error && data.error.message) message = data.error.message;
+      } catch (_) { /* ignore */ }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename || "download";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+async function loadBootstrapAndMeta() {
+  const bootstrap = await api("/app/api/v1/bootstrap").catch(() => null);
+  if (!bootstrap) return;
+  state.bootstrap = bootstrap;
+  state.years = bootstrap.years || [];
+  renderMeta();
+  renderYearSelect();
+}
+
+async function openTemplateImport(file) {
+  if (file.size > 40 * 1024 * 1024) {
+    toast("模板文件过大，请压缩到 40MB 以内", true);
+    return;
+  }
+  let base64;
+  try {
+    base64 = await readFileBase64(file);
+  } catch (err) {
+    toast(err.message, true);
+    return;
+  }
+  await loadConverters();
+  const ext = (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+  const isPDF = ext === ".pdf";
+  const converterRows = (state.converters || []).map((c) =>
+    `<li>${esc(c.label)}：${c.available ? `可用（${esc(c.detail || "")}）` : `不可用（${esc(c.detail || "")}）`}</li>`).join("");
+  const anyConverter = (state.converters || []).some((c) => c.available);
+  const warning = (!isPDF && !anyConverter)
+    ? `<div class="warning-list">本机未检测到 Microsoft Word 或 LibreOffice。Word 转换会失败；
+        可以安装 LibreOffice（免费），或先用 Word / WPS 将文档另存为 PDF，再导入 PDF。</div>`
+    : "";
+  const defaultName = file.name.replace(/\.[^.]+$/, "");
+  const modal = openModal(`导入模板 · ${file.name}`, { wide: true });
+  modal.body.innerHTML = `
+    <div id="templateImportErrors"></div>
+    ${warning}
+    <div class="form-grid">
+      <div class="field"><label for="tplImportName">模板名称<span class="req">*</span></label>
+        <input id="tplImportName" type="text" value="${esc(defaultName)}" placeholder="例如：房屋租赁合同（村委会版）">
+        <span class="help">同名再导入会增加新版本；旧版本和已生成 PDF 都会保留。</span></div>
+      <div class="field"><label>文件</label>
+        <div class="mono">${esc(file.name)} · ${(file.size / 1024 / 1024).toFixed(2)} MB</div>
+        <span class="help">${isPDF ? "直接作为模板 PDF 导入，不经过转换。" : "将转换为 PDF 后用于所见即所得的标定。"}</span></div>
+      <div class="field full"><label>转换程序</label>
+        <ul class="import-notes">${converterRows || "<li>未检测到转换程序</li>"}</ul>
+        ${!isPDF ? `<span class="help">优先使用本机 Microsoft Word（Windows，保真度最高）；否则用 LibreOffice，可能出现细微排版差异。</span>` : ""}
+      </div>
+    </div>`;
+  footerButton(modal, "取消", "", closeModal);
+  const save = footerButton(modal, "导入", "primary", async () => {
+    save.disabled = true;
+    $("#templateImportErrors", modal.body).innerHTML = "";
+    try {
+      const res = await api("/app/api/v1/templates/import", {
+        method: "POST",
+        body: {
+          name: $("#tplImportName", modal.body).value.trim(),
+          file_name: file.name,
+          file_base64: base64,
+        },
+      });
+      closeModal();
+      const warnings = res.warnings || [];
+      toast(warnings.length ? warnings[0] : `模板已导入（v${res.item.version}）`);
+      if (warnings.length > 1) setTimeout(() => toast(warnings.slice(1).join("；")), 400);
+      await loadTemplates();
+      renderTemplates();
+      await loadBootstrapAndMeta();
+      openTemplateEditor(res.item).catch((err) => toast(err.message, true));
+    } catch (err) {
+      save.disabled = false;
+      $("#templateImportErrors", modal.body).innerHTML = fieldErrorsHTML(err);
+    }
+  });
+}
+
+function templateFieldOptionsHTML() {
+  const groups = [];
+  const push = (label, fields, prefix) => {
+    const options = [];
+    for (const f of fields) {
+      if (f.archived) continue;
+      if (!f.built_in && f.type === "image") continue;
+      const key = f.built_in ? `${prefix}.${f.key}` : `${prefix}.data.${f.key}`;
+      options.push(`<option value="${esc(key)}">${esc(label)} · ${esc(f.label)}</option>`);
+    }
+    if (options.length) {
+      groups.push(`<optgroup label="${esc(label)}">${options.join("")}</optgroup>`);
+    }
+  };
+  push("合同", state.fields.contract, "contract");
+  push("甲方", state.fields.party, "party_a");
+  push("乙方", state.fields.party, "party_b");
+  return groups.join("");
+}
+
+function templateSealOptionsHTML() {
+  if (!state.seals.length) {
+    return `<option value="">（还没有公章图片）</option>`;
+  }
+  return state.seals.map((seal) =>
+    `<option value="${esc(seal.id)}">${esc(seal.name)}${seal.party_id ? "（已关联单位）" : ""}</option>`).join("");
+}
+
+function templateBindingLabel(p) {
+  if (p.type === "signature") {
+    return `签名 · ${p.party === "party_a" ? "甲方" : "乙方"}`;
+  }
+  if (p.type === "seal") {
+    if (p.seal_mode === "seal" && p.seal_id) {
+      const seal = state.seals.find((s) => s.id === p.seal_id);
+      return `公章 · ${seal ? seal.name : "指定图片"}`;
+    }
+    const party = p.party === "party_a" ? "（甲方）" : p.party === "party_b" ? "（乙方）" : "";
+    return `公章 · 合同关联/单位公章${party}`;
+  }
+  const key = String(p.field || "");
+  const prefix = key.split(".")[0];
+  const role = prefix === "party_a" ? "甲方" : prefix === "party_b" ? "乙方" : "合同";
+  const dataKey = key.includes(".data.") ? key.split(".data.")[1] : key.split(".")[1];
+  const list = prefix === "contract" ? state.fields.contract : state.fields.party;
+  const field = list.find((f) => f.key === dataKey);
+  return `${role} · ${field ? field.label : key}`;
+}
+
+function newPlacementID() {
+  return "p_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+async function openTemplateEditor(template) {
+  const modal = openModal(`模板标定 · ${template.name} v${template.version}`, { full: true });
+  modal.foot.style.display = "none";
+  const placements = JSON.parse(JSON.stringify(template.placements || []));
+  const editor = {
+    modal,
+    template,
+    placements,
+    scale: 1.25,
+    selected: null,
+    dirty: false,
+    preview: null,
+    pdfDoc: null,
+    pdfBytes: null,
+    pageObjs: [],
+    pageSizes: [],
+    renderToken: 0,
+    previewDoc: null,
+    previewOverlay: null,
+    contracts: [],
+  };
+  templateEditor = editor;
+  modal.body.innerHTML = `
+    <div class="template-editor">
+      <div class="tpl-toolbar">
+        <span class="tpl-current" id="tplCurrent">v${template.version} · ${template.page_count || 0} 页 · ${placements.length} 个位置</span>
+        <label class="inline">缩放
+          <select id="tplZoom">
+            ${[0.75, 1, 1.25, 1.5, 2].map((z) => `<option value="${z}"${z === 1.25 ? " selected" : ""}>${Math.round(z * 100)}%</option>`).join("")}
+          </select>
+        </label>
+        <span class="spacer"></span>
+        <button type="button" id="tplSaveBtn">保存为新版本</button>
+        <button type="button" id="tplCloseBtn">关闭</button>
+      </div>
+      <div class="tpl-body">
+        <div class="tpl-pages" id="tplPages"><div class="tpl-loading">正在加载模板 PDF…</div></div>
+        <aside class="tpl-side">
+          <h3>新增位置</h3>
+          <div class="tpl-add">
+            <div class="field"><label for="tplAddKind">类型</label>
+              <select id="tplAddKind">
+                <option value="field">字段文字</option>
+                <option value="signature">手写签名</option>
+                <option value="seal">公章图片</option>
+              </select></div>
+            <div class="field" id="tplAddFieldWrap"><label for="tplAddField">字段</label>
+              <select id="tplAddField">${templateFieldOptionsHTML()}</select></div>
+            <div class="field" id="tplAddPartyWrap" style="display:none"><label for="tplAddParty">签名方</label>
+              <select id="tplAddParty">
+                <option value="party_b">乙方</option>
+                <option value="party_a">甲方</option>
+              </select></div>
+            <div class="field" id="tplAddSealModeWrap" style="display:none"><label for="tplAddSealMode">公章来源</label>
+              <select id="tplAddSealMode">
+                <option value="contract">合同关联 / 单位公章（自动）</option>
+                <option value="seal">指定公章图片</option>
+              </select></div>
+            <div class="field" id="tplAddSealWrap" style="display:none"><label for="tplAddSeal">公章图片</label>
+              <select id="tplAddSeal">${templateSealOptionsHTML()}</select></div>
+            <button type="button" id="tplAddPlace">添加位置</button>
+            <span class="help">添加后拖动框到目标位置，右下角可缩放大小。每次保存都会生成新版本。</span>
+          </div>
+          <h3>位置列表</h3>
+          <div id="tplPlacementList" class="tpl-list"></div>
+          <div id="tplSelectedPanel"></div>
+          <h3>预览与生成</h3>
+          <div class="field"><label for="tplContract">合同</label>
+            <select id="tplContract"><option value="">（正在加载合同…）</option></select></div>
+          <div class="tpl-add" style="grid-template-columns:1fr 1fr">
+            <button type="button" id="tplPreviewSample">样例预览</button>
+            <button type="button" id="tplPreviewContract">合同预览</button>
+          </div>
+          <button type="button" id="tplGenerate" class="primary" disabled>生成 PDF</button>
+          <div id="tplPreviewStatus" class="tpl-status"></div>
+          <div id="tplWarnings" class="tpl-warnings"></div>
+          <div id="tplResult"></div>
+        </aside>
+      </div>
+    </div>`;
+  bindTemplateEditorEvents(editor);
+  renderPlacementList(editor);
+  updateTemplatePreviewStatus(editor);
+  loadEditorContracts(editor).catch(() => {});
+  try {
+    await loadTemplateEditorPDF(editor);
+  } catch (err) {
+    $("#tplPages", modal.body).innerHTML =
+      `<div class="tpl-loading">模板 PDF 加载失败：${esc(err.message)}</div>`;
+  }
+}
+
+function destroyTemplateEditor() {
+  const editor = templateEditor;
+  if (!editor) return;
+  templateEditor = null;
+  try { if (editor.pdfDoc) editor.pdfDoc.destroy(); } catch (_) { /* ignore */ }
+  try { if (editor.previewDoc) editor.previewDoc.destroy(); } catch (_) { /* ignore */ }
+}
+
+async function loadTemplateEditorPDF(editor) {
+  const res = await fetch(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/pdf`);
+  if (!res.ok) throw new Error(`请求失败（${res.status}）`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  editor.pdfBytes = bytes;
+  editor.pdfDoc = await pdfjsLib.getDocument({
+    data: bytes.slice(0),
+    isEvalSupported: false,
+    useSystemFonts: true,
+  }).promise;
+  editor.pageObjs = [];
+  editor.pageSizes = [];
+  for (let i = 1; i <= editor.pdfDoc.numPages; i++) {
+    const page = await editor.pdfDoc.getPage(i);
+    const base = page.getViewport({ scale: 1 });
+    editor.pageObjs[i] = page;
+    editor.pageSizes[i - 1] = { width: base.width, height: base.height };
+  }
+  await renderTemplateEditorPages(editor);
+}
+
+async function renderTemplateEditorPages(editor) {
+  const pagesEl = $("#tplPages", editor.modal.body);
+  if (!pagesEl) return;
+  const token = ++editor.renderToken;
+  pagesEl.innerHTML = "";
+  const count = editor.pdfDoc.numPages;
+  const dpr = window.devicePixelRatio || 1;
+  for (let i = 1; i <= count; i++) {
+    if (token !== editor.renderToken) return;
+    const page = editor.pageObjs[i] || await editor.pdfDoc.getPage(i);
+    editor.pageObjs[i] = page;
+    const viewport = page.getViewport({ scale: editor.scale });
+    const wrap = document.createElement("div");
+    wrap.className = "tpl-page";
+    wrap.dataset.page = String(i);
+    wrap.style.width = viewport.width + "px";
+    wrap.style.height = viewport.height + "px";
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.floor(viewport.width * dpr);
+    canvas.height = Math.floor(viewport.height * dpr);
+    canvas.style.width = viewport.width + "px";
+    canvas.style.height = viewport.height + "px";
+    const boxes = document.createElement("div");
+    boxes.className = "tpl-boxes";
+    const pageNo = document.createElement("div");
+    pageNo.className = "tpl-page-no";
+    pageNo.textContent = `第 ${i} / ${count} 页`;
+    wrap.append(canvas, boxes, pageNo);
+    pagesEl.appendChild(wrap);
+    await page.render({
+      canvasContext: canvas.getContext("2d"),
+      viewport,
+      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+    }).promise;
+    if (token !== editor.renderToken) return;
+    renderTemplateBoxes(editor, i, boxes);
+  }
+}
+
+function renderTemplateBoxes(editor, pageNumber, boxesEl) {
+  boxesEl.innerHTML = "";
+  const scale = editor.scale;
+  for (const p of editor.placements) {
+    if (p.page !== pageNumber) continue;
+    boxesEl.appendChild(makeTemplateBox(editor, p, scale));
+  }
+}
+
+function makeTemplateBox(editor, p, scale) {
+  const el = document.createElement("div");
+  const typeClass = p.type === "signature" ? "sig" : p.type === "seal" ? "seal" : "";
+  el.className = ["tpl-box", typeClass, editor.selected === p.id ? "selected" : ""].filter(Boolean).join(" ");
+  el.dataset.id = p.id;
+  positionTemplateBox(el, p, scale);
+  el.innerHTML = `<span class="tpl-box-label">${esc(templateBindingLabel(p))}</span>
+    <span class="tpl-handle"></span>
+    <button type="button" class="tpl-box-del" title="删除位置">×</button>`;
+  el.addEventListener("pointerdown", (e) => startTemplateBoxDrag(editor, p, el, e));
+  const handle = el.querySelector(".tpl-handle");
+  handle.addEventListener("pointerdown", (e) => startTemplateBoxResize(editor, p, el, e));
+  el.querySelector(".tpl-box-del").addEventListener("click", (e) => {
+    e.stopPropagation();
+    removeTemplatePlacement(editor, p.id);
+  });
+  return el;
+}
+
+function positionTemplateBox(el, p, scale) {
+  el.style.left = (p.x * scale) + "px";
+  el.style.top = (p.y * scale) + "px";
+  el.style.width = (p.w * scale) + "px";
+  el.style.height = (p.h * scale) + "px";
+}
+
+function startTemplateBoxDrag(editor, p, el, e) {
+  if (e.target.closest(".tpl-handle") || e.target.closest(".tpl-box-del")) return;
+  e.preventDefault();
+  selectTemplatePlacement(editor, p.id);
+  const page = editor.pageSizes[p.page - 1];
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const origin = { x: p.x, y: p.y };
+  const move = (ev) => {
+    const dx = (ev.clientX - startX) / editor.scale;
+    const dy = (ev.clientY - startY) / editor.scale;
+    p.x = roundPt(clampNumber(origin.x + dx, 0, page.width - p.w));
+    p.y = roundPt(clampNumber(origin.y + dy, 0, page.height - p.h));
+    positionTemplateBox(el, p, editor.scale);
+    markTemplateDirty(editor);
+  };
+  const up = () => {
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", up);
+    el.removeEventListener("pointercancel", up);
+    renderPlacementList(editor);
+    renderSelectedPanel(editor);
+  };
+  el.setPointerCapture && el.setPointerCapture(e.pointerId);
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", up);
+  el.addEventListener("pointercancel", up);
+}
+
+function startTemplateBoxResize(editor, p, el, e) {
+  e.preventDefault();
+  e.stopPropagation();
+  selectTemplatePlacement(editor, p.id);
+  const page = editor.pageSizes[p.page - 1];
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const origin = { w: p.w, h: p.h };
+  const move = (ev) => {
+    const dx = (ev.clientX - startX) / editor.scale;
+    const dy = (ev.clientY - startY) / editor.scale;
+    p.w = roundPt(clampNumber(origin.w + dx, 6, page.width - p.x));
+    p.h = roundPt(clampNumber(origin.h + dy, 6, page.height - p.y));
+    positionTemplateBox(el, p, editor.scale);
+    markTemplateDirty(editor);
+  };
+  const up = () => {
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", up);
+    el.removeEventListener("pointercancel", up);
+    renderPlacementList(editor);
+    renderSelectedPanel(editor);
+  };
+  el.setPointerCapture && el.setPointerCapture(e.pointerId);
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", up);
+  el.addEventListener("pointercancel", up);
+}
+
+function selectTemplatePlacement(editor, id) {
+  editor.selected = id;
+  $$(".tpl-box", editor.modal.body).forEach((el) => {
+    el.classList.toggle("selected", el.dataset.id === id);
+  });
+  renderPlacementList(editor);
+  renderSelectedPanel(editor);
+}
+
+function renderPlacementList(editor) {
+  const list = $("#tplPlacementList", editor.modal.body);
+  if (!list) return;
+  if (!editor.placements.length) {
+    list.innerHTML = `<div class="tpl-list-empty">还没有标定位置。在上方选择字段/签名/公章后点击「添加位置」。</div>`;
+    return;
+  }
+  list.innerHTML = editor.placements.map((p) => `
+    <div class="tpl-list-item${editor.selected === p.id ? " selected" : ""}" data-id="${esc(p.id)}">
+      <span class="grow">${esc(templateBindingLabel(p))}</span>
+      <span class="tpl-kind">第 ${p.page} 页</span>
+      <button type="button" data-action="remove" title="删除">×</button>
+    </div>`).join("");
+  $$(".tpl-list-item", list).forEach((item) => {
+    item.addEventListener("click", (e) => {
+      const remove = e.target.closest("button[data-action='remove']");
+      if (remove) {
+        e.stopPropagation();
+        removeTemplatePlacement(editor, item.dataset.id);
+        return;
+      }
+      selectTemplatePlacement(editor, item.dataset.id);
+      const pageEl = $(`.tpl-page[data-page="${editor.placements.find((p) => p.id === item.dataset.id)?.page || 1}"]`, editor.modal.body);
+      const boxEl = pageEl ? $(`.tpl-box[data-id="${item.dataset.id}"]`, pageEl) : null;
+      if (boxEl) boxEl.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  });
+}
+
+function renderSelectedPanel(editor) {
+  const panel = $("#tplSelectedPanel", editor.modal.body);
+  if (!panel) return;
+  const p = editor.placements.find((item) => item.id === editor.selected);
+  if (!p) {
+    panel.innerHTML = `<div class="tpl-status">点击页面上的框或上方列表进行编辑。</div>`;
+    return;
+  }
+  if (p.type !== "field") {
+    panel.innerHTML = `<div class="tpl-add">
+      <div class="tpl-status">${esc(templateBindingLabel(p))} · 第 ${p.page} 页 · ${Math.round(p.w)}×${Math.round(p.h)} pt</div>
+      <button type="button" class="danger" id="tplRemoveSelected">删除这个位置</button>
+    </div>`;
+    $("#tplRemoveSelected", panel).addEventListener("click", () => removeTemplatePlacement(editor, p.id));
+    return;
+  }
+  panel.innerHTML = `<div class="tpl-add">
+    <div class="tpl-status">${esc(templateBindingLabel(p))} · 第 ${p.page} 页 · ${Math.round(p.w)}×${Math.round(p.h)} pt</div>
+    <div class="field"><label for="tplFontSize">字号（pt，0 = 自动缩放）</label>
+      <input id="tplFontSize" type="number" min="0" max="72" step="0.5" value="${p.font_size || 0}"></div>
+    <div class="field"><label for="tplAlign">对齐</label>
+      <select id="tplAlign">
+        <option value="left"${(p.align || "left") === "left" ? " selected" : ""}>左对齐</option>
+        <option value="center"${p.align === "center" ? " selected" : ""}>居中</option>
+        <option value="right"${p.align === "right" ? " selected" : ""}>右对齐</option>
+      </select></div>
+    <button type="button" class="danger" id="tplRemoveSelected">删除这个位置</button>
+  </div>`;
+  $("#tplFontSize", panel).addEventListener("change", (e) => {
+    const value = Number(e.target.value) || 0;
+    p.font_size = value > 0 ? value : 0;
+    markTemplateDirty(editor);
+    toast(value > 0 ? `字号设为 ${value}pt（放不下时仍会自动缩小）` : "字号改为自动缩放");
+  });
+  $("#tplAlign", panel).addEventListener("change", (e) => {
+    p.align = e.target.value;
+    markTemplateDirty(editor);
+  });
+  $("#tplRemoveSelected", panel).addEventListener("click", () => removeTemplatePlacement(editor, p.id));
+}
+
+function removeTemplatePlacement(editor, id) {
+  editor.placements = editor.placements.filter((p) => p.id !== id);
+  if (editor.selected === id) editor.selected = null;
+  markTemplateDirty(editor);
+  rerenderTemplateBoxes(editor);
+  renderPlacementList(editor);
+  renderSelectedPanel(editor);
+}
+
+function rerenderTemplateBoxes(editor) {
+  $$(".tpl-page", editor.modal.body).forEach((pageEl) => {
+    const pageNumber = Number(pageEl.dataset.page);
+    const boxes = $(".tpl-boxes", pageEl);
+    if (boxes) renderTemplateBoxes(editor, pageNumber, boxes);
+  });
+}
+
+function addTemplatePlacement(editor) {
+  const kind = $("#tplAddKind", editor.modal.body).value;
+  const page = 1;
+  const pageSize = editor.pageSizes[page - 1];
+  if (!pageSize) {
+    toast("模板 PDF 尚未加载完成", true);
+    return;
+  }
+  const placement = {
+    id: newPlacementID(),
+    page,
+    x: 60,
+    y: 100 + (editor.placements.filter((p) => p.page === page).length % 12) * 34,
+    w: 180,
+    h: 22,
+    type: kind,
+    field: "",
+    party: "",
+    seal_mode: "",
+    seal_id: "",
+    font_size: 0,
+    align: "left",
+  };
+  if (kind === "field") {
+    const key = $("#tplAddField", editor.modal.body).value;
+    if (!key) {
+      toast("请选择一个字段", true);
+      return;
+    }
+    placement.field = key;
+    placement.align = "left";
+  } else if (kind === "signature") {
+    placement.party = $("#tplAddParty", editor.modal.body).value;
+    placement.w = 130;
+    placement.h = 50;
+  } else {
+    placement.seal_mode = $("#tplAddSealMode", editor.modal.body).value;
+    placement.party = $("#tplAddParty", editor.modal.body).value;
+    if (placement.seal_mode === "seal") {
+      const sealID = $("#tplAddSeal", editor.modal.body).value;
+      if (!sealID) {
+        toast("请先选择或导入公章图片", true);
+        return;
+      }
+      placement.seal_id = sealID;
+    }
+    placement.w = 110;
+    placement.h = 110;
+  }
+  placement.x = roundPt(clampNumber(placement.x, 0, pageSize.width - placement.w));
+  placement.y = roundPt(clampNumber(placement.y, 0, pageSize.height - placement.h));
+  editor.placements.push(placement);
+  markTemplateDirty(editor);
+  rerenderTemplateBoxes(editor);
+  selectTemplatePlacement(editor, placement.id);
+  const pageEl = $(`.tpl-page[data-page="${page}"]`, editor.modal.body);
+  const boxEl = pageEl ? $(`.tpl-box[data-id="${placement.id}"]`, pageEl) : null;
+  if (boxEl) boxEl.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function markTemplateDirty(editor) {
+  editor.dirty = true;
+  editor.preview = null;
+  updateTemplatePreviewStatus(editor);
+}
+
+function updateTemplatePreviewStatus(editor) {
+  const status = $("#tplPreviewStatus", editor.modal.body);
+  const generate = $("#tplGenerate", editor.modal.body);
+  if (!status || !generate) return;
+  let text = "请先预览（样例或合同）再生成 PDF。";
+  let cls = "tpl-status";
+  if (editor.dirty) {
+    text = "有未保存的修改；预览或生成时会先自动保存为新版本。";
+    cls = "tpl-status warn";
+  } else if (editor.preview && !editor.preview.sample) {
+    text = "已用目标合同预览，可以生成 PDF。";
+    cls = "tpl-status ok";
+  } else if (editor.preview && editor.preview.sample) {
+    text = "已用样例数据预览；生成正式 PDF 前请用目标合同预览。";
+    cls = "tpl-status warn";
+  }
+  status.textContent = text;
+  status.className = cls;
+  generate.disabled = !(editor.preview && !editor.preview.sample && !editor.dirty);
+}
+
+function updateTemplateEditorHeader(editor) {
+  const item = editor.template;
+  editor.modal.title.textContent = `模板标定 · ${item.name} v${item.version}`;
+  const current = $("#tplCurrent", editor.modal.body);
+  if (current) {
+    current.textContent = `v${item.version} · ${item.page_count || 0} 页 · ${editor.placements.length} 个位置`;
+  }
+}
+
+function bindTemplateEditorEvents(editor) {
+  $("#tplZoom", editor.modal.body).addEventListener("change", (e) => {
+    editor.scale = Number(e.target.value) || 1.25;
+    renderTemplateEditorPages(editor).catch((err) => toast(err.message, true));
+  });
+  $("#tplAddKind", editor.modal.body).addEventListener("change", () => {
+    const kind = $("#tplAddKind", editor.modal.body).value;
+    $("#tplAddFieldWrap", editor.modal.body).style.display = kind === "field" ? "" : "none";
+    $("#tplAddPartyWrap", editor.modal.body).style.display = kind === "signature" ? "" : "none";
+    $("#tplAddSealModeWrap", editor.modal.body).style.display = kind === "seal" ? "" : "none";
+    syncTemplateAddSealControls(editor);
+  });
+  $("#tplAddSealMode", editor.modal.body).addEventListener("change", () => syncTemplateAddSealControls(editor));
+  $("#tplAddPlace", editor.modal.body).addEventListener("click", () => addTemplatePlacement(editor));
+  $("#tplSaveBtn", editor.modal.body).addEventListener("click", () => {
+    saveTemplateMapping(editor).catch((err) => toast(err.message, true));
+  });
+  $("#tplCloseBtn", editor.modal.body).addEventListener("click", () => {
+    if (editor.dirty && !window.confirm("还有未保存的标定，确定关闭吗？")) return;
+    closeModal();
+  });
+  $("#tplPreviewSample", editor.modal.body).addEventListener("click", () => {
+    previewTemplate(editor, true).catch((err) => toast(err.message, true));
+  });
+  $("#tplPreviewContract", editor.modal.body).addEventListener("click", () => {
+    previewTemplate(editor, false).catch((err) => toast(err.message, true));
+  });
+  $("#tplGenerate", editor.modal.body).addEventListener("click", () => {
+    generateTemplatePDF(editor).catch((err) => toast(err.message, true));
+  });
+  syncTemplateAddSealControls(editor);
+}
+
+function syncTemplateAddSealControls(editor) {
+  const kind = $("#tplAddKind", editor.modal.body).value;
+  const mode = $("#tplAddSealMode", editor.modal.body).value;
+  const wrap = $("#tplAddSealWrap", editor.modal.body);
+  wrap.style.display = kind === "seal" && mode === "seal" ? "" : "none";
+  $("#tplAddPartyWrap", editor.modal.body).style.display = kind === "seal" ? "" : "none";
+}
+
+async function loadEditorContracts(editor) {
+  const select = $("#tplContract", editor.modal.body);
+  try {
+    const data = await api("/app/api/v1/contracts?limit=500");
+    editor.contracts = data.items || [];
+  } catch (_) {
+    editor.contracts = [];
+  }
+  if (!editor.contracts.length) {
+    select.innerHTML = `<option value="">（还没有合同，可先用样例预览）</option>`;
+    return;
+  }
+  select.innerHTML = editor.contracts.map((c) =>
+    `<option value="${esc(c.id)}">${esc(c.contract_no)} · ${esc(c.title)}</option>`).join("");
+}
+
+async function saveTemplateMapping(editor) {
+  if (!editor.dirty) return editor.template;
+  const payload = {
+    placements: editor.placements.map((p) => ({
+      id: p.id,
+      page: p.page,
+      x: p.x,
+      y: p.y,
+      w: p.w,
+      h: p.h,
+      type: p.type,
+      field: p.field || "",
+      party: p.party || "",
+      seal_mode: p.seal_mode || "",
+      seal_id: p.seal_id || "",
+      font_size: p.font_size || 0,
+      align: p.align || "left",
+    })),
+  };
+  const res = await api(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/mapping`, {
+    method: "PUT",
+    body: payload,
+  });
+  const item = res.item;
+  editor.template = item;
+  editor.placements = JSON.parse(JSON.stringify(item.placements || []));
+  editor.selected = null;
+  editor.dirty = false;
+  editor.preview = null;
+  updateTemplateEditorHeader(editor);
+  updateTemplatePreviewStatus(editor);
+  renderPlacementList(editor);
+  renderSelectedPanel(editor);
+  rerenderTemplateBoxes(editor);
+  await loadTemplates();
+  renderTemplates();
+  await loadBootstrapAndMeta();
+  const warnings = res.warnings || [];
+  toast(`已保存为 v${item.version}`);
+  if (warnings.length) setTimeout(() => toast(warnings.join("；")), 350);
+  return item;
+}
+
+async function previewTemplate(editor, sample) {
+  if (editor.dirty) {
+    await saveTemplateMapping(editor);
+  }
+  const contractID = sample ? "" : $("#tplContract", editor.modal.body).value;
+  if (!sample && !contractID) {
+    toast("请先选择用于预览的合同", true);
+    return;
+  }
+  const body = sample ? { sample: true } : { contract_id: contractID };
+  const res = await api(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/preview`, {
+    method: "POST",
+    body,
+  });
+  editor.preview = {
+    sample: !!sample,
+    contractID: sample ? "" : contractID,
+    sha: res.preview_sha256,
+  };
+  const bytes = base64ToBytes(res.pdf_base64);
+  const title = sample
+    ? "样例数据预览"
+    : `合同预览 · ${($("#tplContract", editor.modal.body).selectedOptions[0] || {}).textContent || ""}`;
+  await showTemplatePreview(editor, bytes, res.warnings || [], title, null);
+  renderTemplateWarnings(editor, res.warnings || []);
+  updateTemplatePreviewStatus(editor);
+}
+
+function renderTemplateWarnings(editor, warnings) {
+  const box = $("#tplWarnings", editor.modal.body);
+  if (!box) return;
+  if (!warnings.length) {
+    box.innerHTML = `<div class="tpl-status ok">预览未发现缺失字段或越界问题。</div>`;
+    return;
+  }
+  box.innerHTML = warnings.map((w) => `<div class="tpl-warning">${esc(w.message || w.code)}</div>`).join("");
+}
+
+async function showTemplatePreview(editor, bytes, warnings, title, download) {
+  closeTemplatePreview(editor);
+  const shell = $(".template-editor", editor.modal.body);
+  if (!shell) return;
+  const overlay = document.createElement("div");
+  overlay.className = "tpl-preview-overlay";
+  overlay.innerHTML = `
+    <div class="tpl-preview-head">
+      <strong>${esc(title)}</strong>
+      <span class="spacer"></span>
+      ${download ? `<button type="button" id="tplPreviewDownload">下载 PDF</button>` : ""}
+      <button type="button" id="tplPreviewClose">关闭预览</button>
+    </div>
+    <div class="tpl-preview-pages"><div class="tpl-loading">正在渲染预览…</div></div>
+    <div class="tpl-preview-warnings">${warnings.length
+      ? warnings.map((w) => `<div class="tpl-warning">${esc(w.message || w.code)}</div>`).join("")
+      : `<div class="tpl-status ok">未发现位置或数据问题。</div>`}</div>`;
+  shell.appendChild(overlay);
+  editor.previewOverlay = overlay;
+  $("#tplPreviewClose", overlay).addEventListener("click", () => closeTemplatePreview(editor));
+  if (download) {
+    $("#tplPreviewDownload", overlay).addEventListener("click", () => {
+      downloadAsset(download.path, download.filename);
+    });
+  }
+  const pages = $(".tpl-preview-pages", overlay);
+  try {
+    editor.previewDoc = await renderPDFPagesInto(pages, bytes, 0.9);
+  } catch (err) {
+    pages.innerHTML = `<div class="tpl-loading">预览渲染失败：${esc(err.message)}</div>`;
+  }
+}
+
+function closeTemplatePreview(editor) {
+  if (editor.previewOverlay && editor.previewOverlay.parentNode) {
+    editor.previewOverlay.parentNode.removeChild(editor.previewOverlay);
+  }
+  editor.previewOverlay = null;
+  try { if (editor.previewDoc) editor.previewDoc.destroy(); } catch (_) { /* ignore */ }
+  editor.previewDoc = null;
+}
+
+async function generateTemplatePDF(editor) {
+  if (!editor.preview || editor.preview.sample) {
+    toast("请先用目标合同预览，再生成 PDF", true);
+    return;
+  }
+  if (editor.dirty) {
+    toast("标定已修改，请重新预览后再生成", true);
+    return;
+  }
+  const res = await api(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/generate`, {
+    method: "POST",
+    body: {
+      contract_id: editor.preview.contractID,
+      preview_sha256: editor.preview.sha,
+    },
+  });
+  const doc = res.item;
+  const warnings = res.warnings || [];
+  renderTemplateWarnings(editor, warnings);
+  const result = $("#tplResult", editor.modal.body);
+  const path = `/app/api/v1/documents/${encodeURIComponent(doc.id)}/file`;
+  result.innerHTML = `<div class="tpl-add">
+    <div class="tpl-status ok">已生成 PDF（${doc.page_count} 页，sha256 ${esc(String(doc.sha256 || "").slice(0, 12))}…）</div>
+    <div class="doc-download">
+      <button type="button" id="tplOpenGenerated">查看生成结果</button>
+      <button type="button" id="tplDownloadGenerated">下载 PDF</button>
+    </div>
+  </div>`;
+  $("#tplDownloadGenerated", result).addEventListener("click", () => downloadAsset(path, "contract.pdf"));
+  $("#tplOpenGenerated", result).addEventListener("click", async () => {
+    try {
+      const resp = await fetch(path, { headers: { "X-Tengshou-App": "1" } });
+      if (!resp.ok) throw new Error(`请求失败（${resp.status}）`);
+      const bytes = new Uint8Array(await resp.arrayBuffer());
+      await showTemplatePreview(editor, bytes, warnings, "生成结果", { path, filename: "contract.pdf" });
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+  result.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  toast(`已生成 PDF（v${doc.template_version}）`);
+  await loadTemplates();
+  renderTemplates();
+  await loadBootstrapAndMeta();
+}
+
+async function renderPDFPagesInto(container, bytes, scale) {
+  container.innerHTML = "";
+  const doc = await pdfjsLib.getDocument({
+    data: bytes.slice(0),
+    isEvalSupported: false,
+    useSystemFonts: true,
+  }).promise;
+  const dpr = window.devicePixelRatio || 1;
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const viewport = page.getViewport({ scale });
+    const wrap = document.createElement("div");
+    wrap.className = "pdf-page";
+    wrap.style.width = viewport.width + "px";
+    wrap.style.height = viewport.height + "px";
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.floor(viewport.width * dpr);
+    canvas.height = Math.floor(viewport.height * dpr);
+    canvas.style.width = viewport.width + "px";
+    canvas.style.height = viewport.height + "px";
+    wrap.appendChild(canvas);
+    container.appendChild(wrap);
+    await page.render({
+      canvasContext: canvas.getContext("2d"),
+      viewport,
+      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+    }).promise;
+  }
+  return doc;
+}
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function roundPt(v) { return Math.round(v * 10) / 10; }
+
+function clampNumber(v, min, max) {
+  if (max < min) max = min;
+  if (v < min) return min;
+  if (v > max) return max;
+  return v;
+}
+
 /* ---------- 相对方档案 ---------- */
 
 function partyFieldValue(party, field) {
@@ -1542,10 +2522,11 @@ function switchTab(tab) {
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${tab}`));
   if (tab === "changelog") loadChangelog().catch((err) => toast(err.message, true));
   if (tab === "seals") loadSeals().then(renderSeals).catch((err) => toast(err.message, true));
+  if (tab === "templates") loadTemplates().then(renderTemplates).catch((err) => toast(err.message, true));
 }
 
 async function refreshAfterWrite() {
-  await Promise.all([loadFields(), loadParties(), loadContracts(), loadSeals()]);
+  await Promise.all([loadFields(), loadParties(), loadContracts(), loadSeals(), loadTemplates()]);
   renderMeta();
   const bootstrap = await api("/app/api/v1/bootstrap").catch(() => null);
   if (bootstrap) {
@@ -1562,6 +2543,7 @@ async function refreshAfterWrite() {
   renderParties();
   renderFields();
   renderSeals();
+  renderTemplates();
   if (state.tab === "changelog") {
     loadChangelog().catch((err) => toast(err.message, true));
   }
@@ -1608,6 +2590,25 @@ function bindEvents() {
       renderSeals();
     } catch (err) { toast(err.message, true); }
   }, 250));
+  $("#templateSearch").addEventListener("input", debounce(async (e) => {
+    state.templateQ = e.target.value.trim();
+    try {
+      await loadTemplates();
+      renderTemplates();
+    } catch (err) { toast(err.message, true); }
+  }, 250));
+  $("#importTemplateBtn").addEventListener("click", () => {
+    const input = $("#templateFileInput");
+    input.value = "";
+    input.click();
+  });
+  $("#templateFileInput").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) openTemplateImport(file);
+  });
+  $("#refreshTemplatesBtn").addEventListener("click", () => {
+    loadTemplates().then(renderTemplates).catch((err) => toast(err.message, true));
+  });
   $("#importSealBtn").addEventListener("click", () => {
     const input = $("#sealImageFile");
     input.value = "";
@@ -1653,13 +2654,14 @@ function bindEvents() {
 async function boot() {
   bindEvents();
   try {
-    await Promise.all([loadBootstrap(), loadFields(), loadParties(), loadSeals()]);
+    await Promise.all([loadBootstrap(), loadFields(), loadParties(), loadSeals(), loadTemplates(), loadConverters()]);
     await loadContracts();
     renderMeta();
     renderContracts();
     renderParties();
     renderFields();
     renderSeals();
+    renderTemplates();
   } catch (err) {
     toast(err.message, true);
     const summary = $("#contractSummary");

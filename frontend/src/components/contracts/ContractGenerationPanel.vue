@@ -296,7 +296,7 @@ async function retry(doc: OutputDocument): Promise<void> {
 async function download(doc: OutputDocument): Promise<void> {
   try {
     const file = await downloadDocumentFile(doc.id);
-    saveDownloadedFile(file, "contract.pdf");
+    saveDownloadedFile(file, "contract.pdf", true);
   } catch (error) {
     toast(errorMessage(error), true);
   }

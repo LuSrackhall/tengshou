@@ -46,3 +46,14 @@ bash scripts/check-frontend-structure.sh
 
 基线只在下调时更新：当 `app.js` 显著缩小后，把脚本中的 `APP_JS_BASELINE`
 调整为当前行数，让棘轮保持单调下降。
+
+## 质量门与工作流归属
+
+- 合入质量门由 Gas City 的 review 角色执行：每个 bead 合入前须通过三条只读
+  独立评审车道（`implementation-reviewer`、`design-test-risk-reviewer`、
+  `design-implementation-reviewer`），再由 `review-synthesizer` 汇总裁决；
+  reviewer 只读不改码，findings 与 verdict 写入对应 bead。
+- 评审与 CI 并行执行，两者都通过方可合入；返工由 mayor 在 worktree 修复后
+  重跑受影响车道，不重派实现 worker。
+- 本文件只写工程标准；city 侧的公式、角色与质量门配置以 city 配置为准，不由
+  本文件覆盖。早期「不要用 implement/drain 工作流」的约定作废。

@@ -255,6 +255,138 @@ func (s *Store) PutOutputDocument(ctx context.Context, d *model.OutputDocument) 
 	return nil
 }
 
+// PutSeal inserts or updates a seal asset record.
+func (s *Store) PutSeal(ctx context.Context, seal *model.Seal) error {
+	if seal == nil {
+		return fmt.Errorf("seal is nil")
+	}
+	if seal.ID == "" {
+		id, err := model.NewID("seal")
+		if err != nil {
+			return err
+		}
+		seal.ID = id
+	}
+	if strings.TrimSpace(seal.Name) == "" {
+		return fmt.Errorf("seal name is required")
+	}
+	if seal.AssetPath == "" || seal.SHA256 == "" {
+		return fmt.Errorf("seal asset_path and sha256 are required")
+	}
+	if seal.MIME == "" {
+		seal.MIME = "image/png"
+	}
+	now := model.Now()
+	if seal.CreatedAt.IsZero() {
+		seal.CreatedAt = now
+	}
+	seal.UpdatedAt = now
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO seal_assets (id, party_id, name, asset_path, sha256, mime,
+			width_px, height_px, note, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET
+			party_id = excluded.party_id, name = excluded.name,
+			asset_path = excluded.asset_path, sha256 = excluded.sha256,
+			mime = excluded.mime, width_px = excluded.width_px,
+			height_px = excluded.height_px, note = excluded.note,
+			updated_at = excluded.updated_at`,
+		seal.ID, nullString(seal.PartyID), seal.Name, seal.AssetPath, seal.SHA256,
+		seal.MIME, seal.WidthPx, seal.HeightPx, seal.Note,
+		formatTime(seal.CreatedAt), formatTime(seal.UpdatedAt))
+	if err != nil {
+		return fmt.Errorf("put seal: %w", err)
+	}
+	return nil
+}
+
+// DeleteSeal removes a seal record. Contract links cascade; the asset file is
+// removed by the service layer after the database change commits.
+func (s *Store) DeleteSeal(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM contract_seals WHERE seal_id = ?`, id); err != nil {
+		return fmt.Errorf("unlink seal: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM seal_assets WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete seal: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
+// AttachSeal links one seal to contracts, ignoring links that already exist.
+// It returns how many new links were created.
+func (s *Store) AttachSeal(ctx context.Context, sealID string, contractIDs []string, placedAt time.Time) (int, error) {
+	if len(contractIDs) == 0 {
+		return 0, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	attached := 0
+	for _, contractID := range contractIDs {
+		res, err := tx.ExecContext(ctx, `
+			INSERT INTO contract_seals (contract_id, seal_id, placed_at)
+			VALUES (?, ?, ?)
+			ON CONFLICT (contract_id, seal_id) DO NOTHING`,
+			contractID, sealID, formatTime(placedAt))
+		if err != nil {
+			return 0, fmt.Errorf("attach seal: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		attached += int(n)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return attached, nil
+}
+
+// DetachSeal removes seal links from contracts and reports how many existed.
+func (s *Store) DetachSeal(ctx context.Context, sealID string, contractIDs []string) (int, error) {
+	if len(contractIDs) == 0 {
+		return 0, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	removed := 0
+	for _, contractID := range contractIDs {
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM contract_seals WHERE seal_id = ? AND contract_id = ?`, sealID, contractID)
+		if err != nil {
+			return 0, fmt.Errorf("detach seal: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		removed += int(n)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
 // SetMeta stores an application metadata key.
 func (s *Store) SetMeta(ctx context.Context, key, value string) error {
 	_, err := s.db.ExecContext(ctx, `

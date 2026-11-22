@@ -32,6 +32,7 @@ type Result struct {
 	PartyA             model.Party
 	PartyB             model.Party
 	Signature          model.Signature
+	Seal               model.Seal
 	Template           model.Template
 	Document           model.OutputDocument
 	Fields             []model.FieldDefinition
@@ -138,6 +139,28 @@ func Run(ctx context.Context, a *app.App, now time.Time) (Result, error) {
 		return Result{}, err
 	}
 
+	sealRel := filepath.ToSlash(filepath.Join("assets", "seals", "demo-seal.png"))
+	sealPath := filepath.Join(paths.Root, filepath.FromSlash(sealRel))
+	sealSHA, sealW, sealH, err := ensureSeal(sealPath)
+	if err != nil {
+		return Result{}, err
+	}
+	seal := model.Seal{
+		ID:        "demo-seal-1",
+		PartyID:   partyA.ID,
+		Name:      "幸福村股份经济合作社公章（示例）",
+		AssetPath: sealRel,
+		SHA256:    sealSHA,
+		MIME:      "image/png",
+		WidthPx:   sealW,
+		HeightPx:  sealH,
+		Note:      "示例公章图片，仅用于演示图片落位",
+		CreatedAt: now,
+	}
+	if err := a.Store.PutSeal(ctx, &seal); err != nil {
+		return Result{}, err
+	}
+
 	template := model.Template{
 		ID:        "demo-template-basic",
 		Name:      "房屋租赁合同（示例）",
@@ -209,13 +232,22 @@ func Run(ctx context.Context, a *app.App, now time.Time) (Result, error) {
 		return Result{}, err
 	}
 
+	if _, err := a.Store.AttachSeal(ctx, seal.ID, []string{contract.ID}, now); err != nil {
+		return Result{}, err
+	}
+	allSeals, contractSeals, err := svc.SealsForContract(ctx, contract)
+	if err != nil {
+		return Result{}, err
+	}
 	data := pdfdoc.TemplateData{
-		Contract:   contract,
-		PartyA:     &partyA,
-		PartyB:     &partyB,
-		Signatures: []model.Signature{signature},
-		Data:       contract.Data,
-		Now:        now,
+		Contract:      contract,
+		PartyA:        &partyA,
+		PartyB:        &partyB,
+		Signatures:    []model.Signature{signature},
+		Seals:         allSeals,
+		ContractSeals: contractSeals,
+		Data:          contract.Data,
+		Now:           now,
 	}
 	outName := fmt.Sprintf("%s-%s.pdf", contract.ID, now.Format("20060102-150405"))
 	outPath := filepath.Join(paths.Outputs, outName)
@@ -242,6 +274,7 @@ func Run(ctx context.Context, a *app.App, now time.Time) (Result, error) {
 		PartyA:             partyA,
 		PartyB:             partyB,
 		Signature:          signature,
+		Seal:               seal,
 		Template:           template,
 		Document:           document,
 		Fields:             createdFields,
@@ -364,6 +397,99 @@ func ensureSignature(path string) (string, int, int, error) {
 }
 
 type point struct{ x, y float64 }
+
+// ensureSeal writes a generated red circular stamp if it does not exist and
+// returns its digest and dimensions. It is only a demo picture; real seals are
+// imported through the app.
+func ensureSeal(path string) (string, int, int, error) {
+	if raw, err := os.ReadFile(path); err == nil {
+		img, err := png.Decode(bytes.NewReader(raw))
+		if err == nil {
+			sum := sha256.Sum256(raw)
+			b := img.Bounds()
+			return hex.EncodeToString(sum[:]), b.Dx(), b.Dy(), nil
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", 0, 0, err
+	}
+	const size = 420
+	const center = size / 2.0
+	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	ink := color.NRGBA{0xC0, 0x39, 0x2B, 0xFF}
+	star := starPolygon(center, center, 58, 24)
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			d := math.Hypot(float64(x)-center, float64(y)-center)
+			a := math.Max(bandAlpha(d, 178, 192), bandAlpha(d, 146, 151))
+			if pointInPolygon(float64(x)+0.5, float64(y)+0.5, star) {
+				a = 1
+			}
+			if a <= 0 {
+				continue
+			}
+			img.SetNRGBA(x, y, color.NRGBA{ink.R, ink.G, ink.B, uint8(255 * math.Min(1, a))})
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	if err := png.Encode(f, img); err != nil {
+		f.Close()
+		return "", 0, 0, err
+	}
+	if err := f.Close(); err != nil {
+		return "", 0, 0, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), size, size, nil
+}
+
+// bandAlpha is a one-pixel anti-aliased ring between inner and outer radius.
+func bandAlpha(d, inner, outer float64) float64 {
+	if d < inner-1 || d > outer+1 {
+		return 0
+	}
+	if d >= inner && d <= outer {
+		return 1
+	}
+	if d < inner {
+		return inner - d
+	}
+	return d - outer
+}
+
+func starPolygon(cx, cy, outer, inner float64) []point {
+	pts := make([]point, 0, 10)
+	for i := 0; i < 10; i++ {
+		radius := outer
+		if i%2 == 1 {
+			radius = inner
+		}
+		angle := -math.Pi/2 + float64(i)*math.Pi/5
+		pts = append(pts, point{cx + radius*math.Cos(angle), cy + radius*math.Sin(angle)})
+	}
+	return pts
+}
+
+func pointInPolygon(x, y float64, poly []point) bool {
+	inside := false
+	j := len(poly) - 1
+	for i := 0; i < len(poly); i++ {
+		pi, pj := poly[i], poly[j]
+		if (pi.y > y) != (pj.y > y) &&
+			x < (pj.x-pi.x)*(y-pi.y)/(pj.y-pi.y)+pi.x {
+			inside = !inside
+		}
+		j = i
+	}
+	return inside
+}
 
 // stroke stamps a soft round brush along a sampled polyline.
 func stroke(mask *image.Alpha, pts []point, radius float64) {

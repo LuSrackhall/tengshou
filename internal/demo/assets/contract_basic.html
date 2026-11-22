@@ -46,6 +46,7 @@
 <p style="text-indent:8mm">本合同自双方签字（盖章）之日起生效。本合同一式两份，甲乙双方各执一份，具有同等法律效力。</p>
 
 <p style="margin-top:10mm">甲方（盖章）：{{.PartyA.Name}}</p>
+{{with sealPath .Seals .PartyA}}<p style="text-align:right"><img src="{{.}}" style="width:40mm"></p>{{end}}
 <p>法定代表人或委托代理人：{{default "—" .PartyA.Data.legal_representative}}</p>
 <p style="margin-top:8mm">乙方（签字）：</p>
 {{with signaturePath .Signatures .PartyB}}<p><img src="{{.}}" style="width:45mm"></p>{{else}}<p><img src="{{.Data.signature}}" style="width:45mm"></p>{{end}}

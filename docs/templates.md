@@ -13,6 +13,8 @@
 | `.PartyA` | 对象 / 空 | 甲方档案（`Name`、`IDNumber`、`Phone`、`Address`、`Data`） |
 | `.PartyB` | 对象 / 空 | 乙方档案 |
 | `.Signatures` | 数组 | 签名资产元数据（`AssetPath`、`SignerName`、`SHA256`…） |
+| `.Seals` | 数组 | 当前合同可用的公章图片：已关联公章在前，其次是甲乙双方单位名下的公章 |
+| `.ContractSeals` | 数组 | 只包含显式关联到当前合同的公章 |
 | `.Data` | 对象 | 动态字段值，键为字段定义中的 `key`（如 `{{.Data.area_sqm}}`） |
 | `.Now` | 时间 | 生成时间 |
 
@@ -23,6 +25,22 @@
 | `cnDate` / `date` | `{{cnDate .Data.signed_on}}` | `2026年11月22日` |
 | `money` | `{{money .Data.rent}}` | `1,200.00` |
 | `default` | `{{default "—" .PartyA.IDNumber}}` | 空值回退 |
+| `signaturePath` | `{{signaturePath .Signatures .PartyB}}` | 最新签名图片路径 |
+| `sealPath` | `{{sealPath .Seals .PartyA}}` | 单位名下最新的公章图片路径 |
+| `contractSealPath` | `{{contractSealPath .ContractSeals}}` | 合同显式关联的最新公章图片路径 |
+
+`sealPath` / `contractSealPath` 没有可用公章时返回空字符串，配合 `{{with}}`
+即可省略整段：
+
+```html
+<p style="margin-top:10mm">甲方（盖章）：{{.PartyA.Name}}</p>
+{{with sealPath .Seals .PartyA}}
+<p style="text-align:right"><img src="{{.}}" style="width:40mm"></p>
+{{end}}
+```
+
+公章的位置由所在段落的 `text-align` 与 `<img>` 的 `width` / `height` 决定；
+换模板重新生成时，同一枚公章会按新模板中的占位重新落位。
 
 示例：
 

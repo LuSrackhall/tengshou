@@ -26,8 +26,13 @@ type TemplateData struct {
 	PartyA     *model.Party
 	PartyB     *model.Party
 	Signatures []model.Signature
-	Data       map[string]any
-	Now        time.Time
+	// Seals holds the seal pictures applicable to this contract: explicitly
+	// linked seals first, then seals belonging to either party.
+	Seals []model.Seal
+	// ContractSeals holds only the seals explicitly linked to the contract.
+	ContractSeals []model.Seal
+	Data          map[string]any
+	Now           time.Time
 }
 
 // Generator renders HTML templates into paginated PDF documents.
@@ -133,6 +138,11 @@ func ExecuteTemplate(source string, data TemplateData) (string, error) {
 		// signaturePath resolves the latest retained signature for a party so
 		// templates can place it with <img src="{{signaturePath .Signatures .PartyB}}">.
 		"signaturePath": signaturePath,
+		// sealPath resolves the newest seal picture for a party; contractSealPath
+		// resolves the newest seal explicitly linked to the contract. Both
+		// return "" when nothing is available so templates can use {{with}}.
+		"sealPath":         sealPath,
+		"contractSealPath": contractSealPath,
 	}
 	t, err := template.New("contract").Funcs(funcs).Option("missingkey=error").Parse(source)
 	if err != nil {
@@ -183,6 +193,55 @@ func signaturePath(sigs []model.Signature, party any) string {
 		return ""
 	}
 	return sigs[best].AssetPath
+}
+
+// sealPath returns the asset path of the newest seal picture for a party.
+// party may be a *model.Party, a model.Party or a party id string; nil means
+// "any party". Seals without an owning party (linked directly to contracts)
+// also match the nil case.
+func sealPath(seals []model.Seal, party any) string {
+	partyID := ""
+	switch p := party.(type) {
+	case *model.Party:
+		if p != nil {
+			partyID = p.ID
+		}
+	case model.Party:
+		partyID = p.ID
+	case string:
+		partyID = p
+	}
+	return newestSealPath(seals, partyID)
+}
+
+// contractSealPath returns the newest seal explicitly linked to the contract.
+func contractSealPath(seals []model.Seal) string {
+	return newestSealPath(seals, "")
+}
+
+func newestSealPath(seals []model.Seal, partyID string) string {
+	best := -1
+	for i, item := range seals {
+		if strings.TrimSpace(item.AssetPath) == "" {
+			continue
+		}
+		if partyID != "" && item.PartyID != partyID {
+			continue
+		}
+		if best < 0 {
+			best = i
+			continue
+		}
+		cur := seals[best]
+		if item.CreatedAt.After(cur.CreatedAt) ||
+			(item.CreatedAt.Equal(cur.CreatedAt) && item.ID > cur.ID) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return ""
+	}
+	return seals[best].AssetPath
 }
 
 func isEmpty(v any) bool {

@@ -159,6 +159,7 @@ func runDemo(dataDir, fontPath string, fontIndex int) error {
 	fmt.Printf("  乙方          %s\n", res.PartyB.Name)
 	fmt.Printf("  模板          %s v%d\n", res.Template.Name, res.Template.Version)
 	fmt.Printf("  签名图片      %s\n", res.Signature.AssetPath)
+	fmt.Printf("  公章图片      %s\n", res.Seal.AssetPath)
 	fmt.Printf("  PDF           %s\n", res.PDFPath)
 	fmt.Printf("  PDF 页数      %d\n", res.Document.PageCount)
 	fmt.Printf("  字体          %s\n", res.FontPath)
@@ -242,13 +243,19 @@ func runRender(dataDir, fontPath string, fontIndex int, contractID, templateID, 
 	if err != nil {
 		return err
 	}
+	seals, contractSeals, err := a.Service.SealsForContract(ctx, detail.Contract)
+	if err != nil {
+		return fmt.Errorf("读取公章图片: %w", err)
+	}
 	data := pdfdoc.TemplateData{
-		Contract:   detail.Contract,
-		PartyA:     detail.PartyA,
-		PartyB:     detail.PartyB,
-		Signatures: detail.Signatures,
-		Data:       detail.Contract.Data,
-		Now:        time.Now(),
+		Contract:      detail.Contract,
+		PartyA:        detail.PartyA,
+		PartyB:        detail.PartyB,
+		Signatures:    detail.Signatures,
+		Seals:         seals,
+		ContractSeals: contractSeals,
+		Data:          detail.Contract.Data,
+		Now:           time.Now(),
 	}
 	res, err := gen.RenderFile(tpl.HTML, data, a.Paths.Root, detail.Contract.Title, outPath)
 	if err != nil {

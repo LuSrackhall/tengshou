@@ -937,6 +937,39 @@ func TestExcelNewFieldAppearsInLedgerAndImport(t *testing.T) {
 	}
 }
 
+// A field archived after the export cannot be compared reliably, so the
+// preview says so instead of silently trusting stale fingerprints.
+func TestExcelFieldArchivedAfterExportNote(t *testing.T) {
+	svc, _, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "张三")
+	field, err := svc.CreateField(ctx, service.FieldInput{
+		Entity: model.FieldEntityContract, Key: "usage", Label: "用途",
+		Type: model.FieldTypeText, InLedger: boolPtr(true), InTemplate: boolPtr(true),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContract(t, svc, service.ContractInput{
+		ContractNo: "HT-F-0001", Year: 2026, Title: "归档字段合同", PartyBID: party.ID,
+		Amount: 10, Data: map[string]any{"usage": "居住"},
+	})
+	ledger, err := svc.LedgerWorkbook(ctx, model.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ArchiveField(ctx, field.ID); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := svc.PreviewImport(ctx, ledger, service.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(preview.Notes, "\n"), "字段定义有变化") {
+		t.Fatalf("field-change note missing: %v", preview.Notes)
+	}
+}
+
 // A 100+ row ledger round-trips unchanged, and formatting-only cell edits
 // (e.g. 1.00 instead of 1) never look like modifications.
 func TestExcelRoundTripLargeLedger(t *testing.T) {

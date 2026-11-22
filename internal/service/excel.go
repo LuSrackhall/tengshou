@@ -131,6 +131,7 @@ type importContext struct {
 	createParties *bool
 	snapshot      *xlsx.Snapshot
 	keys          []string // fingerprint keys (sorted)
+	missingKeys   []string // snapshot keys whose field is now deleted/archived
 	byID          map[string]xlsx.SnapshotRow
 	byNo          map[string]xlsx.SnapshotRow
 }
@@ -371,6 +372,11 @@ func (s *Service) previewPlan(ctx context.Context, data []byte, opts ImportOptio
 		preview.Notes = append(preview.Notes, fmt.Sprintf(
 			"Excel 中缺少 %d 行导出时存在的合同；默认不删除，确认后勾选「应用删除」。", preview.Summary.Deleted))
 	}
+	if len(ictx.missingKeys) > 0 {
+		preview.Notes = append(preview.Notes, fmt.Sprintf(
+			"导出后字段定义有变化（已删除或归档：%s），旧文件无法准确比较这些列，相关行可能显示为冲突；建议重新导出台账后再编辑。",
+			strings.Join(ictx.missingKeys, "、")))
+	}
 	if preview.Summary.Conflicts > 0 {
 		preview.Notes = append(preview.Notes, fmt.Sprintf(
 			"有 %d 行冲突（导出后两边都被修改或系统已改动），需逐行选择「保留系统 / 采用 Excel」。", preview.Summary.Conflicts))
@@ -426,6 +432,11 @@ func (s *Service) buildImportContext(ctx context.Context, data []byte, opts Impo
 			}
 		}
 		sort.Strings(ictx.keys)
+		for _, key := range ictx.keys {
+			if _, ok := byKey[key]; !ok {
+				ictx.missingKeys = append(ictx.missingKeys, key)
+			}
+		}
 	}
 	return parsed, ictx, nil
 }

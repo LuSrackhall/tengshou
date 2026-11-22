@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,8 +16,10 @@ import (
 	"time"
 
 	"github.com/LuSrackhall/tengshou/internal/app"
+	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/demo"
 	"github.com/LuSrackhall/tengshou/internal/httpapi"
+	"github.com/LuSrackhall/tengshou/internal/mcp"
 	"github.com/LuSrackhall/tengshou/internal/model"
 	"github.com/LuSrackhall/tengshou/internal/pdfdoc"
 	"github.com/LuSrackhall/tengshou/internal/version"
@@ -88,6 +91,8 @@ func run(args []string) error {
 			return err
 		}
 		return runBackup(*c.dataDir)
+	case "mcp":
+		return runMCP(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("未知子命令 %q", cmd)
@@ -105,6 +110,7 @@ func usage() {
   serve     启动本地 HTTP 服务（含局域网测试页）
   render    用模板重新生成一份合同 PDF
   backup    备份 SQLite 数据库到 backups/
+  mcp       启动 MCP stdio 连接器（供 Claude Code / Claude Desktop 注册）
   version   显示版本
 
 全局参数：
@@ -112,10 +118,17 @@ func usage() {
   --font <路径>       中文字体文件
   --font-index <n>    .ttc 字体集合序号
 
+mcp 参数：
+  --data-dir <路径>   数据目录（读取端口与令牌）
+  --api-url <地址>    本机服务地址（默认 http://127.0.0.1:<配置端口>，自动探测端口回退）
+  --token <令牌>      数据接口令牌（默认读取 config.json）
+  环境变量：TENGHSHOU_API_URL、TENGHSHOU_API_TOKEN
+
 示例：
   tengshou-cli demo --data-dir ./data
   tengshou-cli serve --data-dir ./data --port 8765
   tengshou-cli render --data-dir ./data --contract demo-contract-1
+  tengshou-cli mcp --data-dir ./data
 `, version.String())
 }
 
@@ -295,4 +308,65 @@ func runBackup(dataDir string) error {
 	}
 	fmt.Printf("数据库备份：%s\n", path)
 	return nil
+}
+
+// runMCP starts the B6 stdio MCP connector. It never opens the database: the
+// connector talks to the running local HTTP service over loopback, so all
+// reads, validation and audit logging stay in the one application process.
+func runMCP(args []string) error {
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	dataDir := fs.String("data-dir", "", "数据目录（读取端口与令牌，默认使用系统应用数据目录）")
+	apiURL := fs.String("api-url", os.Getenv("TENGHSHOU_API_URL"), "本机服务地址（默认 http://127.0.0.1:<配置端口>）")
+	token := fs.String("token", os.Getenv("TENGHSHOU_API_TOKEN"), "数据接口令牌（默认读取 config.json）")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	bases, tokenValue, err := mcpTargets(*dataDir, *apiURL, *token)
+	if err != nil {
+		return err
+	}
+	api, err := mcp.NewAPI(mcp.APIOptions{BaseURLs: bases, Token: tokenValue})
+	if err != nil {
+		return err
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger.Info("腾手 MCP 服务已启动（stdio）", "api", strings.Join(bases, "、"), "data_dir", *dataDir)
+	server := mcp.New(mcp.Options{API: api, Version: version.String(), Logger: logger})
+	return server.Serve(context.Background(), os.Stdin, os.Stdout)
+}
+
+// mcpTargets resolves candidate loopback endpoints and the read API token.
+// Without an explicit --api-url it reads config.json and assumes the desktop
+// app's port fallback range (configured port .. +9).
+func mcpTargets(dataDir, apiURL, token string) ([]string, string, error) {
+	apiURL = strings.TrimSpace(apiURL)
+	token = strings.TrimSpace(token)
+	if apiURL == "" || token == "" {
+		paths, err := config.ResolvePaths(dataDir)
+		if err != nil {
+			return nil, "", err
+		}
+		cfg, cfgErr := config.Load(paths)
+		if cfgErr != nil {
+			if apiURL == "" {
+				return nil, "", fmt.Errorf("读取配置失败：%w", cfgErr)
+			}
+			// An explicit address still works for writes; reads may need the
+			// token, which the user can pass with --token.
+			return []string{apiURL}, token, nil
+		}
+		if token == "" {
+			token = cfg.HTTP.Token
+		}
+		if apiURL != "" {
+			return []string{apiURL}, token, nil
+		}
+		bases := make([]string, 0, 10)
+		for port := cfg.HTTP.Port; port < cfg.HTTP.Port+10 && port <= 65535; port++ {
+			bases = append(bases, fmt.Sprintf("http://127.0.0.1:%d", port))
+		}
+		return bases, token, nil
+	}
+	return []string{apiURL}, token, nil
 }

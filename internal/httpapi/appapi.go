@@ -62,13 +62,14 @@ func (s *Server) handleAppBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":        s.version(),
-		"schema_version": schemaVersion,
-		"operator":       svc.Actor(),
-		"current_year":   time.Now().Year(),
-		"years":          years,
-		"stats":          stats,
-		"now":            time.Now().UTC().Format(time.RFC3339),
+		"version":           s.version(),
+		"schema_version":    schemaVersion,
+		"operator":          svc.Actor(),
+		"current_year":      time.Now().Year(),
+		"years":             years,
+		"stats":             stats,
+		"mcp_write_enabled": s.opts.Config.MCP.WriteEnabled,
+		"now":               time.Now().UTC().Format(time.RFC3339),
 	})
 }
 

@@ -1,6 +1,7 @@
-// Package httpapi exposes 腾手's read-only local data API and the LAN test
-// page. The data API is intentionally GET-only so external agents (B6 MCP)
-// cannot mutate the local dataset.
+// Package httpapi exposes 腾手's read-only local data API, the loopback-only
+// application write surface and the LAN signature page. External agents (B6
+// MCP) read /api/v1; their write tools use /app/api with the X-Tengshou-MCP
+// marker, so mutating requests stay on loopback and are audited separately.
 package httpapi
 
 import (
@@ -266,9 +267,16 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// HeaderMCP marks a request as coming from the B6 MCP connector. Mutating
+// requests with this header are gated by config mcp.write_enabled and their
+// change-log entries are recorded with actor=tengshou-mcp.
+const HeaderMCP = "X-Tengshou-MCP"
+
 // withAppGuard protects the application write surface: it must be reached
 // from loopback, mutating requests must carry X-Tengshou-App: 1 (forcing a
 // CORS preflight for foreign pages) and cross-site origins are rejected.
+// Requests from the MCP connector additionally respect the write switch and
+// carry the agent audit identity.
 func (s *Server) withAppGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/app/api/") {
@@ -281,9 +289,8 @@ func (s *Server) withAppGuard(next http.Handler) http.Handler {
 				writeError(w, http.StatusForbidden, "origin_rejected", "跨站请求被拒绝")
 				return
 			}
-			switch r.Method {
-			case http.MethodGet, http.MethodHead:
-			default:
+			mutating := r.Method != http.MethodGet && r.Method != http.MethodHead
+			if mutating {
 				if r.Header.Get("X-Tengshou-App") != "1" {
 					writeError(w, http.StatusForbidden, "app_header_required",
 						"缺少 X-Tengshou-App 请求头")
@@ -295,6 +302,14 @@ func (s *Server) withAppGuard(next http.Handler) http.Handler {
 						"请求体必须是 application/json")
 					return
 				}
+				if r.Header.Get(HeaderMCP) == "1" && !s.opts.Config.MCP.WriteEnabled {
+					writeError(w, http.StatusForbidden, "mcp_write_disabled",
+						"MCP 写工具已在配置中关闭（mcp.write_enabled=false）")
+					return
+				}
+			}
+			if r.Header.Get(HeaderMCP) == "1" {
+				r = r.WithContext(service.WithActor(r.Context(), service.MCPActor))
 			}
 		}
 		next.ServeHTTP(w, r)

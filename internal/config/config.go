@@ -94,6 +94,15 @@ type Signature struct {
 	TTLMinutes int `json:"ttl_minutes"`
 }
 
+// MCP controls the local B6 MCP connector (the `tengshou-cli mcp` stdio
+// subcommand and the loopback write surface it uses).
+type MCP struct {
+	// WriteEnabled allows the MCP connector's write tools (create field,
+	// party and contract draft). It is on by default; set it to false to keep
+	// MCP strictly read-only. Read tools are unaffected.
+	WriteEnabled bool `json:"write_enabled"`
+}
+
 // Config is the application configuration persisted as config.json.
 type Config struct {
 	Version   int       `json:"version"`
@@ -101,6 +110,7 @@ type Config struct {
 	PDF       PDF       `json:"pdf"`
 	Log       Log       `json:"log"`
 	Signature Signature `json:"signature"`
+	MCP       MCP       `json:"mcp"`
 	// Operator is the name recorded in the change log. Empty means the OS user.
 	Operator string `json:"operator,omitempty"`
 }
@@ -192,6 +202,9 @@ func Default() Config {
 		},
 		Signature: Signature{
 			TTLMinutes: 10,
+		},
+		MCP: MCP{
+			WriteEnabled: true,
 		},
 	}
 }

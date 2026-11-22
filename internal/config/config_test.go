@@ -119,3 +119,46 @@ func TestSaveRoundTrip(t *testing.T) {
 		t.Fatalf("round trip mismatch: %+v", loaded)
 	}
 }
+
+func TestMCPWriteEnabledDefaultsOn(t *testing.T) {
+	dir := t.TempDir()
+	paths, _ := ResolvePaths(dir)
+	cfg, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.MCP.WriteEnabled {
+		t.Fatal("mcp.write_enabled should default to true")
+	}
+
+	// Config files written before B6 have no mcp section; they keep the on
+	// default instead of silently disabling agent writes.
+	if err := os.WriteFile(paths.ConfigFile, []byte(`{
+	  "version": 1,
+	  "http": {"port": 9001, "allow_lan": false, "token": "x"}
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.MCP.WriteEnabled {
+		t.Fatal("missing mcp section should default to true")
+	}
+
+	if err := os.WriteFile(paths.ConfigFile, []byte(`{
+	  "version": 1,
+	  "http": {"port": 9001, "allow_lan": false, "token": "x"},
+	  "mcp": {"write_enabled": false}
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MCP.WriteEnabled {
+		t.Fatal("explicit mcp.write_enabled=false should be preserved")
+	}
+}

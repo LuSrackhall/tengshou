@@ -62,6 +62,34 @@ func OSUser() string {
 // Actor returns the name recorded in change-log entries.
 func (s *Service) Actor() string { return s.actor }
 
+// MCPActor is the change-log actor recorded for writes initiated through the
+// B6 MCP connector. The HTTP layer sets it from the X-Tengshou-MCP header so
+// agent writes are distinguishable from desktop-UI writes.
+const MCPActor = "tengshou-mcp"
+
+type actorContextKey struct{}
+
+// WithActor overrides the change-log actor for operations carried by ctx. An
+// empty actor leaves the service default (config operator / OS user) intact.
+// This is used for MCP-originated writes; it does not change authorization.
+func WithActor(ctx context.Context, actor string) context.Context {
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, actorContextKey{}, actor)
+}
+
+// actorFor resolves the audit actor for one operation.
+func (s *Service) actorFor(ctx context.Context) string {
+	if ctx != nil {
+		if actor, ok := ctx.Value(actorContextKey{}).(string); ok && actor != "" {
+			return actor
+		}
+	}
+	return s.actor
+}
+
 // SetDataDir configures the data directory used for binary assets such as
 // captured signature images. It is called once at startup, before serving.
 func (s *Service) SetDataDir(dir string) { s.dataDir = dir }
@@ -135,7 +163,7 @@ func (s *Service) logChange(ctx context.Context, entity, entityID, action, summa
 		Entity:    entity,
 		EntityID:  entityID,
 		Action:    action,
-		Actor:     s.actor,
+		Actor:     s.actorFor(ctx),
 		Summary:   summary,
 		Changes:   changes,
 		CreatedAt: s.now(),

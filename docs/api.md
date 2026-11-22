@@ -58,7 +58,7 @@ X-Api-Token: <token>
 | GET | `/api/v1/parties?q=&limit=&offset=` | 相对方列表（按姓名 / 证件号 / 电话搜索） |
 | GET | `/api/v1/parties/{id}` | 相对方详情 |
 | GET | `/api/v1/contracts?q=&status=&year=&limit=&offset=` | 合同列表；`year` 省略即跨年查询 |
-| GET | `/api/v1/contracts/{id}` | 合同详情（相对方、签名、模板版本、PDF 记录） |
+| GET | `/api/v1/contracts/{id}` | 合同详情（相对方、签名、公章关联、模板版本、PDF 记录） |
 | GET | `/api/v1/templates?q=&limit=&offset=` | 模板列表（不含 HTML 正文） |
 | GET | `/api/v1/templates/{id}` | 模板详情（含 HTML） |
 | GET | `/api/v1/signature-assets?q=&contract_id=&limit=&offset=` | 签名图片元数据（含合同、内容版本关联；不含图片内容） |

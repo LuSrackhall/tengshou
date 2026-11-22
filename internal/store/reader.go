@@ -118,6 +118,25 @@ func scanSignature(sc scanner) (model.Signature, error) {
 const signatureColumns = `id, party_id, contract_id, signer_name, asset_path, sha256,
 	content_sha256, source, session_id, width_px, height_px, captured_at, created_at`
 
+// sealColumns includes the number of contracts currently linked to the seal.
+const sealColumns = `s.id, s.party_id, s.name, s.asset_path, s.sha256, s.mime,
+	s.width_px, s.height_px, s.note,
+	(SELECT COUNT(*) FROM contract_seals cs WHERE cs.seal_id = s.id),
+	s.created_at, s.updated_at`
+
+func scanSeal(sc scanner) (model.Seal, error) {
+	var s model.Seal
+	var partyID sql.NullString
+	var created, updated string
+	if err := sc.Scan(&s.ID, &partyID, &s.Name, &s.AssetPath, &s.SHA256, &s.MIME,
+		&s.WidthPx, &s.HeightPx, &s.Note, &s.ContractCount, &created, &updated); err != nil {
+		return s, err
+	}
+	s.PartyID = partyID.String
+	s.CreatedAt, s.UpdatedAt = parseTime(created), parseTime(updated)
+	return s, nil
+}
+
 func scanDocument(sc scanner) (model.OutputDocument, error) {
 	var d model.OutputDocument
 	var contractID, templateID sql.NullString
@@ -320,7 +339,12 @@ func (r *Reader) GetContractDetail(ctx context.Context, id string) (model.Contra
 	if err != nil {
 		return model.ContractDetail{}, err
 	}
-	detail := model.ContractDetail{Contract: c, Signatures: []model.Signature{}, Documents: []model.OutputDocument{}}
+	detail := model.ContractDetail{
+		Contract:   c,
+		Signatures: []model.Signature{},
+		Seals:      []model.Seal{},
+		Documents:  []model.OutputDocument{},
+	}
 	if c.PartyAID != "" {
 		if p, err := r.GetParty(ctx, c.PartyAID); err == nil {
 			detail.PartyA = &p
@@ -348,6 +372,11 @@ func (r *Reader) GetContractDetail(ctx context.Context, id string) (model.Contra
 		return detail, err
 	}
 	detail.Signatures = sigs
+	seals, err := r.ListSealsForContract(ctx, c.ID)
+	if err != nil {
+		return detail, err
+	}
+	detail.Seals = seals
 	docs, err := r.listDocumentsForContract(ctx, c.ID)
 	if err != nil {
 		return detail, err
@@ -507,6 +536,109 @@ func (r *Reader) ListSignatures(ctx context.Context, f model.ListFilter) (model.
 	return model.List[model.Signature]{Items: items, Total: total, Limit: f.Limit, Offset: f.Offset}, rows.Err()
 }
 
+// ListSeals returns seal asset metadata.
+func (r *Reader) ListSeals(ctx context.Context, f model.ListFilter) (model.List[model.Seal], error) {
+	f.Normalize()
+	where := []string{"1=1"}
+	args := []any{}
+	if q := strings.TrimSpace(f.Query); q != "" {
+		where = append(where, "(s.name LIKE ? OR s.note LIKE ?)")
+		like := "%" + q + "%"
+		args = append(args, like, like)
+	}
+	if partyID := strings.TrimSpace(f.PartyID); partyID != "" {
+		where = append(where, "s.party_id = ?")
+		args = append(args, partyID)
+	}
+	clause := strings.Join(where, " AND ")
+	var total int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM seal_assets s WHERE `+clause, args...).Scan(&total); err != nil {
+		return model.List[model.Seal]{}, err
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT `+sealColumns+` FROM seal_assets s WHERE `+clause+
+		` ORDER BY s.name, s.created_at DESC, s.id LIMIT ? OFFSET ?`, append(args, f.Limit, f.Offset)...)
+	if err != nil {
+		return model.List[model.Seal]{}, err
+	}
+	defer rows.Close()
+	items := []model.Seal{}
+	for rows.Next() {
+		seal, err := scanSeal(rows)
+		if err != nil {
+			return model.List[model.Seal]{}, err
+		}
+		items = append(items, seal)
+	}
+	return model.List[model.Seal]{Items: items, Total: total, Limit: f.Limit, Offset: f.Offset}, rows.Err()
+}
+
+// GetSeal returns one seal by id.
+func (r *Reader) GetSeal(ctx context.Context, id string) (model.Seal, error) {
+	seal, err := scanSeal(r.db.QueryRowContext(ctx, `SELECT `+sealColumns+
+		` FROM seal_assets s WHERE s.id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Seal{}, ErrNotFound
+	}
+	return seal, err
+}
+
+// ListSealsForContract returns seals explicitly linked to one contract,
+// most recently placed first.
+func (r *Reader) ListSealsForContract(ctx context.Context, contractID string) ([]model.Seal, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+sealColumns+`
+		FROM seal_assets s JOIN contract_seals cs ON cs.seal_id = s.id
+		WHERE cs.contract_id = ?
+		ORDER BY cs.placed_at DESC, s.name, s.id`, contractID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSeals(rows)
+}
+
+// ListSealsForParty returns seals that belong to one party.
+func (r *Reader) ListSealsForParty(ctx context.Context, partyID string) ([]model.Seal, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+sealColumns+`
+		FROM seal_assets s WHERE s.party_id = ?
+		ORDER BY s.created_at DESC, s.id`, partyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSeals(rows)
+}
+
+func scanSeals(rows *sql.Rows) ([]model.Seal, error) {
+	out := []model.Seal{}
+	for rows.Next() {
+		seal, err := scanSeal(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, seal)
+	}
+	return out, rows.Err()
+}
+
+// SealContractIDs returns the contracts a seal is linked to.
+func (r *Reader) SealContractIDs(ctx context.Context, sealID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT contract_id FROM contract_seals WHERE seal_id = ? ORDER BY placed_at, contract_id`, sealID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // ListDocuments returns rendered document metadata.
 func (r *Reader) ListDocuments(ctx context.Context, f model.ListFilter) (model.List[model.OutputDocument], error) {
 	f.Normalize()
@@ -549,6 +681,7 @@ func (r *Reader) Stats(ctx context.Context) (model.Stats, error) {
 		{`SELECT COUNT(*) FROM contracts`, &s.Contracts},
 		{`SELECT COUNT(*) FROM templates`, &s.Templates},
 		{`SELECT COUNT(*) FROM signature_assets`, &s.Signatures},
+		{`SELECT COUNT(*) FROM seal_assets`, &s.Seals},
 		{`SELECT COUNT(*) FROM output_documents`, &s.Documents},
 		{`SELECT COUNT(*) FROM field_definitions WHERE archived = 0`, &s.Fields},
 	} {

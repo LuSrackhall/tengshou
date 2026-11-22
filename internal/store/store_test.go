@@ -42,8 +42,8 @@ func TestMigrationsOnEmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
-		t.Fatalf("schema version = %d, want 4", version)
+	if version != 5 {
+		t.Fatalf("schema version = %d, want 5", version)
 	}
 	// Re-opening is idempotent.
 	st2, err := store.Open(st.Path())
@@ -51,7 +51,7 @@ func TestMigrationsOnEmptyDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	if v, _ := st2.SchemaVersion(); v != 4 {
+	if v, _ := st2.SchemaVersion(); v != 5 {
 		t.Fatalf("version after reopen = %d", v)
 	}
 }
@@ -85,7 +85,7 @@ func TestMigrationFromOldDatabase(t *testing.T) {
 		t.Fatalf("migrate old db: %v", err)
 	}
 	defer reopened.Close()
-	if v, _ := reopened.SchemaVersion(); v != 4 {
+	if v, _ := reopened.SchemaVersion(); v != 5 {
 		t.Fatalf("version = %d", v)
 	}
 	db2, err := sql.Open("sqlite", "file:"+path)

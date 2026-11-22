@@ -74,6 +74,7 @@ const (
 	ChangeEntityContract = "contract"
 	ChangeEntityParty    = "party"
 	ChangeEntityField    = "field"
+	ChangeEntitySeal     = "seal"
 	ChangeActionCreate   = "create"
 	ChangeActionUpdate   = "update"
 	ChangeActionDelete   = "delete"
@@ -170,6 +171,7 @@ type ContractDetail struct {
 	PartyB     *Party           `json:"party_b,omitempty"`
 	Template   *Template        `json:"template,omitempty"`
 	Signatures []Signature      `json:"signatures"`
+	Seals      []Seal           `json:"seals"`
 	Documents  []OutputDocument `json:"documents"`
 }
 
@@ -196,6 +198,25 @@ type Signature struct {
 const (
 	SignatureSourceLANQR = "lan_qr"
 )
+
+// Seal is an imported official-seal image retained as an asset file. Only the
+// path and digest live in the database; the image itself stays under the data
+// directory. PartyID links a seal to the unit it belongs to. Contract links
+// are stored separately, so one seal can be reused by many contracts.
+type Seal struct {
+	ID            string    `json:"id"`
+	PartyID       string    `json:"party_id,omitempty"`
+	Name          string    `json:"name"`
+	AssetPath     string    `json:"asset_path"` // path relative to the data directory
+	SHA256        string    `json:"sha256"`
+	MIME          string    `json:"mime"`
+	WidthPx       int       `json:"width_px"`
+	HeightPx      int       `json:"height_px"`
+	Note          string    `json:"note,omitempty"`
+	ContractCount int       `json:"contract_count"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
 
 // Template is a versioned HTML contract template.
 type Template struct {
@@ -227,6 +248,7 @@ type Stats struct {
 	Contracts  int `json:"contracts"`
 	Templates  int `json:"templates"`
 	Signatures int `json:"signatures"`
+	Seals      int `json:"seals"`
 	Documents  int `json:"documents"`
 	Fields     int `json:"fields"`
 }
@@ -249,6 +271,8 @@ type ListFilter struct {
 	Year int
 	// ContractID limits signature assets to one contract; empty means all.
 	ContractID string
+	// PartyID limits seal assets to one party; empty means all.
+	PartyID string
 }
 
 // Normalize clamps pagination to safe bounds.

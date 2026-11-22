@@ -113,13 +113,14 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 			{
 				Name:        "contract_detail",
 				Path:        "/api/v1/contracts/{id}",
-				Description: "合同及其相对方、签名、模板版本与输出记录。",
+				Description: "合同及其相对方、签名、公章关联、模板版本与输出记录。",
 				Fields: []fieldDoc{
 					{"contract", "object", "contract 资源"},
 					{"party_a", "object", "party 资源（可为空）"},
 					{"party_b", "object", "party 资源（可为空）"},
 					{"template", "object", "模板元数据（不含 HTML）"},
 					{"signatures", "array", "signature_asset 列表"},
+					{"seals", "array", "显式关联到合同的公章图片元数据（asset_path / sha256 / 尺寸）"},
 					{"documents", "array", "output_document 列表"},
 				},
 			},
@@ -182,6 +183,7 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 					{"contracts", "integer", "合同数量"},
 					{"templates", "integer", "模板版本数量"},
 					{"signatures", "integer", "签名资产数量"},
+					{"seals", "integer", "公章图片数量"},
 					{"documents", "integer", "输出 PDF 数量"},
 				},
 			},

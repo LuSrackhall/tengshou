@@ -23,7 +23,11 @@
 # Wails / Node
 build/bin/
 node_modules/
-dist/
+/dist/
+
+# Vite 构建产物；dist/.keep 入库，保证干净 clone 下 go:embed 始终成立
+internal/httpapi/web/app/dist/*
+!internal/httpapi/web/app/dist/.keep
 
 # Secrets
 .env

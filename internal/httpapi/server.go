@@ -199,6 +199,7 @@ func (s *Server) routes() {
 		s.handleAppAsset("vendor/pdfjs/pdf.min.js", "application/javascript; charset=utf-8"))
 	m.HandleFunc("GET /app/vendor/pdf.worker.min.js",
 		s.handleAppAsset("vendor/pdfjs/pdf.worker.min.js", "application/javascript; charset=utf-8"))
+	m.HandleFunc("GET /app/dist/", s.handleAppDist)
 	m.HandleFunc("GET /api/v1/health", s.handleHealth)
 	m.HandleFunc("GET /api/v1/schema", s.auth(s.handleSchema))
 	m.HandleFunc("GET /api/v1/stats", s.auth(s.handleStats))

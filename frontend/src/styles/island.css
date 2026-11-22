@@ -1,0 +1,5 @@
+/* 阶段 0 岛式挂载：包装元素不参与顶栏的 flex 布局，
+   内层 .live-status 与旧版一样作为 .topbar 的布局子项。 */
+#vue-live-status {
+  display: contents;
+}

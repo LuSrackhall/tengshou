@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>腾手 · Vue 岛开发预览</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>腾手</h1>
+      <span class="tagline">Vue 岛开发预览</span>
+    </div>
+    <span id="vue-live-status"></span>
+  </header>
+  <main style="padding: 24px 28px;">
+    <p class="hint">
+      此页只用于开发顶栏同步状态徽标，不参与生产构建。按钮通过
+      window 事件模拟存量 app.js 的状态桥（tengshou:live-status）。
+    </p>
+    <p>
+      <button type="button" data-mode="connecting">connecting</button>
+      <button type="button" data-mode="sse">sse</button>
+      <button type="button" data-mode="poll">poll</button>
+      <button type="button" data-mode="offline">offline</button>
+      <button type="button" data-mode="sse" data-detail="自定义 title 提示">sse + detail</button>
+    </p>
+  </main>
+  <script type="module" src="/src/dev.ts"></script>
+  <script>
+    for (const btn of document.querySelectorAll("[data-mode]")) {
+      btn.addEventListener("click", () => {
+        const detail = {
+          mode: btn.dataset.mode,
+          detail: btn.dataset.detail || "",
+        };
+        window.__tengshouLiveStatus = detail;
+        window.dispatchEvent(new CustomEvent("tengshou:live-status", { detail }));
+      });
+    }
+  </script>
+</body>
+</html>

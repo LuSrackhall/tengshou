@@ -4207,24 +4207,11 @@ let pendingAgentActivity = false;
 
 function setLiveStatus(mode, detail) {
   realtimeMode = mode;
-  const el = $("#liveStatus");
-  if (!el) return;
-  el.classList.remove("sse", "poll", "connecting", "offline");
-  el.classList.add(mode);
-  if (mode === "sse") {
-    el.textContent = "实时同步";
-    el.title = "已连接本地变更事件流，外部写入会立即显示";
-  } else if (mode === "poll") {
-    el.textContent = "轮询同步";
-    el.title = "事件流不可用，已降级为 3 秒轮询；外部写入会在数秒内显示";
-  } else if (mode === "offline") {
-    el.textContent = "同步中断";
-    el.title = "暂时无法接收变更事件，正在重试";
-  } else {
-    el.textContent = "同步中…";
-    el.title = "正在连接本地变更事件流";
-  }
-  if (detail) el.title = detail;
+  // 顶栏徽标已迁到 Vue 岛（frontend/src/components/LiveStatusBadge.vue）：
+  // 这里只把状态写到 window 并派发事件，DOM 渲染不再落在 app.js。
+  const live = { mode, detail: detail || "" };
+  window.__tengshouLiveStatus = live;
+  window.dispatchEvent(new CustomEvent("tengshou:live-status", { detail: live }));
 }
 
 function eventStreamURL() {

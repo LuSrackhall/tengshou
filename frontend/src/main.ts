@@ -1,5 +1,6 @@
 import { createApp } from "vue";
 import LiveStatusBadge from "./components/LiveStatusBadge.vue";
+import FieldsView from "./components/fields/FieldsView.vue";
 import PartiesView from "./components/parties/PartiesView.vue";
 import "./styles/island.css";
 
@@ -17,4 +18,11 @@ if (liveStatusHost) {
 const partiesHost = document.getElementById("view-parties");
 if (partiesHost) {
   createApp(PartiesView).mount(partiesHost);
+}
+
+// 字段管理（阶段 1 迁出 app.js）：<section id="view-fields"> 保留为宿主，
+// tab 切换仍由 app.js 的 switchTab 负责。
+const fieldsHost = document.getElementById("view-fields");
+if (fieldsHost) {
+  createApp(FieldsView).mount(fieldsHost);
 }

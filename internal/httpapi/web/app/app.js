@@ -339,7 +339,8 @@ function renderMeta() {
     <span>模板 ${stats.templates || 0} 版</span>
     <span>相对方 ${stats.parties || 0} 个</span>
     <span>公章 ${stats.seals || 0} 枚</span>
-    <span>字段 ${stats.fields || 0} 个</span>`;
+    <span>字段 ${stats.fields || 0} 个</span>
+    <span title="应用版本（数据格式 v${esc(String(state.bootstrap.schema_version || ""))}）">版本 ${esc(state.bootstrap.version || "未知")}</span>`;
 }
 
 function renderYearSelect() {
@@ -3818,6 +3819,7 @@ function renderMCPPanel(status) {
         <h3>连接器状态</h3>
         <dl>
           <dt>服务</dt><dd><span class="badge active">运行中</span></dd>
+          <dt>连接器版本</dt><dd><code>${esc(status.version || "未知")}</code></dd>
           <dt>传输</dt><dd>stdio · 仅本机回环 · 不打开数据库</dd>
           <dt>读工具</dt><dd>${status.read_tools || 0} 个 <span class="muted">始终可用</span></dd>
           <dt>写工具</dt><dd>${status.write_tools || 0} 个 <span class="muted">新建字段 / 档案 / 合同草稿，全部记入变更记录</span></dd>

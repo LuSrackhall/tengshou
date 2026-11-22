@@ -73,11 +73,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAPIRoot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name":      "腾手本地数据接口",
-		"version":   "v1",
-		"read_only": true,
-		"auth":      "Authorization: Bearer <token> or X-Api-Token: <token>",
-		"schema":    "/api/v1/schema",
+		"name":        "腾手本地数据接口",
+		"version":     "v1",
+		"app_version": s.version(),
+		"read_only":   true,
+		"auth":        "Authorization: Bearer <token> or X-Api-Token: <token>",
+		"schema":      "/api/v1/schema",
 		"resources": []string{
 			"/api/v1/stats",
 			"/api/v1/fields",

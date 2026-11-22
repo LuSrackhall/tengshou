@@ -30,6 +30,18 @@ func TestRenewalWordingBoundary(t *testing.T) {
 		}
 		files = append(files, doc)
 	}
+	// 阶段 1：合同台账与续签表单已迁到 Vue，界面文案落在这里，边界检查
+	// 随迁移覆盖。
+	for _, pattern := range []string{
+		"../../frontend/src/components/contracts/*.vue",
+		"../../frontend/src/components/contracts/*.ts",
+	} {
+		matched, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, matched...)
+	}
 	for _, file := range files {
 		raw, err := os.ReadFile(file)
 		if err != nil {

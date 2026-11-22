@@ -75,6 +75,7 @@ const (
 	ChangeEntityParty    = "party"
 	ChangeEntityField    = "field"
 	ChangeEntitySeal     = "seal"
+	ChangeEntityTemplate = "template"
 	ChangeActionCreate   = "create"
 	ChangeActionUpdate   = "update"
 	ChangeActionDelete   = "delete"
@@ -218,16 +219,90 @@ type Seal struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// Template is a versioned HTML contract template.
+// Template kinds. HTML templates are rendered by the built-in layout engine;
+// PDF templates are imported from a user-provided Word document, converted to
+// PDF and filled by overlaying data at user-calibrated positions (B3).
+const (
+	TemplateKindHTML = "html"
+	TemplateKindPDF  = "pdf"
+)
+
+// Placement binding types for PDF templates.
+const (
+	PlacementField     = "field"
+	PlacementSignature = "signature"
+	PlacementSeal      = "seal"
+)
+
+// Placement party roles for signatures and seals.
+const (
+	PlacementPartyA = "party_a"
+	PlacementPartyB = "party_b"
+)
+
+// Placement seal modes: contract picks the seal linked to the contract (or a
+// party seal), seal pins one specific seal asset.
+const (
+	PlacementSealContract = "contract"
+	PlacementSealFixed    = "seal"
+)
+
+// Placement is one calibrated box on a PDF template page. Coordinates are PDF
+// points measured from the top-left corner of the page as displayed (rotation
+// already applied); x,y is the top-left of the box, w,h its size. The editor
+// draws exactly this rectangle over the PDF page.
+type Placement struct {
+	ID   string  `json:"id"`
+	Page int     `json:"page"` // 1-based page number
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
+	W    float64 `json:"w"`
+	H    float64 `json:"h"`
+	Type string  `json:"type"` // field | signature | seal
+	// Field is the bound value key for field placements:
+	//   contract.<field_key>  e.g. contract.contract_no, contract.data.area_sqm
+	//   party_a.<field_key> / party_b.<field_key>  e.g. party_b.name
+	Field string `json:"field,omitempty"`
+	// Party selects the signature/seal party for signature and seal bindings.
+	Party string `json:"party,omitempty"`
+	// SealMode is contract (resolve from the contract) or seal (use SealID).
+	SealMode string `json:"seal_mode,omitempty"`
+	// SealID pins a specific seal asset when SealMode is seal.
+	SealID string `json:"seal_id,omitempty"`
+	// FontSize is the preferred text size in points (0 = default 10.5 pt).
+	FontSize float64 `json:"font_size,omitempty"`
+	// Align is the horizontal text alignment: left (default), center, right.
+	Align string `json:"align,omitempty"`
+}
+
+// Template is a versioned contract template. HTML templates keep their body in
+// HTML; PDF templates keep the imported Word file and converted PDF as assets
+// and store the calibrated positions in Placements. Every saved modification
+// creates a new row, so contracts can keep referencing the version they were
+// generated with.
 type Template struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Version   int       `json:"version"`
-	HTML      string    `json:"html,omitempty"`
-	Variables []string  `json:"variables"`
-	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Version   int      `json:"version"`
+	Kind      string   `json:"kind,omitempty"` // html (default) | pdf
+	HTML      string   `json:"html,omitempty"`
+	Variables []string `json:"variables"`
+	IsActive  bool     `json:"is_active"`
+	// SourcePath is the original .docx asset path (relative to the data dir).
+	SourcePath string `json:"source_path,omitempty"`
+	// PDFPath is the converted template PDF asset path.
+	PDFPath string `json:"pdf_path,omitempty"`
+	// PageCount is the converted PDF page count.
+	PageCount int `json:"page_count,omitempty"`
+	// Converter records how the PDF was produced: word or libreoffice.
+	Converter string `json:"converter,omitempty"`
+	// SourceSHA256 and PDFSHA256 digest the imported source and converted PDF.
+	SourceSHA256 string `json:"source_sha256,omitempty"`
+	PDFSHA256    string `json:"pdf_sha256,omitempty"`
+	// Placements holds the calibrated boxes for PDF templates.
+	Placements []Placement `json:"placements,omitempty"`
+	CreatedAt  time.Time   `json:"created_at"`
+	UpdatedAt  time.Time   `json:"updated_at"`
 }
 
 // OutputDocument records a rendered PDF.
@@ -240,6 +315,25 @@ type OutputDocument struct {
 	SHA256          string    `json:"sha256"`
 	PageCount       int       `json:"page_count"`
 	CreatedAt       time.Time `json:"created_at"`
+}
+
+// TemplateUsage summarizes how widely a template family is referenced. It is
+// shown before saving a new version so users see the impact of template
+// changes on already generated contracts.
+type TemplateUsage struct {
+	TemplateID     string `json:"template_id"`
+	Name           string `json:"name"`
+	Version        int    `json:"version"`
+	LatestVersion  int    `json:"latest_version"`
+	FamilyVersions int    `json:"family_versions"`
+	// VersionContracts count contracts pinned to this exact version.
+	VersionContracts int `json:"version_contracts"`
+	// FamilyContracts count contracts pinned to any version of this name.
+	FamilyContracts int `json:"family_contracts"`
+	// OtherVersionContracts count contracts that still use another version.
+	OtherVersionContracts int `json:"other_version_contracts"`
+	// Documents count generated PDFs produced from any version of this name.
+	Documents int `json:"documents"`
 }
 
 // Stats summarizes the local dataset.
@@ -273,6 +367,8 @@ type ListFilter struct {
 	ContractID string
 	// PartyID limits seal assets to one party; empty means all.
 	PartyID string
+	// Kind limits templates to html or pdf; empty means both.
+	Kind string
 }
 
 // Normalize clamps pagination to safe bounds.

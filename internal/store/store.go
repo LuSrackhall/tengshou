@@ -224,6 +224,8 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrDuplicateContractNo is returned when a contract number is already used.
 	ErrDuplicateContractNo = errors.New("duplicate contract number")
+	// ErrDuplicateTemplateVersion is returned when (name, version) already exists.
+	ErrDuplicateTemplateVersion = errors.New("duplicate template version")
 )
 
 func formatTime(t time.Time) string {

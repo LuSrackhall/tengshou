@@ -23,6 +23,12 @@ func TestSealWordingBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	files = append(files, docs...)
+	// 阶段 1：公章页已迁到 Vue，界面文案落在这里，边界检查随迁移覆盖。
+	vue, err := filepath.Glob("../../frontend/src/components/seals/*.vue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, vue...)
 	files = append(files, "../../README.md")
 	for _, file := range files {
 		raw, err := os.ReadFile(file)

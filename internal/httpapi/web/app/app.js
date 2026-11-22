@@ -11,8 +11,6 @@ const state = {
   contractTotal: 0,
   parties: [],
   seals: [],
-  sealTotal: 0,
-  sealQ: "",
   templates: [],
   templateTotal: 0,
   templateQ: "",
@@ -221,12 +219,11 @@ async function loadParties() {
   state.parties = data.items || [];
 }
 
+// loadSeals 只为未迁移的模板标定（state.seals 供公章下拉与名称回显）取数；
+// 公章页本身由 Vue 岛渲染并自行请求 /seals。
 async function loadSeals() {
-  const params = new URLSearchParams({ limit: "500" });
-  if (state.sealQ) params.set("q", state.sealQ);
-  const data = await api("/app/api/v1/seals?" + params.toString());
+  const data = await api("/app/api/v1/seals?limit=500");
   state.seals = data.items || [];
-  state.sealTotal = data.total || 0;
 }
 
 async function loadTemplates() {
@@ -598,13 +595,18 @@ async function openContractForm(contract, opts) {
     ${contract.source_contract_id ? `<div class="renewal-banner" id="renewalSource">正在加载续签来源…</div>` : ""}
     ${contract ? `<div class="warning-list">合同编号创建后不可修改。修改会写入变更记录。</div>` : ""}
     ${detail && detail.signatures && detail.signatures.length ? signaturesSummaryHTML(detail) : ""}
-    ${detail && detail.seals && detail.seals.length ? sealsSummaryHTML(detail) : ""}
+    ${detail && detail.seals && detail.seals.length ? `<div id="contractSealSummary"></div>` : ""}
     <datalist id="partyNameList">
       ${state.parties.map((p) => `<option value="${esc(p.name)}"></option>`).join("")}
     </datalist>
     <div class="form-grid">${form}</div>
     ${contract ? `<div id="contractGeneration" class="gen-panel"></div>` : ""}
     ${contract ? `<div id="contractHistory" class="audit-host"></div>` : ""}`;
+  // 合同详情里的「已关联公章」摘要属于已迁移的公章域：宿主由上面的模板
+  // 占位渲染，内容交给 Vue（bridge/seal-summary.ts 注册的全局挂载函数）。
+  if (detail && detail.seals && detail.seals.length && window.__tengshouSealSummary) {
+    window.__tengshouSealSummary($("#contractSealSummary", modal.body), detail.seals);
+  }
   if (contract) {
     state.auditTarget = { entity: "contract", id: contract.id, selector: "#contractHistory" };
     loadAuditHistory("contract", contract.id, "#contractHistory");
@@ -1556,295 +1558,6 @@ function pollSignatureSession(id) {
   };
   tick();
   signPollTimer = setInterval(tick, 2000);
-}
-
-/* ---------- 公章图片 ---------- */
-
-function sealImageURL(seal) {
-  return `/app/api/v1/seals/${encodeURIComponent(seal.id)}/image`;
-}
-
-function sealsSummaryHTML(detail) {
-  const items = detail.seals.map((seal) =>
-    `<li>${esc(seal.name)} · ${seal.width_px}×${seal.height_px}px · <code>${esc(seal.sha256.slice(0, 12))}</code></li>`).join("");
-  return `<div class="signature-summary seal-summary"><strong>已关联公章 ${detail.seals.length} 枚</strong>
-    <ul>${items}</ul></div>`;
-}
-
-function renderSeals() {
-  const grid = $("#sealGrid");
-  if (!grid) return;
-  $("#sealSummary").textContent =
-    `共 ${state.sealTotal} 枚公章图片${state.sealQ ? ` · 搜索「${state.sealQ}」` : ""}`;
-  if (!state.seals.length) {
-    grid.innerHTML = `<div class="empty">还没有公章图片。点击「导入公章图片」上传 PNG / JPG。</div>`;
-    return;
-  }
-  grid.innerHTML = state.seals.map((seal) => {
-    const owner = seal.party_id ? (partyName(seal.party_id) || "单位档案") : "未关联单位";
-    return `<div class="seal-card" data-id="${esc(seal.id)}">
-      <div class="seal-thumb"><img src="${sealImageURL(seal)}" alt="${esc(seal.name)}" loading="lazy"></div>
-      <div class="seal-card-body">
-        <div class="seal-name">${esc(seal.name)}</div>
-        <div class="seal-meta">${esc(owner)} · ${seal.width_px}×${seal.height_px}px</div>
-        <div class="seal-meta mono">sha256 ${esc(seal.sha256.slice(0, 12))}…</div>
-        <div class="seal-meta">已关联 ${seal.contract_count || 0} 份合同</div>
-        <div class="seal-actions">
-          <button type="button" data-action="preview">预览</button>
-          <button type="button" data-action="attach">关联合同</button>
-          <button type="button" data-action="replace">替换</button>
-          <button type="button" class="danger" data-action="delete">删除</button>
-        </div>
-      </div>
-    </div>`;
-  }).join("");
-  $$("#sealGrid .seal-card").forEach((card) => {
-    card.addEventListener("click", (e) => {
-      const button = e.target.closest("button[data-action]");
-      const seal = state.seals.find((s) => s.id === card.dataset.id);
-      if (!seal) return;
-      const action = button ? button.dataset.action : "preview";
-      if (action === "attach") { openSealAttach(seal); return; }
-      if (action === "replace") { replaceSealImage(seal); return; }
-      if (action === "delete") { deleteSeal(seal); return; }
-      openSealPreview(seal);
-    });
-  });
-}
-
-async function openSealImport(file) {
-  if (file.size > 12 * 1024 * 1024) {
-    toast("公章图片文件过大，请压缩到 12MB 以内", true);
-    return;
-  }
-  let base64;
-  try {
-    base64 = await readFileBase64(file);
-  } catch (err) {
-    toast(err.message, true);
-    return;
-  }
-  const defaultName = file.name.replace(/\.[^.]+$/, "");
-  const parties = state.parties.map((p) =>
-    `<option value="${esc(p.id)}">${esc(p.name)}（${kindLabel(p.kind)}）</option>`).join("");
-  const modal = openModal(`导入公章图片 · ${file.name}`);
-  modal.body.innerHTML = `
-    <div id="sealImportErrors"></div>
-    <div class="form-grid">
-      <div class="field"><label for="sealName">公章名称<span class="req">*</span></label>
-        <input id="sealName" type="text" value="${esc(defaultName)}" placeholder="例如：幸福村股份经济合作社公章"></div>
-      <div class="field"><label for="sealParty">所属单位（可选）</label>
-        <select id="sealParty"><option value="">（暂不关联）</option>${parties}</select>
-        <span class="help">关联单位后，该单位的合同可按模板自动取用这枚公章。</span></div>
-      <div class="field full"><label for="sealNote">说明</label>
-        <input id="sealNote" type="text" placeholder="可选，例如印章类型或保管人"></div>
-      <div class="field full"><label>图片预览</label>
-        <div class="seal-import-preview"><img src="data:${esc(file.type || "image/png")};base64,${base64}" alt="公章预览"></div>
-        <span class="help">支持 PNG / JPG。PNG 保留透明底；JPG 或白底图片会自动去除白底并裁剪空白边距。</span></div>
-    </div>`;
-  footerButton(modal, "取消", "", closeModal);
-  const save = footerButton(modal, "导入", "primary", async () => {
-    save.disabled = true;
-    $("#sealImportErrors", modal.body).innerHTML = "";
-    try {
-      await api("/app/api/v1/seals", {
-        method: "POST",
-        body: {
-          name: $("#sealName", modal.body).value.trim(),
-          party_id: $("#sealParty", modal.body).value,
-          note: $("#sealNote", modal.body).value.trim(),
-          file_base64: base64,
-        },
-      });
-      closeModal();
-      toast("公章图片已导入");
-      await refreshAfterWrite();
-    } catch (err) {
-      save.disabled = false;
-      $("#sealImportErrors", modal.body).innerHTML = fieldErrorsHTML(err);
-    }
-  });
-}
-
-function sealPlacementSnippet(seal, widthMM, align) {
-  const source = seal.party_id ? "sealPath .Seals .PartyA" : "contractSealPath .ContractSeals";
-  const textAlign = align === "left" ? "left" : align === "right" ? "right" : "center";
-  return `{{with ${source}}}<p style="text-align:${textAlign}"><img src="{{.}}" style="width:${widthMM}mm"></p>{{end}}`;
-}
-
-function openSealPreview(seal) {
-  const owner = seal.party_id ? (partyName(seal.party_id) || "单位档案") : "未关联单位";
-  const modal = openModal(`公章预览 · ${seal.name}`, { wide: true });
-  modal.body.innerHTML = `
-    <div class="seal-preview">
-      <div class="seal-a4">
-        <div class="seal-a4-page">
-          <div class="seal-a4-row" id="sealA4Row"><img id="sealA4Img" src="${sealImageURL(seal)}" alt="${esc(seal.name)}" style="width:40mm"></div>
-          <div class="seal-a4-label">A4 页面 · 盖章位置示意</div>
-        </div>
-        <p class="hint">这里只示意模板中的水平位置与图片大小，方便调整模板占位；实际换行与分页由模板排版决定。</p>
-      </div>
-      <div class="seal-preview-side">
-        <div class="seal-meta">${esc(owner)} · ${seal.width_px}×${seal.height_px}px</div>
-        <div class="seal-meta mono">sha256 ${esc(seal.sha256)}</div>
-        <div class="seal-meta">已关联 ${seal.contract_count || 0} 份合同</div>
-        ${seal.note ? `<div class="seal-meta">说明：${esc(seal.note)}</div>` : ""}
-        <div class="field"><label for="sealWidth">盖章宽度</label>
-          <select id="sealWidth">${[30, 35, 40, 45, 50].map((w) => `<option value="${w}"${w === 40 ? " selected" : ""}>${w} mm</option>`).join("")}</select></div>
-        <div class="field"><label for="sealAlign">水平位置</label>
-          <select id="sealAlign">
-            <option value="left">靠左</option>
-            <option value="center" selected>居中</option>
-            <option value="right">靠右</option>
-          </select></div>
-        <div class="field"><label>模板占位</label>
-          <pre id="sealSnippet" class="snippet"></pre>
-          <span class="help">把这段复制到模板的盖章位置；公章属于乙方时把 <code>.PartyA</code> 换成 <code>.PartyB</code>。换模板时按新模板里的位置重新落位，图片本身可以继续复用。</span></div>
-      </div>
-    </div>`;
-  const row = $("#sealA4Row", modal.body);
-  const img = $("#sealA4Img", modal.body);
-  const snippet = $("#sealSnippet", modal.body);
-  const sync = () => {
-    const width = Number($("#sealWidth", modal.body).value) || 40;
-    const align = $("#sealAlign", modal.body).value;
-    img.style.width = width + "mm";
-    row.style.justifyContent = align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center";
-    snippet.textContent = sealPlacementSnippet(seal, width, align);
-  };
-  $("#sealWidth", modal.body).addEventListener("change", sync);
-  $("#sealAlign", modal.body).addEventListener("change", sync);
-  sync();
-  footerButton(modal, "关闭", "", closeModal);
-  footerButton(modal, "复制模板占位", "primary", async () => {
-    const ok = await copyText(snippet.textContent);
-    toast(ok ? "模板占位已复制" : "复制失败，请手动选择文本", !ok);
-  });
-}
-
-async function openSealAttach(seal) {
-  let linked = [];
-  try {
-    const res = await api(`/app/api/v1/seals/${encodeURIComponent(seal.id)}/contracts`);
-    linked = res.contract_ids || [];
-  } catch (err) {
-    toast(err.message, true);
-    return;
-  }
-  let contracts = [];
-  let contractTotal = 0;
-  try {
-    const res = await api("/app/api/v1/contracts?limit=500");
-    contracts = res.items || [];
-    contractTotal = res.total || contracts.length;
-  } catch (err) {
-    toast(err.message, true);
-    return;
-  }
-  const linkedSet = new Set(linked);
-  const visible = new Set(contracts.map((contract) => contract.id));
-  const rows = contracts.map((contract) => `
-    <label class="seal-contract-row">
-      <input type="checkbox" class="seal-contract-check" data-id="${esc(contract.id)}"${linkedSet.has(contract.id) ? " checked" : ""}>
-      <span class="mono">${esc(contract.contract_no)}</span>
-      <span>${esc(contract.title)}</span>
-      <span class="seal-meta">${contract.year} 年</span>
-    </label>`).join("");
-  const truncated = contractTotal > contracts.length
-    ? `<p class="hint">合同较多，这里只列出前 ${contracts.length} 份（共 ${contractTotal} 份）；未列出的合同会保持原有关联不变。</p>`
-    : "";
-  const modal = openModal(`关联合同 · ${seal.name}`, { wide: true });
-  modal.body.innerHTML = `
-    <p class="hint">勾选要使用这枚公章的合同，可以一次选择多份（批量落位）。取消勾选会解除对应合同与这枚公章的关联。</p>
-    ${truncated}
-    <div class="seal-contract-list">${rows || `<div class="empty">还没有合同。</div>`}</div>`;
-  footerButton(modal, "取消", "", closeModal);
-  const save = footerButton(modal, "保存关联", "primary", async () => {
-    save.disabled = true;
-    try {
-      const selected = new Set($$(".seal-contract-check:checked", modal.body).map((el) => el.dataset.id));
-      const add = [...selected].filter((id) => !linkedSet.has(id));
-      const remove = [...linkedSet].filter((id) => visible.has(id) && !selected.has(id));
-      if (add.length) {
-        await api(`/app/api/v1/seals/${encodeURIComponent(seal.id)}/attach`, {
-          method: "POST", body: { contract_ids: add },
-        });
-      }
-      if (remove.length) {
-        await api(`/app/api/v1/seals/${encodeURIComponent(seal.id)}/detach`, {
-          method: "POST", body: { contract_ids: remove },
-        });
-      }
-      closeModal();
-      toast(`公章关联已保存：新增 ${add.length} 份，解除 ${remove.length} 份`);
-      await refreshAfterWrite();
-    } catch (err) {
-      save.disabled = false;
-      toast(err.message, true);
-    }
-  });
-}
-
-function pickImageFile(callback) {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/png,image/jpeg";
-  input.addEventListener("change", () => {
-    const file = input.files && input.files[0];
-    if (file) callback(file);
-  });
-  input.click();
-}
-
-function replaceSealImage(seal) {
-  if (!window.confirm(`确定替换公章图片「${seal.name}」吗？替换后生成的新 PDF 使用新图片，历史文件不受影响；替换会记入变更记录。`)) return;
-  pickImageFile(async (file) => {
-    let base64;
-    try {
-      base64 = await readFileBase64(file);
-    } catch (err) {
-      toast(err.message, true);
-      return;
-    }
-    try {
-      await api(`/app/api/v1/seals/${encodeURIComponent(seal.id)}/replace`, {
-        method: "POST", body: { file_base64: base64 },
-      });
-      toast("公章图片已替换");
-      await refreshAfterWrite();
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-}
-
-async function deleteSeal(seal) {
-  const linked = seal.contract_count || 0;
-  const extra = linked ? `，并解除 ${linked} 份合同的关联` : "";
-  if (!window.confirm(`确定删除公章图片「${seal.name}」吗${extra}？删除会记入变更记录。`)) return;
-  try {
-    await api(`/app/api/v1/seals/${encodeURIComponent(seal.id)}`, { method: "DELETE" });
-    toast("公章图片已删除");
-    await refreshAfterWrite();
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch (_) {
-    const area = document.createElement("textarea");
-    area.value = text;
-    document.body.appendChild(area);
-    area.select();
-    let ok = false;
-    try { ok = document.execCommand("copy"); } catch (_) { /* ignore */ }
-    area.remove();
-    return ok;
-  }
 }
 
 /* ---------- 模板管理（Word → PDF 套印，B3） ---------- */
@@ -4043,7 +3756,6 @@ async function flushRealtimeRefresh() {
     }
   }
   if (entities.has("contract") || needFields) renderContracts();
-  if (entities.has("seal")) renderSeals();
   if (entities.has("template")) renderTemplates();
   if (state.tab === "changelog") {
     loadChangelog().catch(() => {});
@@ -4071,7 +3783,6 @@ function switchTab(tab) {
     loadOnboardingCheck();
     loadOnboardingTemplateCheck();
   }
-  if (tab === "seals") loadSeals().then(renderSeals).catch((err) => toast(err.message, true));
   if (tab === "templates") loadTemplates().then(renderTemplates).catch((err) => toast(err.message, true));
   if (tab === "data") loadBackupStatus().catch((err) => toast(err.message, true));
   if (tab === "settings") loadMCPStatus().catch((err) => toast(err.message, true));
@@ -4096,9 +3807,8 @@ async function refreshAfterWrite() {
     renderMeta();
   }
   renderContracts();
-  renderSeals();
   renderTemplates();
-  // Vue 域（相对方档案、字段管理）不复用这里的 DOM，但需要知道数据已经变了。
+  // Vue 域（相对方档案、字段管理、公章）不复用这里的 DOM，但需要知道数据已经变了。
   notifyDataChanged(["field", "party", "contract", "seal", "template"]);
   if (state.tab === "onboarding") {
     loadOnboarding();
@@ -4144,13 +3854,6 @@ function bindEvents() {
       renderContracts();
     } catch (err) { toast(err.message, true); }
   }, 250));
-  $("#sealSearch").addEventListener("input", debounce(async (e) => {
-    state.sealQ = e.target.value.trim();
-    try {
-      await loadSeals();
-      renderSeals();
-    } catch (err) { toast(err.message, true); }
-  }, 250));
   $("#templateSearch").addEventListener("input", debounce(async (e) => {
     state.templateQ = e.target.value.trim();
     try {
@@ -4181,15 +3884,6 @@ function bindEvents() {
       contracts: state.contracts,
       templateId: active ? active.id : "",
     }).catch((err) => toast(err.message, true));
-  });
-  $("#importSealBtn").addEventListener("click", () => {
-    const input = $("#sealImageFile");
-    input.value = "";
-    input.click();
-  });
-  $("#sealImageFile").addEventListener("change", (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (file) openSealImport(file);
   });
   $("#newContractBtn").addEventListener("click", () => openContractForm(null));
   $("#batchGenerateBtn").addEventListener("click", () => {
@@ -4248,7 +3942,6 @@ async function boot() {
     await loadContracts();
     renderMeta();
     renderContracts();
-    renderSeals();
     renderTemplates();
   } catch (err) {
     toast(err.message, true);

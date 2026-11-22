@@ -120,16 +120,7 @@
     </div>
   </section>
 
-  <section id="view-seals" class="view" aria-label="公章图片">
-    <div class="toolbar">
-      <input id="sealSearch" type="search" placeholder="搜索公章名称 / 说明" autocomplete="off">
-      <span class="spacer"></span>
-      <button type="button" id="importSealBtn" class="primary">导入公章图片</button>
-    </div>
-    <p class="hint">公章以图片文件保存：记录文件路径与 SHA-256 摘要，不塞进数据库单元格。可关联到单位与多份合同；模板中的盖章占位决定它在 PDF 中的位置与大小。</p>
-    <div id="sealSummary" class="summary"></div>
-    <div id="sealGrid" class="seal-grid"></div>
-  </section>
+  <section id="view-seals" class="view" aria-label="公章图片"></section>
 
   <section id="view-parties" class="view" aria-label="相对方档案"></section>
 
@@ -183,7 +174,6 @@
 </main>
 
 <input type="file" id="importFile" accept=".xlsx" hidden>
-<input type="file" id="sealImageFile" accept="image/png,image/jpeg" hidden>
 <input type="file" id="templateFileInput" accept=".docx,.pdf" hidden>
 <input type="file" id="backupFileInput" accept=".zip,application/zip" hidden>
 <div id="modalRoot"></div>

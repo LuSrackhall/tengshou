@@ -16,6 +16,7 @@ import (
 
 	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/httpapi"
+	"github.com/LuSrackhall/tengshou/internal/mcpspec"
 	"github.com/LuSrackhall/tengshou/internal/model"
 	"github.com/LuSrackhall/tengshou/internal/service"
 	"github.com/LuSrackhall/tengshou/internal/store"
@@ -615,5 +616,45 @@ func TestDecodeArgsRejectsUnknownFields(t *testing.T) {
 	}
 	if err := decodeArgs(nil, &dst); err != nil {
 		t.Fatalf("empty args rejected: %v", err)
+	}
+}
+
+func TestToolCountsMatchSpec(t *testing.T) {
+	reads, writes := 0, 0
+	for _, tool := range toolDefinitions() {
+		if isWriteTool(tool.Name) {
+			writes++
+		} else {
+			reads++
+		}
+	}
+	if reads != mcpspec.ReadToolCount || writes != mcpspec.WriteToolCount {
+		t.Fatalf("tool counts = %d read / %d write, spec says %d / %d",
+			reads, writes, mcpspec.ReadToolCount, mcpspec.WriteToolCount)
+	}
+}
+
+func TestWriteGateShortCircuitsWriteTools(t *testing.T) {
+	env := newTestEnv(t, true) // the HTTP service allows writes
+	allowed := false
+	srv := New(Options{
+		API:          env.api,
+		Version:      "test",
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WriteEnabled: func() bool { return allowed },
+	})
+
+	text, isError := callTool(t, srv, toolCreateParty, map[string]any{"name": "被开关拒绝"})
+	if !isError || !strings.Contains(text, "mcp_write_disabled") {
+		t.Fatalf("write gate off: isError=%v text=%s", isError, text)
+	}
+	// Reads are never gated.
+	callToolJSON(t, srv, toolListContracts, map[string]any{})
+
+	allowed = true
+	created := callToolJSON(t, srv, toolCreateParty, map[string]any{"name": "允许写入"})
+	item, _ := created["item"].(map[string]any)
+	if item["name"] != "允许写入" {
+		t.Fatalf("create after gate opened = %v", created)
 	}
 }

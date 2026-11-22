@@ -31,13 +31,23 @@ type Options struct {
 	Service *service.Service
 	Logger  *slog.Logger
 	Config  config.Config
-	Version string
+	// Settings is the live runtime configuration. When set, switches such as
+	// mcp.write_enabled are read from it so a change applies immediately; nil
+	// falls back to the Config snapshot (tests, read-only embeds).
+	Settings *config.Settings
+	Version  string
 	// Sign overrides the signature session manager (tests inject a fake
 	// clock). Nil uses the config TTL and the system clock.
 	Sign *sign.Manager
 	// LANHosts overrides the LAN IPv4 addresses used in signing URLs. Nil
 	// detects the machine's interfaces.
 	LANHosts []string
+	// EventPollInterval overrides how often the SSE endpoint checks for new
+	// change-log rows. Zero uses one second.
+	EventPollInterval time.Duration
+	// EventHeartbeatInterval overrides the SSE keep-alive comment interval.
+	// Zero uses fifteen seconds.
+	EventHeartbeatInterval time.Duration
 }
 
 // Server owns the local HTTP service.
@@ -46,6 +56,10 @@ type Server struct {
 	mux  *http.ServeMux
 	srv  *http.Server
 	sign *sign.Manager
+	// eventsCtx is cancelled on shutdown so long-lived SSE handlers return
+	// promptly instead of holding Shutdown open until its timeout.
+	eventsCtx    context.Context
+	eventsCancel context.CancelFunc
 
 	mu   sync.RWMutex
 	urls []string
@@ -53,7 +67,9 @@ type Server struct {
 
 // New constructs the server and its routes.
 func New(opts Options) *Server {
-	s := &Server{opts: opts, mux: http.NewServeMux(), sign: opts.Sign}
+	eventsCtx, eventsCancel := context.WithCancel(context.Background())
+	s := &Server{opts: opts, mux: http.NewServeMux(), sign: opts.Sign,
+		eventsCtx: eventsCtx, eventsCancel: eventsCancel}
 	if s.sign == nil {
 		ttl := time.Duration(opts.Config.Signature.TTLMinutes) * time.Minute
 		s.sign = sign.NewManager(ttl, nil)
@@ -104,7 +120,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = s.srv.Shutdown(shutdownCtx)
+		_ = s.Shutdown(shutdownCtx)
 	}()
 	err := s.srv.Serve(ln)
 	if errors.Is(err, http.ErrServerClosed) {
@@ -113,8 +129,10 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	return err
 }
 
-// Shutdown stops the server.
+// Shutdown stops the server. Open SSE streams are ended first so Shutdown
+// does not wait for them to time out.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.eventsCancel()
 	return s.srv.Shutdown(ctx)
 }
 
@@ -198,6 +216,10 @@ func (s *Server) routes() {
 	// Application write surface. It is loopback-only and requires the
 	// X-Tengshou-App header on mutating requests (see withAppGuard).
 	m.HandleFunc("GET /app/api/v1/bootstrap", s.handleAppBootstrap)
+	m.HandleFunc("GET /app/api/v1/events", s.handleAppEvents)
+	m.HandleFunc("GET /app/api/v1/mcp/status", s.handleAppMCPStatus)
+	m.HandleFunc("PUT /app/api/v1/settings/mcp", s.handleAppUpdateMCPSettings)
+	m.HandleFunc("POST /app/api/v1/settings/mcp", s.handleAppUpdateMCPSettings)
 	m.HandleFunc("GET /app/api/v1/fields", s.handleAppListFields)
 	m.HandleFunc("POST /app/api/v1/fields", s.handleAppCreateField)
 	m.HandleFunc("PUT /app/api/v1/fields/{id}", s.handleAppUpdateField)
@@ -296,8 +318,8 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // HeaderMCP marks a request as coming from the B6 MCP connector. Mutating
-// requests with this header are gated by config mcp.write_enabled and their
-// change-log entries are recorded with actor=tengshou-mcp.
+// requests with this header are gated by the live mcp.write_enabled setting and
+// their change-log entries are recorded with actor=tengshou-mcp.
 const HeaderMCP = "X-Tengshou-MCP"
 
 // withAppGuard protects the application write surface: it must be reached
@@ -336,9 +358,9 @@ func (s *Server) withAppGuard(next http.Handler) http.Handler {
 						"请求体必须是 application/json")
 					return
 				}
-				if r.Header.Get(HeaderMCP) == "1" && !s.opts.Config.MCP.WriteEnabled {
+				if r.Header.Get(HeaderMCP) == "1" && !s.mcpWriteEnabled() {
 					writeError(w, http.StatusForbidden, "mcp_write_disabled",
-						"MCP 写工具已在配置中关闭（mcp.write_enabled=false）")
+						"MCP 写工具已关闭（mcp.write_enabled=false）；可在腾手「设置」页重新开启")
 					return
 				}
 			}
@@ -348,6 +370,15 @@ func (s *Server) withAppGuard(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// mcpWriteEnabled resolves the live MCP write switch. The Settings holder is
+// authoritative when present; the startup Config snapshot is only a fallback.
+func (s *Server) mcpWriteEnabled() bool {
+	if s.opts.Settings != nil {
+		return s.opts.Settings.MCPWriteEnabled()
+	}
+	return s.opts.Config.MCP.WriteEnabled
 }
 
 func isLoopbackRemote(remote string) bool {
@@ -471,6 +502,11 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
 }
+
+// Unwrap lets http.NewResponseController reach the underlying writer. The SSE
+// endpoint uses it to clear the server-wide WriteTimeout for its long-lived
+// response (the deadline is absolute, so heartbeats alone cannot keep it open).
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 func (s *Server) withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

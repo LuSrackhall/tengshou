@@ -196,7 +196,14 @@ false`）。只读工具标注 `readOnlyHint=true`；写工具标注
 - 默认 `true`；旧配置没有 `mcp` 段时按开启处理。
 - 关闭后：只读工具正常；写工具返回 HTTP 403 `mcp_write_disabled`，桌面 UI
   的写入不受影响。
-- 配置在服务启动时读取，修改后需重启桌面应用 / `serve` 进程。
+- **即时生效（B18）**：桌面应用「设置」页提供读写开关。写开关由 HTTP 服务的
+  运行时设置持有，切换后下一次请求立即按新值判定；连接器在每次写工具调用前
+  也会重新读取 `config.json`，因此无需重启 MCP 进程或桌面应用。
+- 开关变更本身会以 `entity=settings`、actor=当前操作者写入变更记录；MCP
+  agent 不能通过接口修改该开关（返回 403 `settings_ui_only`）。
+- 状态查询：`GET /app/api/v1/mcp/status` 返回写开关、读/写工具数、agent
+  操作次数与连接说明；`PUT|POST /app/api/v1/settings/mcp` 仅接受本机界面
+  （回环 + `X-Tengshou-App: 1`）修改 `{"write_enabled": true|false}`。
 
 ## 安全边界
 
@@ -298,7 +305,7 @@ printf '%s\n' \
 | --- | --- |
 | `无法连接腾手本地服务` | 启动桌面应用；确认 `--data-dir` 与桌面端一致；未带 `--api-url` 时会自动探测端口回退 |
 | `401 unauthorized` | 令牌不匹配：使用同一数据目录，或显式传 `--token` |
-| `403 mcp_write_disabled` | `config.json` 的 `mcp.write_enabled=false`；改为 `true` 后重启服务 |
+| `403 mcp_write_disabled` | `mcp.write_enabled=false`；在桌面应用「设置」页打开写开关即即时生效（也可修改 `config.json`） |
 | Windows 配置不生效 | 反斜杠写成 `\\`，使用完整路径，确认 `command` 指向 `tengshou-cli.exe` |
 | 工具列表为空 | 客户端未完成 `initialize`，或连接的是其它 MCP 服务 |
 

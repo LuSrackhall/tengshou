@@ -44,13 +44,19 @@ type Options struct {
 	API     *API
 	Version string
 	Logger  *slog.Logger
+	// WriteEnabled reports whether write tools may run. When set, the
+	// connector checks it before every write tool call, so a switch flipped in
+	// the desktop app applies to the next call without restarting this process.
+	// Nil leaves enforcement to the HTTP guard (which is authoritative anyway).
+	WriteEnabled func() bool
 }
 
 // Server is a minimal MCP stdio server exposing tools over JSON-RPC 2.0.
 type Server struct {
-	api     *API
-	version string
-	logger  *slog.Logger
+	api          *API
+	version      string
+	logger       *slog.Logger
+	writeEnabled func() bool
 }
 
 // New constructs the MCP server.
@@ -63,7 +69,7 @@ func New(opts Options) *Server {
 	if version == "" {
 		version = "dev"
 	}
-	return &Server{api: opts.API, version: version, logger: logger}
+	return &Server{api: opts.API, version: version, logger: logger, writeEnabled: opts.WriteEnabled}
 }
 
 type rpcRequest struct {

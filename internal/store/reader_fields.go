@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/LuSrackhall/tengshou/internal/model"
 )
@@ -14,8 +15,15 @@ import (
 type ChangeFilter struct {
 	Entity   string
 	EntityID string
-	Limit    int
-	Offset   int
+	// Actor keeps only entries recorded by this exact actor.
+	Actor string
+	// ActorNot excludes entries recorded by this actor (used to separate
+	// human edits from the tengshou-mcp agent).
+	ActorNot string
+	// Since keeps entries created at or after this time.
+	Since  time.Time
+	Limit  int
+	Offset int
 }
 
 // Normalize clamps pagination to safe bounds.
@@ -118,6 +126,8 @@ func scanChangeLog(sc scanner) (model.ChangeLog, error) {
 	return e, nil
 }
 
+const changeLogColumns = `id, entity, entity_id, action, actor, summary, changes_json, created_at`
+
 // ListChangeLogs returns audit entries, newest first.
 func (r *Reader) ListChangeLogs(ctx context.Context, f ChangeFilter) (model.List[model.ChangeLog], error) {
 	f.Normalize()
@@ -131,14 +141,28 @@ func (r *Reader) ListChangeLogs(ctx context.Context, f ChangeFilter) (model.List
 		where = append(where, "entity_id = ?")
 		args = append(args, entityID)
 	}
+	if actor := strings.TrimSpace(f.Actor); actor != "" {
+		where = append(where, "actor = ?")
+		args = append(args, actor)
+	}
+	if actorNot := strings.TrimSpace(f.ActorNot); actorNot != "" {
+		where = append(where, "actor <> ?")
+		args = append(args, actorNot)
+	}
+	if !f.Since.IsZero() {
+		where = append(where, "created_at >= ?")
+		// created_at values are written at second precision; truncate the
+		// bound so the textual comparison stays chronological.
+		args = append(args, formatTime(f.Since.Truncate(time.Second)))
+	}
 	clause := strings.Join(where, " AND ")
 	var total int
 	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM change_log WHERE `+clause, args...).Scan(&total); err != nil {
 		return model.List[model.ChangeLog]{}, err
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, entity, entity_id, action, actor, summary, changes_json, created_at
-		 FROM change_log WHERE `+clause+` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+		`SELECT `+changeLogColumns+` FROM change_log WHERE `+clause+
+			` ORDER BY rowid DESC LIMIT ? OFFSET ?`,
 		append(args, f.Limit, f.Offset)...)
 	if err != nil {
 		return model.List[model.ChangeLog]{}, err
@@ -153,4 +177,75 @@ func (r *Reader) ListChangeLogs(ctx context.Context, f ChangeFilter) (model.List
 		items = append(items, e)
 	}
 	return model.List[model.ChangeLog]{Items: items, Total: total, Limit: f.Limit, Offset: f.Offset}, rows.Err()
+}
+
+// ListChangeLogsAfter returns entries appended after the entry with id afterID,
+// oldest first. It is the cursor feed behind the realtime SSE endpoint and its
+// polling fallback.
+//
+// created_at is truncated to seconds, so several entries can share a timestamp;
+// the implicit rowid is used for strict append ordering. The public cursor stays
+// the change-log id (also the SSE event id). An empty or unknown cursor returns
+// the most recent limit entries (oldest first), which lets a client recover
+// after the database was restored from a backup.
+func (r *Reader) ListChangeLogsAfter(ctx context.Context, afterID string, limit int) ([]model.ChangeLog, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if afterID = strings.TrimSpace(afterID); afterID != "" {
+		var cursor int64
+		err := r.db.QueryRowContext(ctx, `SELECT rowid FROM change_log WHERE id = ?`, afterID).Scan(&cursor)
+		switch {
+		case err == nil:
+			return r.queryChangeLogsAsc(ctx,
+				`SELECT `+changeLogColumns+` FROM change_log WHERE rowid > ? ORDER BY rowid ASC LIMIT ?`,
+				cursor, limit)
+		case errors.Is(err, sql.ErrNoRows):
+			// Unknown cursor: fall through to the tail below.
+		default:
+			return nil, err
+		}
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+changeLogColumns+` FROM change_log ORDER BY rowid DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []model.ChangeLog{}
+	for rows.Next() {
+		e, err := scanChangeLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Reverse the newest-first tail into append order.
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
+	return items, nil
+}
+
+func (r *Reader) queryChangeLogsAsc(ctx context.Context, query string, args ...any) ([]model.ChangeLog, error) {
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []model.ChangeLog{}
+	for rows.Next() {
+		e, err := scanChangeLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, e)
+	}
+	return items, rows.Err()
 }

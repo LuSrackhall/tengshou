@@ -4,6 +4,7 @@ import ContractsView from "./components/contracts/ContractsView.vue";
 import FieldsView from "./components/fields/FieldsView.vue";
 import PartiesView from "./components/parties/PartiesView.vue";
 import SealsView from "./components/seals/SealsView.vue";
+import TemplatesView from "./components/templates/TemplatesView.vue";
 import { installSealSummaryBridge } from "./bridge/seal-summary";
 import "./styles/island.css";
 
@@ -46,4 +47,12 @@ installSealSummaryBridge();
 const sealsHost = document.getElementById("view-seals");
 if (sealsHost) {
   createApp(SealsView).mount(sealsHost);
+}
+
+// 模板（阶段 1 迁出 app.js）：<section id="view-templates"> 保留为宿主。
+// 列表、导入与标定编辑器都由 TemplatesView 渲染；引导步骤打开的编辑器经
+// tengshou:open-template-editor 事件到达本岛。
+const templatesHost = document.getElementById("view-templates");
+if (templatesHost) {
+  createApp(TemplatesView).mount(templatesHost);
 }

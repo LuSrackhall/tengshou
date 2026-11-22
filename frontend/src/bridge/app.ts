@@ -74,6 +74,10 @@ declare global {
 export const DATA_CHANGED_EVENT = "tengshou:data-changed";
 export const CHANGE_EVENT = "tengshou:change";
 export const OPEN_CONTRACT_FORM_EVENT = "tengshou:open-contract-form";
+// 模板域（阶段 1 迁出 app.js）：引导与引导自检仍由 app.js 渲染，需要打开
+// 模板标定编辑器或导入流程；模板岛监听这两个事件后接管。
+export const OPEN_TEMPLATE_EDITOR_EVENT = "tengshou:open-template-editor";
+export const OPEN_TEMPLATE_IMPORT_EVENT = "tengshou:open-template-import";
 
 export interface DataChangedDetail {
   entities: string[];
@@ -82,6 +86,14 @@ export interface DataChangedDetail {
 export interface OpenContractFormDetail {
   contract: Contract | null;
   options?: ContractFormOptions;
+}
+
+/** 引导步骤顺带触发的样例动作（等价于迁移前 openTemplateEditor + 预览）。 */
+export type TemplateEditorAction = "sample-preview" | "download-sample";
+
+export interface OpenTemplateEditorDetail {
+  templateId: string;
+  action?: TemplateEditorAction;
 }
 
 /** 本域关心的变更通知（appEvent 的紧凑子集）。 */
@@ -222,6 +234,54 @@ export function subscribeOpenContractForm(
   };
   window.addEventListener(OPEN_CONTRACT_FORM_EVENT, listener);
   return () => window.removeEventListener(OPEN_CONTRACT_FORM_EVENT, listener);
+}
+
+/** 打开模板标定编辑器：由模板岛监听事件后打开 Vue 全屏弹窗。 */
+export function openTemplateEditor(detail: OpenTemplateEditorDetail): void {
+  window.dispatchEvent(
+    new CustomEvent<OpenTemplateEditorDetail>(OPEN_TEMPLATE_EDITOR_EVENT, {
+      detail,
+    }),
+  );
+}
+
+/** 打开模板导入文件选择；导入弹窗由模板岛渲染。 */
+export function openTemplateImport(): void {
+  window.dispatchEvent(new CustomEvent(OPEN_TEMPLATE_IMPORT_EVENT));
+}
+
+function normalizeOpenTemplateEditor(raw: unknown): OpenTemplateEditorDetail | null {
+  if (!isRecord(raw) || typeof raw.templateId !== "string" || raw.templateId === "") {
+    return null;
+  }
+  const action =
+    raw.action === "sample-preview" || raw.action === "download-sample"
+      ? raw.action
+      : undefined;
+  return { templateId: raw.templateId, action };
+}
+
+/** 订阅「打开模板标定编辑器」事件；返回取消订阅函数。 */
+export function subscribeOpenTemplateEditor(
+  handler: (detail: OpenTemplateEditorDetail) => void,
+): () => void {
+  const listener = (event: Event): void => {
+    const detail = normalizeOpenTemplateEditor(
+      (event as CustomEvent<unknown>).detail,
+    );
+    if (detail) {
+      handler(detail);
+    }
+  };
+  window.addEventListener(OPEN_TEMPLATE_EDITOR_EVENT, listener);
+  return () => window.removeEventListener(OPEN_TEMPLATE_EDITOR_EVENT, listener);
+}
+
+/** 订阅「打开模板导入」事件；返回取消订阅函数。 */
+export function subscribeOpenTemplateImport(handler: () => void): () => void {
+  const listener = (): void => handler();
+  window.addEventListener(OPEN_TEMPLATE_IMPORT_EVENT, listener);
+  return () => window.removeEventListener(OPEN_TEMPLATE_IMPORT_EVENT, listener);
 }
 
 function normalizeChange(raw: unknown): AppChangeNotice | null {

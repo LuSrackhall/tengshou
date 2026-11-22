@@ -113,6 +113,32 @@ export function templateSourceUrl(id: string): string {
   return apiUrl(`/templates/${enc(id)}/source`);
 }
 
+/** GET /templates/{id}/pdf 的原始字节（标定编辑器交给 PDF.js 渲染）。 */
+export async function fetchTemplatePdf(
+  id: string,
+  options: RequestOptions = {},
+): Promise<Uint8Array> {
+  const file = await getFile(`/templates/${enc(id)}/pdf`, options);
+  return new Uint8Array(await file.blob.arrayBuffer());
+}
+
+/** GET /templates/{id}/source：下载原始导入文件。 */
+export function downloadTemplateSource(
+  id: string,
+  options: RequestOptions = {},
+): Promise<DownloadedFile> {
+  return getFile(`/templates/${enc(id)}/source`, options);
+}
+
+/** GET /documents/{id}/file 的原始字节（生成结果预览）。 */
+export async function fetchDocumentFile(
+  id: string,
+  options: RequestOptions = {},
+): Promise<Uint8Array> {
+  const file = await getFile(`/documents/${enc(id)}/file`, options);
+  return new Uint8Array(await file.blob.arrayBuffer());
+}
+
 /** POST /templates/{id}/preview：渲染预览（样例或真实合同）。 */
 export function previewTemplate(
   id: string,

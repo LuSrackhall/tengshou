@@ -29,6 +29,23 @@ func TestSealWordingBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	files = append(files, vue...)
+	sealModules, err := filepath.Glob("../../frontend/src/components/seals/*.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, sealModules...)
+	// 模板标定编辑器里的公章下拉/名称回显也已迁到 Vue；按扩展名分别取
+	// 文件，避免 templates/ 下出现子目录时把目录当文件读取。
+	templates, err := filepath.Glob("../../frontend/src/components/templates/*.vue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, templates...)
+	templateModules, err := filepath.Glob("../../frontend/src/components/templates/*.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, templateModules...)
 	files = append(files, "../../README.md")
 	for _, file := range files {
 		raw, err := os.ReadFile(file)

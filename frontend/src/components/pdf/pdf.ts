@@ -1,50 +1,20 @@
-// pdf.js 适配（迁移期）：index.html 以 classic script 加载本地 vendor
+// pdf.js 适配（迁移期）：类型统一来自 src/pdfjs.ts（与模板标定域共用一份
+// 全局声明）。index.html 以 classic script 加载本地 vendor
 // `/app/vendor/pdf.min.js`，app.js 先把 worker 指到
 // `/app/vendor/pdf.worker.min.js`；Vue 侧只读取全局 `pdfjsLib`，不打包、不改
 // CDN（离线单二进制约束）。
 //
-// 这里给出用到的 pdf.js 结构的最小类型声明，TS strict 下不使用 any /
-// ts-ignore；渲染循环与 app.js renderPDFPagesInto 保持一致
+// 渲染循环与 app.js renderPDFPagesInto 保持一致
 // （0.9 倍缩放、按 devicePixelRatio 放大画布）。
+import type {
+  PdfDocument,
+  PdfJsLib,
+  PdfPage,
+  PdfRenderTask,
+  PdfViewport,
+} from "../../pdfjs";
 
-export interface PdfViewport {
-  width: number;
-  height: number;
-}
-
-export interface PdfRenderTask {
-  promise: Promise<void>;
-}
-
-export interface PdfPage {
-  getViewport(params: { scale: number }): PdfViewport;
-  render(params: {
-    canvasContext: CanvasRenderingContext2D;
-    viewport: PdfViewport;
-    transform?: number[] | null;
-  }): PdfRenderTask;
-}
-
-export interface PdfDocument {
-  numPages: number;
-  getPage(pageNumber: number): Promise<PdfPage>;
-  destroy(): Promise<void>;
-}
-
-export interface PdfJsLib {
-  getDocument(params: {
-    data: Uint8Array;
-    isEvalSupported?: boolean;
-    useSystemFonts?: boolean;
-  }): { promise: Promise<PdfDocument> };
-}
-
-declare global {
-  interface Window {
-    /** 本地 vendor 的 pdf.js 全局对象；未加载时为 undefined。 */
-    pdfjsLib?: PdfJsLib;
-  }
-}
+export type { PdfDocument, PdfJsLib, PdfPage, PdfRenderTask, PdfViewport };
 
 /** base64 → 字节数组（app.js base64ToBytes 的等价实现）。 */
 export function base64ToBytes(value: string): Uint8Array {

@@ -7,11 +7,7 @@ const state = {
   onboarding: null,
   onboardingCheck: null,
   fields: { contract: [], party: [] },
-  seals: [],
   templates: [],
-  templateTotal: 0,
-  templateQ: "",
-  converters: [],
   changelog: [],
   tab: "contracts",
   /* 实时同步游标：最近一条变更记录的 id（服务端用它补发之后的事件）。 */
@@ -46,14 +42,6 @@ function esc(value) {
 
 function $(sel, root) { return (root || document).querySelector(sel); }
 function $$(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
-
-function debounce(fn, ms) {
-  let timer = null;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), ms);
-  };
-}
 
 let toastTimer = null;
 function toast(message, isError) {
@@ -101,7 +89,6 @@ function fmtDate(iso) {
 
 function closeModal() {
   stopSignPolling();
-  destroyTemplateEditor();
   closePDFOverlay();
   if (currentSignSessionId) {
     const id = currentSignSessionId;
@@ -180,28 +167,11 @@ async function loadFields() {
   state.fields = { contract: data.contract || [], party: data.party || [] };
 }
 
-// loadSeals 只为未迁移的模板标定（state.seals 供公章下拉与名称回显）取数；
-// 公章页本身由 Vue 岛渲染并自行请求 /seals。
-async function loadSeals() {
-  const data = await api("/app/api/v1/seals?limit=500");
-  state.seals = data.items || [];
-}
-
+// 模板页与标定编辑器已迁到 Vue（frontend/src/components/templates/），本函数
+// 只为未迁移的生成面板/批量生成与引导步骤保留当前模板版本列表。
 async function loadTemplates() {
-  const params = new URLSearchParams({ limit: "500", kind: "pdf" });
-  if (state.templateQ) params.set("q", state.templateQ);
-  const data = await api("/app/api/v1/templates?" + params.toString());
+  const data = await api("/app/api/v1/templates?limit=500&kind=pdf");
   state.templates = data.items || [];
-  state.templateTotal = data.total || 0;
-}
-
-async function loadConverters() {
-  try {
-    const data = await api("/app/api/v1/converters");
-    state.converters = data.items || [];
-  } catch (_) {
-    state.converters = [];
-  }
 }
 
 async function loadChangelog() {
@@ -543,7 +513,6 @@ async function runBatchGeneration(modal, batch) {
     $("#batchSummary", modal.body).textContent =
       `生成完成：成功 ${res.summary.success} 份 · 失败 ${res.summary.failed} 份`;
     await Promise.all([loadTemplates(), loadBootstrapAndMeta()]);
-    renderTemplates();
     notifyDataChanged(["contract", "template"]);
   } finally {
     batch.generateBtn.disabled = true;
@@ -617,7 +586,6 @@ async function retryBatchItem(modal, batch, contractID) {
     `生成完成：成功 ${batch.results.summary.success} 份 · 失败 ${batch.results.summary.failed} 份`;
   toast(outcome.success ? "已重试成功" : `重试失败：${outcome.error_message || ""}`, !outcome.success);
   await Promise.all([loadTemplates(), loadBootstrapAndMeta()]);
-  renderTemplates();
   notifyDataChanged(["contract", "template"]);
 }
 
@@ -794,106 +762,6 @@ function pollSignatureSession(id) {
 
 /* ---------- 模板管理（Word → PDF 套印，B3） ---------- */
 
-let templateEditor = null;
-
-function templateConverterLabel(converter) {
-  if (converter === "word") return "Microsoft Word";
-  if (converter === "libreoffice") return "LibreOffice";
-  if (converter === "pdf") return "PDF 直接导入";
-  return converter || "—";
-}
-
-function renderTemplates() {
-  const table = $("#templateTable");
-  if (!table) return;
-  const familyNames = new Set(state.templates.map((t) => t.name));
-  $("#templateSummary").textContent =
-    `共 ${familyNames.size} 个模板 · ${state.templateTotal} 个版本` +
-    (state.templateQ ? ` · 搜索「${state.templateQ}」` : "");
-  const head = ["模板名称", "版本", "页数", "转换方式", "标定位置", "状态", "更新时间", "操作"]
-    .map((h) => `<th>${h}</th>`).join("");
-  const rows = state.templates.map((tpl) => {
-    const positions = (tpl.placements || []).length;
-    return `<tr data-id="${esc(tpl.id)}">
-      <td class="wrap">${esc(tpl.name)}</td>
-      <td><span class="badge ${tpl.is_active ? "active" : ""}">v${tpl.version}</span></td>
-      <td class="row-num">${tpl.page_count || 0}</td>
-      <td>${esc(templateConverterLabel(tpl.converter))}</td>
-      <td class="row-num">${positions}</td>
-      <td>${tpl.is_active ? "当前版本" : "历史版本"}</td>
-      <td class="row-num">${esc(fmtDate(tpl.updated_at))}</td>
-      <td><div class="actions">
-        <button type="button" data-action="edit">标定与生成</button>
-        <button type="button" data-action="rerender">整改重出</button>
-        <button type="button" data-action="source">原文件</button>
-        <button type="button" class="danger" data-action="delete">删除</button>
-      </div></td>
-    </tr>`;
-  }).join("");
-  table.innerHTML = `<thead><tr>${head}</tr></thead>
-    <tbody>${rows || `<tr><td class="empty" colspan="8">还没有 PDF 模板。点击「导入模板」选择您的 Word 合同模板（或另存好的 PDF）。</td></tr>`}</tbody>`;
-  $$("#templateTable tbody tr[data-id]").forEach((tr) => {
-    tr.addEventListener("click", (e) => {
-      const button = e.target.closest("button[data-action]");
-      const tpl = state.templates.find((t) => t.id === tr.dataset.id);
-      if (!tpl) return;
-      const action = button ? button.dataset.action : "edit";
-      if (action === "delete") {
-        e.stopPropagation();
-        deleteTemplateVersion(tpl);
-        return;
-      }
-      if (action === "rerender") {
-        e.stopPropagation();
-        openTemplateRerenderDialog(tpl).catch((err) => toast(err.message, true));
-        return;
-      }
-      if (action === "source") {
-        e.stopPropagation();
-        const ext = (String(tpl.source_path || "").match(/\.[a-z0-9]+$/i) || [".docx"])[0];
-        downloadAsset(
-          `/app/api/v1/templates/${encodeURIComponent(tpl.id)}/source`,
-          `${tpl.name}-v${tpl.version}${ext}`);
-        return;
-      }
-      openTemplateEditor(tpl).catch((err) => toast(err.message, true));
-    });
-  });
-}
-
-async function deleteTemplateVersion(tpl) {
-  if (!window.confirm(`确定删除模板「${tpl.name}」v${tpl.version} 吗？已被合同或 PDF 引用的版本会保留。`)) return;
-  try {
-    await api(`/app/api/v1/templates/${encodeURIComponent(tpl.id)}`, { method: "DELETE" });
-    toast(`模板「${tpl.name}」v${tpl.version} 已删除`);
-    await loadTemplates();
-    renderTemplates();
-    await loadBootstrapAndMeta();
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
-/* openTemplateRerenderDialog finds contracts still pinned to an older version
-   of this template family and opens the B4 batch reissue flow (整改重出). */
-async function openTemplateRerenderDialog(tpl) {
-  const data = await api("/app/api/v1/contracts?limit=500");
-  const contracts = (data.items || []).filter((contract) => {
-    const pinned = contract.template_id ? templateByID(contract.template_id) : null;
-    return pinned && pinned.name === tpl.name && pinned.version < tpl.version;
-  });
-  if (!contracts.length) {
-    toast(`没有引用「${tpl.name}」旧版本、需要整改重出的合同`, true);
-    return;
-  }
-  await openBatchGenerateDialog({
-    title: `整改重出 · ${tpl.name} v${tpl.version} · ${contracts.length} 份合同`,
-    contracts,
-    templateId: tpl.id,
-    kind: "regenerate",
-  });
-}
-
 async function downloadAsset(path, filename) {
   try {
     const res = await fetch(path, { headers: { "X-Tengshou-App": "1" } });
@@ -1007,8 +875,7 @@ async function handleOnboardingStep(action) {
   switch (action) {
     case "template_import": {
       switchTab("templates");
-      const input = $("#templateFileInput");
-      setTimeout(() => { input.value = ""; input.click(); }, 60);
+      setTimeout(openTemplateImportInVue, 60);
       return;
     }
     case "template_calibrate": {
@@ -1018,7 +885,7 @@ async function handleOnboardingStep(action) {
         return handleOnboardingStep("template_import");
       }
       switchTab("templates");
-      await openTemplateEditor(tpl);
+      openTemplateEditorInVue(tpl);
       return;
     }
     case "sample_preview":
@@ -1029,9 +896,7 @@ async function handleOnboardingStep(action) {
         return handleOnboardingStep("template_import");
       }
       switchTab("templates");
-      await openTemplateEditor(tpl);
-      await previewTemplate(templateEditor, true);
-      if (action === "trial_pdf") await downloadSampleTemplatePDF(templateEditor);
+      openTemplateEditorInVue(tpl, action === "trial_pdf" ? "download-sample" : "sample-preview");
       return;
     }
     case "contract_create":
@@ -1077,18 +942,8 @@ async function reopenOnboarding() {
   }
 }
 
-// recordOnboardingStep only records sample-only progress (no business data).
-async function recordOnboardingStep(step) {
-  try {
-    const data = await api("/app/api/v1/onboarding/state", {
-      method: "POST", body: { action: "step", step },
-    });
-    state.onboarding = data;
-    if (state.tab === "onboarding") renderOnboarding();
-  } catch (_) {
-    /* 引导进度记录失败不影响预览本身 */
-  }
-}
+// 模板标定的样例预览/试生成已迁到 Vue（useTemplateEditor）：引导步骤的
+// 进度记录改由它在预览/下载后直接调用 /onboarding/state。
 
 async function loadOnboardingCheck() {
   const host = $("#onboardCheckList");
@@ -1175,873 +1030,9 @@ function renderOnboardingTemplateCheck(data) {
     calibrateBtn.addEventListener("click", () => {
       const tpl = onboardingActiveTemplate();
       switchTab("templates");
-      if (tpl) openTemplateEditor(tpl).catch((err) => toast(err.message, true));
+      openTemplateEditorInVue(tpl);
     });
   }
-}
-
-async function openTemplateImport(file) {
-  if (file.size > 40 * 1024 * 1024) {
-    toast("模板文件过大，请压缩到 40MB 以内", true);
-    return;
-  }
-  let base64;
-  try {
-    base64 = await readFileBase64(file);
-  } catch (err) {
-    toast(err.message, true);
-    return;
-  }
-  await loadConverters();
-  const ext = (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
-  const isPDF = ext === ".pdf";
-  const converterRows = (state.converters || []).map((c) =>
-    `<li>${esc(c.label)}：${c.available ? `可用（${esc(c.detail || "")}）` : `不可用（${esc(c.detail || "")}）`}</li>`).join("");
-  const anyConverter = (state.converters || []).some((c) => c.available);
-  const warning = (!isPDF && !anyConverter)
-    ? `<div class="warning-list">本机未检测到 Microsoft Word 或 LibreOffice。Word 转换会失败；
-        可以安装 LibreOffice（免费），或先用 Word / WPS 将文档另存为 PDF，再导入 PDF。</div>`
-    : "";
-  const defaultName = file.name.replace(/\.[^.]+$/, "");
-  const modal = openModal(`导入模板 · ${file.name}`, { wide: true });
-  modal.body.innerHTML = `
-    <div id="templateImportErrors"></div>
-    ${warning}
-    <div class="form-grid">
-      <div class="field"><label for="tplImportName">模板名称<span class="req">*</span></label>
-        <input id="tplImportName" type="text" value="${esc(defaultName)}" placeholder="例如：房屋租赁合同（村委会版）">
-        <span class="help">同名再导入会增加新版本；旧版本和已生成 PDF 都会保留。</span></div>
-      <div class="field"><label>文件</label>
-        <div class="mono">${esc(file.name)} · ${(file.size / 1024 / 1024).toFixed(2)} MB</div>
-        <span class="help">${isPDF ? "直接作为模板 PDF 导入，不经过转换。" : "将转换为 PDF 后用于所见即所得的标定。"}</span></div>
-      <div class="field full"><label>转换程序</label>
-        <ul class="import-notes">${converterRows || "<li>未检测到转换程序</li>"}</ul>
-        ${!isPDF ? `<span class="help">优先使用本机 Microsoft Word（Windows，保真度最高）；否则用 LibreOffice，可能出现细微排版差异。</span>` : ""}
-      </div>
-    </div>`;
-  footerButton(modal, "取消", "", closeModal);
-  const save = footerButton(modal, "导入", "primary", async () => {
-    save.disabled = true;
-    $("#templateImportErrors", modal.body).innerHTML = "";
-    try {
-      const res = await api("/app/api/v1/templates/import", {
-        method: "POST",
-        body: {
-          name: $("#tplImportName", modal.body).value.trim(),
-          file_name: file.name,
-          file_base64: base64,
-        },
-      });
-      closeModal();
-      const warnings = res.warnings || [];
-      toast(warnings.length ? warnings[0] : `模板已导入（v${res.item.version}）`);
-      if (warnings.length > 1) setTimeout(() => toast(warnings.slice(1).join("；")), 400);
-      await loadTemplates();
-      renderTemplates();
-      await loadBootstrapAndMeta();
-      openTemplateEditor(res.item).catch((err) => toast(err.message, true));
-    } catch (err) {
-      save.disabled = false;
-      $("#templateImportErrors", modal.body).innerHTML = fieldErrorsHTML(err);
-    }
-  });
-}
-
-function templateFieldOptionsHTML() {
-  const groups = [];
-  const push = (label, fields, prefix) => {
-    const options = [];
-    for (const f of fields) {
-      if (f.archived) continue;
-      if (!f.built_in && f.type === "image") continue;
-      const key = f.built_in ? `${prefix}.${f.key}` : `${prefix}.data.${f.key}`;
-      options.push(`<option value="${esc(key)}">${esc(label)} · ${esc(f.label)}</option>`);
-    }
-    if (options.length) {
-      groups.push(`<optgroup label="${esc(label)}">${options.join("")}</optgroup>`);
-    }
-  };
-  push("合同", state.fields.contract, "contract");
-  push("甲方", state.fields.party, "party_a");
-  push("乙方", state.fields.party, "party_b");
-  return groups.join("");
-}
-
-function templateSealOptionsHTML() {
-  if (!state.seals.length) {
-    return `<option value="">（还没有公章图片）</option>`;
-  }
-  return state.seals.map((seal) =>
-    `<option value="${esc(seal.id)}">${esc(seal.name)}${seal.party_id ? "（已关联单位）" : ""}</option>`).join("");
-}
-
-function templateBindingLabel(p) {
-  if (p.type === "signature") {
-    return `签名 · ${p.party === "party_a" ? "甲方" : "乙方"}`;
-  }
-  if (p.type === "seal") {
-    if (p.seal_mode === "seal" && p.seal_id) {
-      const seal = state.seals.find((s) => s.id === p.seal_id);
-      return `公章 · ${seal ? seal.name : "指定图片"}`;
-    }
-    const party = p.party === "party_a" ? "（甲方）" : p.party === "party_b" ? "（乙方）" : "";
-    return `公章 · 合同关联/单位公章${party}`;
-  }
-  const key = String(p.field || "");
-  const prefix = key.split(".")[0];
-  const role = prefix === "party_a" ? "甲方" : prefix === "party_b" ? "乙方" : "合同";
-  const dataKey = key.includes(".data.") ? key.split(".data.")[1] : key.split(".")[1];
-  const list = prefix === "contract" ? state.fields.contract : state.fields.party;
-  const field = list.find((f) => f.key === dataKey);
-  return `${role} · ${field ? field.label : key}`;
-}
-
-function newPlacementID() {
-  return "p_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
-
-async function openTemplateEditor(template) {
-  const modal = openModal(`模板标定 · ${template.name} v${template.version}`, { full: true });
-  modal.foot.style.display = "none";
-  const placements = JSON.parse(JSON.stringify(template.placements || []));
-  const editor = {
-    modal,
-    template,
-    placements,
-    scale: 1.25,
-    selected: null,
-    dirty: false,
-    preview: null,
-    pdfDoc: null,
-    pdfBytes: null,
-    pageObjs: [],
-    pageSizes: [],
-    renderToken: 0,
-    previewDoc: null,
-    previewOverlay: null,
-    contracts: [],
-  };
-  templateEditor = editor;
-  modal.body.innerHTML = `
-    <div class="template-editor">
-      <div class="tpl-toolbar">
-        <span class="tpl-current" id="tplCurrent">v${template.version} · ${template.page_count || 0} 页 · ${placements.length} 个位置</span>
-        <label class="inline">缩放
-          <select id="tplZoom">
-            ${[0.75, 1, 1.25, 1.5, 2].map((z) => `<option value="${z}"${z === 1.25 ? " selected" : ""}>${Math.round(z * 100)}%</option>`).join("")}
-          </select>
-        </label>
-        <span class="spacer"></span>
-        <button type="button" id="tplSaveBtn">保存为新版本</button>
-        <button type="button" id="tplCloseBtn">关闭</button>
-      </div>
-      <div class="tpl-body">
-        <div class="tpl-pages" id="tplPages"><div class="tpl-loading">正在加载模板 PDF…</div></div>
-        <aside class="tpl-side">
-          <h3>新增位置</h3>
-          <div class="tpl-add">
-            <div class="field"><label for="tplAddKind">类型</label>
-              <select id="tplAddKind">
-                <option value="field">字段文字</option>
-                <option value="signature">手写签名</option>
-                <option value="seal">公章图片</option>
-              </select></div>
-            <div class="field" id="tplAddFieldWrap"><label for="tplAddField">字段</label>
-              <select id="tplAddField">${templateFieldOptionsHTML()}</select></div>
-            <div class="field" id="tplAddPartyWrap" style="display:none"><label for="tplAddParty">签名方 / 公章所属方</label>
-              <select id="tplAddParty">
-                <option value="">（自动 / 不限）</option>
-                <option value="party_b">乙方</option>
-                <option value="party_a">甲方</option>
-              </select></div>
-            <div class="field" id="tplAddSealModeWrap" style="display:none"><label for="tplAddSealMode">公章来源</label>
-              <select id="tplAddSealMode">
-                <option value="contract">合同关联 / 单位公章（自动）</option>
-                <option value="seal">指定公章图片</option>
-              </select></div>
-            <div class="field" id="tplAddSealWrap" style="display:none"><label for="tplAddSeal">公章图片</label>
-              <select id="tplAddSeal">${templateSealOptionsHTML()}</select></div>
-            <button type="button" id="tplAddPlace">添加位置</button>
-            <span class="help">添加后拖动框到目标位置，右下角可缩放大小。每次保存都会生成新版本。</span>
-          </div>
-          <h3>位置列表</h3>
-          <div id="tplPlacementList" class="tpl-list"></div>
-          <div id="tplSelectedPanel"></div>
-          <h3>预览与生成</h3>
-          <div id="tplUsage" class="tpl-status">正在统计影响范围…</div>
-          <div id="tplCheck" class="tpl-status">正在检查字段绑定…</div>
-          <div class="field"><label for="tplContract">合同</label>
-            <select id="tplContract"><option value="">（正在加载合同…）</option></select></div>
-          <div class="tpl-add" style="grid-template-columns:1fr 1fr">
-            <button type="button" id="tplPreviewSample">样例预览</button>
-            <button type="button" id="tplPreviewContract">合同预览</button>
-          </div>
-          <button type="button" id="tplGenerate" class="primary" disabled>生成 PDF</button>
-          <div id="tplPreviewStatus" class="tpl-status"></div>
-          <div id="tplWarnings" class="tpl-warnings"></div>
-          <div id="tplResult"></div>
-        </aside>
-      </div>
-    </div>`;
-  bindTemplateEditorEvents(editor);
-  renderPlacementList(editor);
-  updateTemplatePreviewStatus(editor);
-  loadTemplateUsage(editor).catch(() => {});
-  loadTemplateCheckPanel(editor).catch(() => {});
-  loadEditorContracts(editor).catch(() => {});
-  try {
-    await loadTemplateEditorPDF(editor);
-  } catch (err) {
-    $("#tplPages", modal.body).innerHTML =
-      `<div class="tpl-loading">模板 PDF 加载失败：${esc(err.message)}</div>`;
-  }
-}
-
-function destroyTemplateEditor() {
-  const editor = templateEditor;
-  if (!editor) return;
-  templateEditor = null;
-  try { if (editor.pdfDoc) editor.pdfDoc.destroy(); } catch (_) { /* ignore */ }
-  try { if (editor.previewDoc) editor.previewDoc.destroy(); } catch (_) { /* ignore */ }
-}
-
-async function loadTemplateEditorPDF(editor) {
-  const res = await fetch(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/pdf`);
-  if (!res.ok) throw new Error(`请求失败（${res.status}）`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  editor.pdfBytes = bytes;
-  editor.pdfDoc = await pdfjsLib.getDocument({
-    data: bytes.slice(0),
-    isEvalSupported: false,
-    useSystemFonts: true,
-  }).promise;
-  editor.pageObjs = [];
-  editor.pageSizes = [];
-  for (let i = 1; i <= editor.pdfDoc.numPages; i++) {
-    const page = await editor.pdfDoc.getPage(i);
-    const base = page.getViewport({ scale: 1 });
-    editor.pageObjs[i] = page;
-    editor.pageSizes[i - 1] = { width: base.width, height: base.height };
-  }
-  await renderTemplateEditorPages(editor);
-}
-
-async function renderTemplateEditorPages(editor) {
-  const pagesEl = $("#tplPages", editor.modal.body);
-  if (!pagesEl) return;
-  const token = ++editor.renderToken;
-  pagesEl.innerHTML = "";
-  const count = editor.pdfDoc.numPages;
-  const dpr = window.devicePixelRatio || 1;
-  for (let i = 1; i <= count; i++) {
-    if (token !== editor.renderToken) return;
-    const page = editor.pageObjs[i] || await editor.pdfDoc.getPage(i);
-    editor.pageObjs[i] = page;
-    const viewport = page.getViewport({ scale: editor.scale });
-    const wrap = document.createElement("div");
-    wrap.className = "tpl-page";
-    wrap.dataset.page = String(i);
-    wrap.style.width = viewport.width + "px";
-    wrap.style.height = viewport.height + "px";
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.floor(viewport.width * dpr);
-    canvas.height = Math.floor(viewport.height * dpr);
-    canvas.style.width = viewport.width + "px";
-    canvas.style.height = viewport.height + "px";
-    const boxes = document.createElement("div");
-    boxes.className = "tpl-boxes";
-    const pageNo = document.createElement("div");
-    pageNo.className = "tpl-page-no";
-    pageNo.textContent = `第 ${i} / ${count} 页`;
-    wrap.append(canvas, boxes, pageNo);
-    pagesEl.appendChild(wrap);
-    await page.render({
-      canvasContext: canvas.getContext("2d"),
-      viewport,
-      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
-    }).promise;
-    if (token !== editor.renderToken) return;
-    renderTemplateBoxes(editor, i, boxes);
-  }
-}
-
-function renderTemplateBoxes(editor, pageNumber, boxesEl) {
-  boxesEl.innerHTML = "";
-  const scale = editor.scale;
-  for (const p of editor.placements) {
-    if (p.page !== pageNumber) continue;
-    boxesEl.appendChild(makeTemplateBox(editor, p, scale));
-  }
-}
-
-function makeTemplateBox(editor, p, scale) {
-  const el = document.createElement("div");
-  const typeClass = p.type === "signature" ? "sig" : p.type === "seal" ? "seal" : "";
-  el.className = ["tpl-box", typeClass, editor.selected === p.id ? "selected" : ""].filter(Boolean).join(" ");
-  el.dataset.id = p.id;
-  positionTemplateBox(el, p, scale);
-  el.innerHTML = `<span class="tpl-box-label">${esc(templateBindingLabel(p))}</span>
-    <span class="tpl-handle"></span>
-    <button type="button" class="tpl-box-del" title="删除位置">×</button>`;
-  el.addEventListener("pointerdown", (e) => startTemplateBoxDrag(editor, p, el, e));
-  const handle = el.querySelector(".tpl-handle");
-  handle.addEventListener("pointerdown", (e) => startTemplateBoxResize(editor, p, el, e));
-  el.querySelector(".tpl-box-del").addEventListener("click", (e) => {
-    e.stopPropagation();
-    removeTemplatePlacement(editor, p.id);
-  });
-  return el;
-}
-
-function positionTemplateBox(el, p, scale) {
-  el.style.left = (p.x * scale) + "px";
-  el.style.top = (p.y * scale) + "px";
-  el.style.width = (p.w * scale) + "px";
-  el.style.height = (p.h * scale) + "px";
-}
-
-function startTemplateBoxDrag(editor, p, el, e) {
-  if (e.target.closest(".tpl-handle") || e.target.closest(".tpl-box-del")) return;
-  e.preventDefault();
-  selectTemplatePlacement(editor, p.id);
-  const page = editor.pageSizes[p.page - 1];
-  const startX = e.clientX;
-  const startY = e.clientY;
-  const origin = { x: p.x, y: p.y };
-  const move = (ev) => {
-    const dx = (ev.clientX - startX) / editor.scale;
-    const dy = (ev.clientY - startY) / editor.scale;
-    p.x = roundPt(clampNumber(origin.x + dx, 0, page.width - p.w));
-    p.y = roundPt(clampNumber(origin.y + dy, 0, page.height - p.h));
-    positionTemplateBox(el, p, editor.scale);
-    markTemplateDirty(editor);
-  };
-  const up = () => {
-    el.removeEventListener("pointermove", move);
-    el.removeEventListener("pointerup", up);
-    el.removeEventListener("pointercancel", up);
-    renderPlacementList(editor);
-    renderSelectedPanel(editor);
-  };
-  el.setPointerCapture && el.setPointerCapture(e.pointerId);
-  el.addEventListener("pointermove", move);
-  el.addEventListener("pointerup", up);
-  el.addEventListener("pointercancel", up);
-}
-
-function startTemplateBoxResize(editor, p, el, e) {
-  e.preventDefault();
-  e.stopPropagation();
-  selectTemplatePlacement(editor, p.id);
-  const page = editor.pageSizes[p.page - 1];
-  const startX = e.clientX;
-  const startY = e.clientY;
-  const origin = { w: p.w, h: p.h };
-  const move = (ev) => {
-    const dx = (ev.clientX - startX) / editor.scale;
-    const dy = (ev.clientY - startY) / editor.scale;
-    p.w = roundPt(clampNumber(origin.w + dx, 6, page.width - p.x));
-    p.h = roundPt(clampNumber(origin.h + dy, 6, page.height - p.y));
-    positionTemplateBox(el, p, editor.scale);
-    markTemplateDirty(editor);
-  };
-  const up = () => {
-    el.removeEventListener("pointermove", move);
-    el.removeEventListener("pointerup", up);
-    el.removeEventListener("pointercancel", up);
-    renderPlacementList(editor);
-    renderSelectedPanel(editor);
-  };
-  el.setPointerCapture && el.setPointerCapture(e.pointerId);
-  el.addEventListener("pointermove", move);
-  el.addEventListener("pointerup", up);
-  el.addEventListener("pointercancel", up);
-}
-
-function selectTemplatePlacement(editor, id) {
-  editor.selected = id;
-  $$(".tpl-box", editor.modal.body).forEach((el) => {
-    el.classList.toggle("selected", el.dataset.id === id);
-  });
-  renderPlacementList(editor);
-  renderSelectedPanel(editor);
-}
-
-function renderPlacementList(editor) {
-  const list = $("#tplPlacementList", editor.modal.body);
-  if (!list) return;
-  if (!editor.placements.length) {
-    list.innerHTML = `<div class="tpl-list-empty">还没有标定位置。在上方选择字段/签名/公章后点击「添加位置」。</div>`;
-    return;
-  }
-  list.innerHTML = editor.placements.map((p) => `
-    <div class="tpl-list-item${editor.selected === p.id ? " selected" : ""}" data-id="${esc(p.id)}">
-      <span class="grow">${esc(templateBindingLabel(p))}</span>
-      <span class="tpl-kind">第 ${p.page} 页</span>
-      <button type="button" data-action="remove" title="删除">×</button>
-    </div>`).join("");
-  $$(".tpl-list-item", list).forEach((item) => {
-    item.addEventListener("click", (e) => {
-      const remove = e.target.closest("button[data-action='remove']");
-      if (remove) {
-        e.stopPropagation();
-        removeTemplatePlacement(editor, item.dataset.id);
-        return;
-      }
-      selectTemplatePlacement(editor, item.dataset.id);
-      const pageEl = $(`.tpl-page[data-page="${editor.placements.find((p) => p.id === item.dataset.id)?.page || 1}"]`, editor.modal.body);
-      const boxEl = pageEl ? $(`.tpl-box[data-id="${item.dataset.id}"]`, pageEl) : null;
-      if (boxEl) boxEl.scrollIntoView({ block: "center", behavior: "smooth" });
-    });
-  });
-}
-
-function renderSelectedPanel(editor) {
-  const panel = $("#tplSelectedPanel", editor.modal.body);
-  if (!panel) return;
-  const p = editor.placements.find((item) => item.id === editor.selected);
-  if (!p) {
-    panel.innerHTML = `<div class="tpl-status">点击页面上的框或上方列表进行编辑。</div>`;
-    return;
-  }
-  if (p.type !== "field") {
-    panel.innerHTML = `<div class="tpl-add">
-      <div class="tpl-status">${esc(templateBindingLabel(p))} · 第 ${p.page} 页 · ${Math.round(p.w)}×${Math.round(p.h)} pt</div>
-      <button type="button" class="danger" id="tplRemoveSelected">删除这个位置</button>
-    </div>`;
-    $("#tplRemoveSelected", panel).addEventListener("click", () => removeTemplatePlacement(editor, p.id));
-    return;
-  }
-  panel.innerHTML = `<div class="tpl-add">
-    <div class="tpl-status">${esc(templateBindingLabel(p))} · 第 ${p.page} 页 · ${Math.round(p.w)}×${Math.round(p.h)} pt</div>
-    <div class="field"><label for="tplFontSize">字号（pt，0 = 自动缩放）</label>
-      <input id="tplFontSize" type="number" min="0" max="72" step="0.5" value="${p.font_size || 0}"></div>
-    <div class="field"><label for="tplAlign">对齐</label>
-      <select id="tplAlign">
-        <option value="left"${(p.align || "left") === "left" ? " selected" : ""}>左对齐</option>
-        <option value="center"${p.align === "center" ? " selected" : ""}>居中</option>
-        <option value="right"${p.align === "right" ? " selected" : ""}>右对齐</option>
-      </select></div>
-    <button type="button" class="danger" id="tplRemoveSelected">删除这个位置</button>
-  </div>`;
-  $("#tplFontSize", panel).addEventListener("change", (e) => {
-    const value = Number(e.target.value) || 0;
-    p.font_size = value > 0 ? value : 0;
-    markTemplateDirty(editor);
-    toast(value > 0 ? `字号设为 ${value}pt（放不下时仍会自动缩小）` : "字号改为自动缩放");
-  });
-  $("#tplAlign", panel).addEventListener("change", (e) => {
-    p.align = e.target.value;
-    markTemplateDirty(editor);
-  });
-  $("#tplRemoveSelected", panel).addEventListener("click", () => removeTemplatePlacement(editor, p.id));
-}
-
-function removeTemplatePlacement(editor, id) {
-  editor.placements = editor.placements.filter((p) => p.id !== id);
-  if (editor.selected === id) editor.selected = null;
-  markTemplateDirty(editor);
-  rerenderTemplateBoxes(editor);
-  renderPlacementList(editor);
-  renderSelectedPanel(editor);
-}
-
-function rerenderTemplateBoxes(editor) {
-  $$(".tpl-page", editor.modal.body).forEach((pageEl) => {
-    const pageNumber = Number(pageEl.dataset.page);
-    const boxes = $(".tpl-boxes", pageEl);
-    if (boxes) renderTemplateBoxes(editor, pageNumber, boxes);
-  });
-}
-
-function addTemplatePlacement(editor) {
-  const kind = $("#tplAddKind", editor.modal.body).value;
-  const page = 1;
-  const pageSize = editor.pageSizes[page - 1];
-  if (!pageSize) {
-    toast("模板 PDF 尚未加载完成", true);
-    return;
-  }
-  const placement = {
-    id: newPlacementID(),
-    page,
-    x: 60,
-    y: 100 + (editor.placements.filter((p) => p.page === page).length % 12) * 34,
-    w: 180,
-    h: 22,
-    type: kind,
-    field: "",
-    party: "",
-    seal_mode: "",
-    seal_id: "",
-    font_size: 0,
-    align: "left",
-  };
-  if (kind === "field") {
-    const key = $("#tplAddField", editor.modal.body).value;
-    if (!key) {
-      toast("请选择一个字段", true);
-      return;
-    }
-    placement.field = key;
-    placement.align = "left";
-  } else if (kind === "signature") {
-    placement.party = $("#tplAddParty", editor.modal.body).value;
-    if (!placement.party) {
-      toast("请选择签名方（甲方或乙方）", true);
-      return;
-    }
-    placement.w = 130;
-    placement.h = 50;
-  } else {
-    placement.seal_mode = $("#tplAddSealMode", editor.modal.body).value;
-    placement.party = $("#tplAddParty", editor.modal.body).value;
-    if (placement.seal_mode === "seal") {
-      const sealID = $("#tplAddSeal", editor.modal.body).value;
-      if (!sealID) {
-        toast("请先选择或导入公章图片", true);
-        return;
-      }
-      placement.seal_id = sealID;
-    }
-    placement.w = 110;
-    placement.h = 110;
-  }
-  placement.x = roundPt(clampNumber(placement.x, 0, pageSize.width - placement.w));
-  placement.y = roundPt(clampNumber(placement.y, 0, pageSize.height - placement.h));
-  editor.placements.push(placement);
-  markTemplateDirty(editor);
-  rerenderTemplateBoxes(editor);
-  selectTemplatePlacement(editor, placement.id);
-  const pageEl = $(`.tpl-page[data-page="${page}"]`, editor.modal.body);
-  const boxEl = pageEl ? $(`.tpl-box[data-id="${placement.id}"]`, pageEl) : null;
-  if (boxEl) boxEl.scrollIntoView({ block: "center", behavior: "smooth" });
-}
-
-function markTemplateDirty(editor) {
-  editor.dirty = true;
-  editor.preview = null;
-  updateTemplatePreviewStatus(editor);
-}
-
-function updateTemplatePreviewStatus(editor) {
-  const status = $("#tplPreviewStatus", editor.modal.body);
-  const generate = $("#tplGenerate", editor.modal.body);
-  if (!status || !generate) return;
-  let text = "请先预览（样例或合同）再生成 PDF。";
-  let cls = "tpl-status";
-  if (editor.dirty) {
-    text = "有未保存的修改；预览或生成时会先自动保存为新版本。";
-    cls = "tpl-status warn";
-  } else if (editor.preview && !editor.preview.sample) {
-    text = "已用目标合同预览，可以生成 PDF。";
-    cls = "tpl-status ok";
-  } else if (editor.preview && editor.preview.sample) {
-    text = "已用样例数据预览；生成正式 PDF 前请用目标合同预览。";
-    cls = "tpl-status warn";
-  }
-  status.textContent = text;
-  status.className = cls;
-  generate.disabled = !(editor.preview && !editor.preview.sample && !editor.dirty);
-}
-
-function updateTemplateEditorHeader(editor) {
-  const item = editor.template;
-  editor.modal.title.textContent = `模板标定 · ${item.name} v${item.version}`;
-  const current = $("#tplCurrent", editor.modal.body);
-  if (current) {
-    current.textContent = `v${item.version} · ${item.page_count || 0} 页 · ${editor.placements.length} 个位置`;
-  }
-}
-
-function bindTemplateEditorEvents(editor) {
-  $("#tplZoom", editor.modal.body).addEventListener("change", (e) => {
-    editor.scale = Number(e.target.value) || 1.25;
-    renderTemplateEditorPages(editor).catch((err) => toast(err.message, true));
-  });
-  $("#tplAddKind", editor.modal.body).addEventListener("change", () => {
-    const kind = $("#tplAddKind", editor.modal.body).value;
-    $("#tplAddFieldWrap", editor.modal.body).style.display = kind === "field" ? "" : "none";
-    $("#tplAddPartyWrap", editor.modal.body).style.display = kind === "signature" ? "" : "none";
-    $("#tplAddSealModeWrap", editor.modal.body).style.display = kind === "seal" ? "" : "none";
-    syncTemplateAddSealControls(editor);
-  });
-  $("#tplAddSealMode", editor.modal.body).addEventListener("change", () => syncTemplateAddSealControls(editor));
-  $("#tplAddPlace", editor.modal.body).addEventListener("click", () => addTemplatePlacement(editor));
-  $("#tplSaveBtn", editor.modal.body).addEventListener("click", () => {
-    saveTemplateMapping(editor).catch((err) => toast(err.message, true));
-  });
-  $("#tplCloseBtn", editor.modal.body).addEventListener("click", () => {
-    if (editor.dirty && !window.confirm("还有未保存的标定，确定关闭吗？")) return;
-    closeModal();
-  });
-  $("#tplPreviewSample", editor.modal.body).addEventListener("click", () => {
-    previewTemplate(editor, true).catch((err) => toast(err.message, true));
-  });
-  $("#tplPreviewContract", editor.modal.body).addEventListener("click", () => {
-    previewTemplate(editor, false).catch((err) => toast(err.message, true));
-  });
-  $("#tplGenerate", editor.modal.body).addEventListener("click", () => {
-    generateTemplatePDF(editor).catch((err) => toast(err.message, true));
-  });
-  syncTemplateAddSealControls(editor);
-}
-
-function syncTemplateAddSealControls(editor) {
-  const kind = $("#tplAddKind", editor.modal.body).value;
-  const mode = $("#tplAddSealMode", editor.modal.body).value;
-  const wrap = $("#tplAddSealWrap", editor.modal.body);
-  wrap.style.display = kind === "seal" && mode === "seal" ? "" : "none";
-  $("#tplAddPartyWrap", editor.modal.body).style.display =
-    (kind === "signature" || kind === "seal") ? "" : "none";
-}
-
-async function loadTemplateUsage(editor) {
-  const el = $("#tplUsage", editor.modal.body);
-  try {
-    const u = await api(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/usage`);
-    if (!el) return;
-    el.textContent = `影响范围：${u.family_contracts} 份合同使用该模板系列` +
-      `（其中 ${u.other_version_contracts} 份仍用旧版本）· 已生成 ${u.documents} 份 PDF`;
-  } catch (err) {
-    if (el) el.textContent = "影响范围统计失败：" + err.message;
-  }
-}
-
-// loadTemplateCheckPanel is the B8 template wizard validation: it compares the
-// calibrated placements with the current field definitions and points at the
-// existing pages that fix each problem. It never edits the template.
-async function loadTemplateCheckPanel(editor) {
-  const el = $("#tplCheck", editor.modal.body);
-  if (!el) return;
-  try {
-    const data = await api(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/check`);
-    if (templateEditor !== editor) return;
-    const issues = data.issues || [];
-    if (!issues.length) {
-      el.className = "tpl-status ok";
-      el.textContent = "模板体检通过：占位与字段定义一致，签名 / 公章位置齐全。";
-      return;
-    }
-    el.className = "tpl-warnings";
-    el.innerHTML = issues.map((issue) =>
-      `<div class="tpl-warning">${esc(issue.message)}${issue.action ? `（${esc(issue.action)}）` : ""}</div>`).join("");
-  } catch (err) {
-    el.className = "tpl-status warn";
-    el.textContent = "模板体检失败：" + err.message;
-  }
-}
-
-async function loadEditorContracts(editor) {
-  const select = $("#tplContract", editor.modal.body);
-  try {
-    const data = await api("/app/api/v1/contracts?limit=500");
-    editor.contracts = data.items || [];
-  } catch (_) {
-    editor.contracts = [];
-  }
-  if (!editor.contracts.length) {
-    select.innerHTML = `<option value="">（还没有合同，可先用样例预览）</option>`;
-    return;
-  }
-  select.innerHTML = editor.contracts.map((c) =>
-    `<option value="${esc(c.id)}">${esc(c.contract_no)} · ${esc(c.title)}</option>`).join("");
-}
-
-async function saveTemplateMapping(editor) {
-  if (!editor.dirty) return editor.template;
-  const payload = {
-    placements: editor.placements.map((p) => ({
-      id: p.id,
-      page: p.page,
-      x: p.x,
-      y: p.y,
-      w: p.w,
-      h: p.h,
-      type: p.type,
-      field: p.field || "",
-      party: p.party || "",
-      seal_mode: p.seal_mode || "",
-      seal_id: p.seal_id || "",
-      font_size: p.font_size || 0,
-      align: p.align || "left",
-    })),
-  };
-  const res = await api(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/mapping`, {
-    method: "PUT",
-    body: payload,
-  });
-  const item = res.item;
-  editor.template = item;
-  editor.placements = JSON.parse(JSON.stringify(item.placements || []));
-  editor.selected = null;
-  editor.dirty = false;
-  editor.preview = null;
-  updateTemplateEditorHeader(editor);
-  updateTemplatePreviewStatus(editor);
-  renderPlacementList(editor);
-  renderSelectedPanel(editor);
-  rerenderTemplateBoxes(editor);
-  await loadTemplates();
-  renderTemplates();
-  await loadBootstrapAndMeta();
-  loadTemplateUsage(editor).catch(() => {});
-  loadTemplateCheckPanel(editor).catch(() => {});
-  const warnings = res.warnings || [];
-  toast(`已保存为 v${item.version}`);
-  if (warnings.length) setTimeout(() => toast(warnings.join("；")), 350);
-  return item;
-}
-
-async function previewTemplate(editor, sample) {
-  if (editor.dirty) {
-    await saveTemplateMapping(editor);
-  }
-  const contractID = sample ? "" : $("#tplContract", editor.modal.body).value;
-  if (!sample && !contractID) {
-    toast("请先选择用于预览的合同", true);
-    return;
-  }
-  const body = sample ? { sample: true } : { contract_id: contractID };
-  const res = await api(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/preview`, {
-    method: "POST",
-    body,
-  });
-  editor.preview = {
-    sample: !!sample,
-    contractID: sample ? "" : contractID,
-    sha: res.preview_sha256,
-    bytes: base64ToBytes(res.pdf_base64),
-  };
-  const bytes = editor.preview.bytes;
-  const title = sample
-    ? "样例数据预览（不写入台账）"
-    : `合同预览 · ${($("#tplContract", editor.modal.body).selectedOptions[0] || {}).textContent || ""}`;
-  const download = sample ? { bytes, filename: "样例试生成.pdf", sample: true } : null;
-  await showTemplatePreview(editor, bytes, res.warnings || [], title, download);
-  renderTemplateWarnings(editor, res.warnings || []);
-  updateTemplatePreviewStatus(editor);
-  if (sample) await recordOnboardingStep("sample_preview");
-}
-
-// downloadSampleTemplatePDF saves the already-rendered sample PDF locally and
-// records the guide's trial step. It never asks the server to persist an
-// output document, so the sample stays out of the ledger and generation log.
-async function downloadSampleTemplatePDF(editor) {
-  if (!editor || !editor.preview || !editor.preview.sample || !editor.preview.bytes) {
-    toast("先完成样例预览，再试生成 PDF", true);
-    return;
-  }
-  downloadBytes(editor.preview.bytes, "样例试生成.pdf");
-  await recordOnboardingStep("trial_pdf");
-  toast("样例 PDF 已下载；样例数据未写入台账");
-}
-
-function renderTemplateWarnings(editor, warnings) {
-  const box = $("#tplWarnings", editor.modal.body);
-  if (!box) return;
-  if (!warnings.length) {
-    box.innerHTML = `<div class="tpl-status ok">预览未发现缺失字段或越界问题。</div>`;
-    return;
-  }
-  box.innerHTML = warnings.map((w) => `<div class="tpl-warning">${esc(w.message || w.code)}</div>`).join("");
-}
-
-async function showTemplatePreview(editor, bytes, warnings, title, download) {
-  closeTemplatePreview(editor);
-  const shell = $(".template-editor", editor.modal.body);
-  if (!shell) return;
-  const overlay = document.createElement("div");
-  overlay.className = "tpl-preview-overlay";
-  overlay.innerHTML = `
-    <div class="tpl-preview-head">
-      <strong>${esc(title)}</strong>
-      <span class="spacer"></span>
-      ${download ? `<button type="button" id="tplPreviewDownload">${download.sample ? "下载试生成 PDF" : "下载 PDF"}</button>` : ""}
-      <button type="button" id="tplPreviewClose">关闭预览</button>
-    </div>
-    <div class="tpl-preview-pages"><div class="tpl-loading">正在渲染预览…</div></div>
-    <div class="tpl-preview-warnings">${warnings.length
-      ? warnings.map((w) => `<div class="tpl-warning">${esc(w.message || w.code)}</div>`).join("")
-      : `<div class="tpl-status ok">未发现位置或数据问题。</div>`}</div>`;
-  shell.appendChild(overlay);
-  editor.previewOverlay = overlay;
-  $("#tplPreviewClose", overlay).addEventListener("click", () => closeTemplatePreview(editor));
-  if (download) {
-    $("#tplPreviewDownload", overlay).addEventListener("click", async () => {
-      if (download.bytes) {
-        downloadBytes(download.bytes, download.filename || "preview.pdf");
-        if (download.sample) {
-          await recordOnboardingStep("trial_pdf");
-          toast("样例 PDF 已下载；样例数据未写入台账");
-        }
-        return;
-      }
-      downloadAsset(download.path, download.filename);
-    });
-  }
-  const pages = $(".tpl-preview-pages", overlay);
-  try {
-    editor.previewDoc = await renderPDFPagesInto(pages, bytes, 0.9);
-  } catch (err) {
-    pages.innerHTML = `<div class="tpl-loading">预览渲染失败：${esc(err.message)}</div>`;
-  }
-}
-
-function closeTemplatePreview(editor) {
-  if (editor.previewOverlay && editor.previewOverlay.parentNode) {
-    editor.previewOverlay.parentNode.removeChild(editor.previewOverlay);
-  }
-  editor.previewOverlay = null;
-  try { if (editor.previewDoc) editor.previewDoc.destroy(); } catch (_) { /* ignore */ }
-  editor.previewDoc = null;
-}
-
-async function generateTemplatePDF(editor) {
-  if (!editor.preview || editor.preview.sample) {
-    toast("请先用目标合同预览，再生成 PDF", true);
-    return;
-  }
-  if (editor.dirty) {
-    toast("标定已修改，请重新预览后再生成", true);
-    return;
-  }
-  const res = await api(`/app/api/v1/templates/${encodeURIComponent(editor.template.id)}/generate`, {
-    method: "POST",
-    body: {
-      contract_id: editor.preview.contractID,
-      preview_sha256: editor.preview.sha,
-    },
-  });
-  const doc = res.item;
-  const warnings = res.warnings || [];
-  renderTemplateWarnings(editor, warnings);
-  const result = $("#tplResult", editor.modal.body);
-  const path = `/app/api/v1/documents/${encodeURIComponent(doc.id)}/file`;
-  result.innerHTML = `<div class="tpl-add">
-    <div class="tpl-status ok">已生成 PDF（${doc.page_count} 页，sha256 ${esc(String(doc.sha256 || "").slice(0, 12))}…）</div>
-    <div class="doc-download">
-      <button type="button" id="tplOpenGenerated">查看生成结果</button>
-      <button type="button" id="tplDownloadGenerated">下载 PDF</button>
-    </div>
-  </div>`;
-  $("#tplDownloadGenerated", result).addEventListener("click", () => downloadAsset(path, "contract.pdf"));
-  $("#tplOpenGenerated", result).addEventListener("click", async () => {
-    try {
-      const resp = await fetch(path, { headers: { "X-Tengshou-App": "1" } });
-      if (!resp.ok) throw new Error(`请求失败（${resp.status}）`);
-      const bytes = new Uint8Array(await resp.arrayBuffer());
-      await showTemplatePreview(editor, bytes, warnings, "生成结果", { path, filename: "contract.pdf" });
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-  result.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  toast(`已生成 PDF（v${doc.template_version}）`);
-  await loadTemplates();
-  renderTemplates();
-  await loadBootstrapAndMeta();
-  loadTemplateUsage(editor).catch(() => {});
 }
 
 async function renderPDFPagesInto(container, bytes, scale) {
@@ -2082,19 +1073,10 @@ function base64ToBytes(b64) {
   return out;
 }
 
-function roundPt(v) { return Math.round(v * 10) / 10; }
-
-function clampNumber(v, min, max) {
-  if (max < min) max = min;
-  if (v < min) return min;
-  if (v > max) return max;
-  return v;
-}
-
 /* ---------- 字段管理 ----------
    字段页已迁到 Vue（frontend/src/components/fields/）：渲染、新建/编辑弹窗、
    归档与恢复都由 Vue 负责。app.js 只保留 loadFields() 与 state.fields，供
-   未迁移的模板标定读取；字段变更仍经 refreshAfterWrite() 派发
+   未迁移的合同生成面板读取；字段变更仍经 refreshAfterWrite() 派发
    tengshou:data-changed。 */
 
 /* ---------- 变更记录 ---------- */
@@ -2522,12 +1504,6 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-// downloadBytes saves an in-memory preview (sample trial PDFs never become
-// output-document records).
-function downloadBytes(bytes, filename) {
-  downloadBlob(new Blob([bytes], { type: "application/pdf" }), filename || "preview.pdf");
-}
-
 async function loadBackupStatus() {
   const status = await api("/app/api/v1/backup/status");
   renderBackupStatus(status);
@@ -2918,7 +1894,6 @@ async function flushRealtimeRefresh() {
   const needBootstrap = entities.has("contract") || needFields;
   const jobs = [];
   if (needFields) jobs.push(loadFields());
-  if (entities.has("seal")) jobs.push(loadSeals());
   if (entities.has("template")) jobs.push(loadTemplates());
   try {
     await Promise.all(jobs);
@@ -2936,7 +1911,6 @@ async function flushRealtimeRefresh() {
       renderMeta();
     }
   }
-  if (entities.has("template")) renderTemplates();
   if (state.tab === "changelog") {
     loadChangelog().catch(() => {});
   } else {
@@ -2963,13 +1937,12 @@ function switchTab(tab) {
     loadOnboardingCheck();
     loadOnboardingTemplateCheck();
   }
-  if (tab === "templates") loadTemplates().then(renderTemplates).catch((err) => toast(err.message, true));
   if (tab === "data") loadBackupStatus().catch((err) => toast(err.message, true));
   if (tab === "settings") loadMCPStatus().catch((err) => toast(err.message, true));
 }
 
 async function refreshAfterWrite() {
-  await Promise.all([loadFields(), loadSeals(), loadTemplates()]);
+  await Promise.all([loadFields(), loadTemplates()]);
   renderMeta();
   const bootstrap = await api("/app/api/v1/bootstrap").catch(() => null);
   if (bootstrap) {
@@ -2980,9 +1953,8 @@ async function refreshAfterWrite() {
     }
     renderMeta();
   }
-  renderTemplates();
-  // 已迁移的 Vue 域（合同台账、相对方档案、字段管理、公章）不复用这里的 DOM，
-  // 但需要知道数据已经变了：它们据此重取各自的列表。
+  // 已迁移的 Vue 域（合同台账、相对方档案、字段管理、公章、模板）不复用
+  // 这里的 DOM，但需要知道数据已经变了：它们据此重取各自的列表。
   notifyDataChanged(["field", "party", "contract", "seal", "template"]);
   if (state.tab === "onboarding") {
     loadOnboarding();
@@ -2991,15 +1963,6 @@ async function refreshAfterWrite() {
   if (state.tab === "changelog") {
     loadChangelog().catch((err) => toast(err.message, true));
   }
-}
-
-/* 模板页的批量生成沿用「当前台账合同」语义：台账已迁到 Vue，优先读台账岛
-   当前筛选后的列表；岛缺席（未构建前端产物）时退回接口全量。 */
-async function ledgerContractsForBatch() {
-  const ledger = window.__tengshouContracts;
-  if (ledger) return ledger.currentContracts();
-  const data = await api("/app/api/v1/contracts?limit=500");
-  return data.items || [];
 }
 
 function openExcelImport() {
@@ -3022,39 +1985,6 @@ function bindEvents() {
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-export-signature]");
     if (button) exportSignature(button.dataset.exportSignature);
-  });
-  $("#templateSearch").addEventListener("input", debounce(async (e) => {
-    state.templateQ = e.target.value.trim();
-    try {
-      await loadTemplates();
-      renderTemplates();
-    } catch (err) { toast(err.message, true); }
-  }, 250));
-  $("#importTemplateBtn").addEventListener("click", () => {
-    const input = $("#templateFileInput");
-    input.value = "";
-    input.click();
-  });
-  $("#templateFileInput").addEventListener("change", (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (file) openTemplateImport(file);
-  });
-  $("#refreshTemplatesBtn").addEventListener("click", () => {
-    loadTemplates().then(renderTemplates).catch((err) => toast(err.message, true));
-  });
-  $("#templateBatchGenerateBtn").addEventListener("click", () => {
-    ledgerContractsForBatch().then((contracts) => {
-      if (!contracts.length) {
-        toast("当前台账没有合同；请先切换年度或新建合同", true);
-        return;
-      }
-      const active = state.templates.find((t) => t.is_active) || state.templates[0];
-      openBatchGenerateDialog({
-        title: "批量生成 PDF",
-        contracts,
-        templateId: active ? active.id : "",
-      }).catch((err) => toast(err.message, true));
-    }).catch((err) => toast(err.message, true));
   });
   $("#importFile").addEventListener("change", (e) => {
     const file = e.target.files && e.target.files[0];
@@ -3090,9 +2020,8 @@ function bindEvents() {
 async function boot() {
   bindEvents();
   try {
-    await Promise.all([loadBootstrap(), loadFields(), loadSeals(), loadTemplates(), loadConverters()]);
+    await Promise.all([loadBootstrap(), loadFields(), loadTemplates()]);
     renderMeta();
-    renderTemplates();
   } catch (err) {
     toast(err.message, true);
   }
@@ -3112,6 +2041,20 @@ function openContractFormInVue(contract, options) {
   window.dispatchEvent(new CustomEvent("tengshou:open-contract-form", {
     detail: { contract: contract || null, options: options || {} },
   }));
+}
+
+/* 模板页已迁到 Vue（frontend/src/components/templates/）：引导与引导自检经
+   这两个事件打开导入选择或标定编辑器；样例动作随 detail.action 传入，
+   由模板岛在编辑器打开后执行。 */
+function openTemplateEditorInVue(template, action) {
+  if (!template) return;
+  window.dispatchEvent(new CustomEvent("tengshou:open-template-editor", {
+    detail: { templateId: template.id, action: action || "" },
+  }));
+}
+
+function openTemplateImportInVue() {
+  window.dispatchEvent(new CustomEvent("tengshou:open-template-import"));
 }
 
 /* 合同详情里的签名摘要仍由 app.js 渲染（扫码签名域尚未迁移）：Vue 合同弹窗

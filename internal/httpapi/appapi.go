@@ -791,7 +791,7 @@ func (s *Server) writeServiceError(w http.ResponseWriter, msg string, err error)
 			status = http.StatusConflict
 		case "import_errors", "converter_unavailable", "convert_failed",
 			"invalid_pdf", "invalid_kind", "too_many_placements",
-			"invalid_backup", "confirm_required",
+			"invalid_backup", "confirm_required", "conflict_unresolved",
 			"missing_signature", "missing_field", "missing_party", "missing_seal",
 			"preflight_failed", "too_many_contracts":
 			status = http.StatusUnprocessableEntity

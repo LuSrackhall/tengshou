@@ -127,8 +127,9 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 台账界面使用 `/app/api/v1/*`：字段、档案、合同 CRUD，变更记录，Excel 模板 /
 台账下载与导入预览/提交，以及签名会话（B5）。该接口**只接受回环地址**，写请求
 必须带 `X-Tengshou-App: 1`；跨站 Origin 会被拒绝。它不面向外部 agent，契约也不
-承诺稳定。字段、合并与验收细节见 [b2-data.md](b2-data.md)；签名流程、安全边界
-与端点见 [b5-signature.md](b5-signature.md)。
+承诺稳定。字段、合并与验收细节见 [b2-data.md](b2-data.md)；Excel 往返、隐藏快照
+与冲突/删除参数见 [b14-excel-roundtrip.md](b14-excel-roundtrip.md)；签名流程、
+安全边界与端点见 [b5-signature.md](b5-signature.md)。
 
 签名会话响应中的 `urls` 是手机可访问的局域网签名页地址，`qr_url` 是二维码
 PNG。二维码中的一次性 token 只出现在 URL 里，不出现在 JSON 响应中。

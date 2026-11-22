@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -9,6 +10,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/xuri/excelize/v2"
+
+	"github.com/LuSrackhall/tengshou/internal/service"
 )
 
 func (f *fixture) appRequest(t *testing.T, method, path string, body any, headers map[string]string) (*http.Response, []byte) {
@@ -263,5 +268,91 @@ func TestAppExcelEndpoints(t *testing.T) {
 	resp, _ = f.appRequest(t, http.MethodPost, "/app/api/v1/excel/preview", map[string]any{}, nil)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("missing file should be 400: %d", resp.StatusCode)
+	}
+}
+
+// B14 over HTTP: the exported ledger round-trips, conflicts are reported with
+// both sides' values, and an unresolved conflict maps to 422.
+func TestAppExcelRoundTripEndpoints(t *testing.T) {
+	f := newFixture(t)
+	resp, ledger := f.get(t, "/app/api/v1/excel/ledger", false)
+	if resp.StatusCode != 200 || len(ledger) == 0 {
+		t.Fatalf("ledger: %d", resp.StatusCode)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(ledger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := book.GetRows("合同台账")
+	if err != nil || len(rows) < 2 {
+		t.Fatalf("ledger rows: %v", err)
+	}
+	amountCol := -1
+	for i, header := range rows[0] {
+		if strings.TrimSpace(header) == "金额（元）" {
+			amountCol = i
+			break
+		}
+	}
+	if amountCol < 0 {
+		t.Fatalf("ledger header = %v", rows[0])
+	}
+	cell, _ := excelize.CoordinatesToCellName(amountCol+1, 2)
+	if err := book.SetCellValue("合同台账", cell, "4321"); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := book.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	book.Close()
+	encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	resp, preview := f.appRequest(t, http.MethodPost, "/app/api/v1/excel/preview", map[string]any{
+		"file_base64": encoded,
+		"options":     map[string]any{"file_name": "台账.xlsx"},
+	}, nil)
+	if resp.StatusCode != 200 || !strings.Contains(string(preview), `"action":"update"`) {
+		t.Fatalf("preview: %d %s", resp.StatusCode, preview)
+	}
+
+	// Edit the same record in the system: both sides changed -> conflict.
+	if _, _, err := f.service.SaveContract(context.Background(), service.ContractInput{
+		ID: f.contractID, Title: "幸福村房屋租赁合同", PartyBID: f.partyBID, Amount: 9999,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp, preview = f.appRequest(t, http.MethodPost, "/app/api/v1/excel/preview", map[string]any{
+		"file_base64": encoded,
+	}, nil)
+	if resp.StatusCode != 200 || !strings.Contains(string(preview), `"action":"conflict"`) ||
+		!strings.Contains(string(preview), `"system_values":{"amount":"9999"}`) ||
+		!strings.Contains(string(preview), `"excel_values":{"amount":"4321"}`) {
+		t.Fatalf("conflict preview: %d %s", resp.StatusCode, preview)
+	}
+
+	resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/excel/commit", map[string]any{
+		"file_base64": encoded,
+		"options":     map[string]any{"file_name": "台账.xlsx"},
+	}, nil)
+	if resp.StatusCode != http.StatusUnprocessableEntity ||
+		!strings.Contains(string(body), "conflict_unresolved") {
+		t.Fatalf("unresolved conflict commit: %d %s", resp.StatusCode, body)
+	}
+
+	resp, body = f.appRequest(t, http.MethodPost, "/app/api/v1/excel/commit", map[string]any{
+		"file_base64": encoded,
+		"options": map[string]any{
+			"file_name":   "台账.xlsx",
+			"resolutions": map[string]string{"2": "keep_system"},
+		},
+	}, nil)
+	if resp.StatusCode != 200 || !strings.Contains(string(body), `"conflicts":1`) ||
+		!strings.Contains(string(body), `"skipped":1`) || !strings.Contains(string(body), `"updated":0`) {
+		t.Fatalf("keep_system commit: %d %s", resp.StatusCode, body)
+	}
+	contract, err := f.reader.GetContract(context.Background(), f.contractID)
+	if err != nil || contract.Amount != 9999 {
+		t.Fatalf("keep_system contract = %+v err=%v", contract, err)
 	}
 }

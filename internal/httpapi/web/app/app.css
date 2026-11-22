@@ -112,6 +112,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .badge.draft, .badge.update { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: var(--warn-soft); }
 .badge.archived, .badge.unchanged { color: var(--muted); }
 .badge.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); background: transparent; }
+.badge.delete, .badge.conflict { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 
 .changelog { display: grid; gap: 10px; }
 .change-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
@@ -165,6 +166,19 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .row-warnings { color: var(--warn); font-size: 12.5px; white-space: normal; margin: 0; padding-left: 16px; }
 .import-table td, .import-table th { white-space: nowrap; }
 .import-table td.wrap { white-space: normal; }
+.import-section-title { font-size: 14px; margin: 18px 0 6px; }
+.import-conflict {
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
+  border-radius: 10px; padding: 10px 14px; margin-bottom: 12px;
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+}
+.import-conflict-head { display: flex; gap: 10px; align-items: center; margin-bottom: 4px; }
+.import-conflict .hint { margin: 2px 0 8px; }
+.conflict-table td, .conflict-table th { white-space: normal; }
+.conflict-choice { display: flex; gap: 18px; margin-top: 8px; flex-wrap: wrap; }
+.import-deletes { margin: 16px 0; }
+.import-deletes .hint { margin: 4px 0 8px; }
+.import-deletes .table-wrap { margin-top: 8px; }
 
 .toast {
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px);

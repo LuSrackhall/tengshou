@@ -417,6 +417,12 @@ func validateContractNo(s string) error {
 
 // DeleteContract removes a contract record and records the deletion.
 func (s *Service) DeleteContract(ctx context.Context, id string) error {
+	return s.deleteContract(ctx, id, "")
+}
+
+// deleteContract removes a contract record and records the deletion. source
+// "excel" marks import-driven deletes in the audit summary.
+func (s *Service) deleteContract(ctx context.Context, id, source string) error {
 	contract, err := s.rd.GetContract(ctx, strings.TrimSpace(id))
 	if err != nil {
 		if isNotFound(err) {
@@ -430,8 +436,12 @@ func (s *Service) DeleteContract(ctx context.Context, id string) error {
 		}
 		return err
 	}
+	prefix := ""
+	if source == "excel" {
+		prefix = "Excel 导入："
+	}
 	s.logChange(ctx, model.ChangeEntityContract, contract.ID, model.ChangeActionDelete,
-		fmt.Sprintf("删除合同 %s「%s」", contract.ContractNo, contract.Title), nil)
+		fmt.Sprintf("%s删除合同 %s「%s」", prefix, contract.ContractNo, contract.Title), nil)
 	return nil
 }
 

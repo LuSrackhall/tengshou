@@ -65,7 +65,7 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 					{"required", "boolean", "是否必填"},
 					{"default_value", "string", "默认值"},
 					{"options", "array", "单选字段的选项"},
-					{"in_ledger", "boolean", "是否出现在台账与 Excel"},
+					{"in_ledger", "boolean", "是否出现在应用内台账表格（Excel 列始终由当前字段定义生成）"},
 					{"in_template", "boolean", "是否用于模板占位符"},
 					{"built_in", "boolean", "是否内置字段"},
 					{"archived", "boolean", "是否已归档（数据保留）"},

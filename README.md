@@ -31,8 +31,10 @@
   `{{with sealPath .Seals .PartyA}}` 或 `contractSealPath` 落位，换模板后按新
   位置重新落位；删除 / 替换有确认并写入变更记录。细节见
   [docs/b13-seals.md](docs/b13-seals.md)。
-- **Excel 入口**：按当前字段定义生成录入模板（表头动态生成）；导入支持列名映射、
-  逐行预览、新增/更新合并、错误行报告；台账导出使用同一套列定义，可导出后再导回。
+- **Excel 入口（B14）**：按当前字段定义生成录入模板与台账（表头动态生成）；
+  导出文件带隐藏合同 ID 列与隐藏快照表，支持「导出 → 编辑 → 导回 → 预览合并」：
+  修改/新增/删除可识别，冲突逐行选择，删除需显式勾选，每次导入写一条文件级审计。
+  图片资产不进 Excel。细节见 [docs/b14-excel-roundtrip.md](docs/b14-excel-roundtrip.md)。
 - **变更记录**：谁在何时改了什么（字段级 diff），操作者取系统用户或 `config.json`
   的 `operator`；签名采集也写入变更记录。
 - **Wails v3 桌面壳**：`cmd/tengshou`，窗口加载 `/app/` 台账界面。

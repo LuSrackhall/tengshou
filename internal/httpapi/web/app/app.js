@@ -10,7 +10,6 @@ const state = {
   contracts: [],
   contractTotal: 0,
   parties: [],
-  partyTotal: 0,
   seals: [],
   sealTotal: 0,
   sealQ: "",
@@ -22,7 +21,6 @@ const state = {
   year: "",
   contractQ: "",
   status: "",
-  partyQ: "",
   fieldEntity: "contract",
   showArchivedFields: false,
   changelog: [],
@@ -222,12 +220,12 @@ async function loadFields() {
   state.fields = { contract: data.contract || [], party: data.party || [] };
 }
 
+// loadParties keeps state.parties fresh for the contract form's
+// counterparty datalist and ledger column. The 相对方档案 view itself is
+// rendered by the Vue island and fetches /parties on its own.
 async function loadParties() {
-  const params = new URLSearchParams({ limit: "500" });
-  if (state.partyQ) params.set("q", state.partyQ);
-  const data = await api("/app/api/v1/parties?" + params.toString());
+  const data = await api("/app/api/v1/parties?limit=500");
   state.parties = data.items || [];
-  state.partyTotal = data.total || 0;
 }
 
 async function loadSeals() {
@@ -326,16 +324,6 @@ async function downloadWorkbook(kind) {
   } catch (err) {
     toast(err.message, true);
   }
-}
-
-async function reloadAll() {
-  await Promise.all([loadFields(), loadParties(), loadContracts(), loadSeals(), loadTemplates()]);
-  renderMeta();
-  renderContracts();
-  renderParties();
-  renderFields();
-  renderSeals();
-  renderTemplates();
 }
 
 /* ---------- 顶栏 / 年度 ---------- */
@@ -3167,184 +3155,6 @@ function clampNumber(v, min, max) {
   return v;
 }
 
-/* ---------- 相对方档案 ---------- */
-
-function partyFieldValue(party, field) {
-  switch (field.key) {
-    case "name": return party.name;
-    case "kind": return kindLabel(party.kind);
-    case "id_number": return party.id_number || "—";
-    case "phone": return party.phone || "—";
-    case "address": return party.address || "—";
-    case "note": return party.note || "—";
-  }
-  const value = party.data ? party.data[field.key] : null;
-  return formatDynamic(field, value);
-}
-
-function renderParties() {
-  const table = $("#partyTable");
-  const fields = activeField("party").filter((f) => f.in_ledger);
-  $("#partySummary").textContent = `共 ${state.partyTotal} 个相对方${state.partyQ ? ` · 搜索「${state.partyQ}」` : ""}`;
-  if (!fields.length) {
-    table.innerHTML = `<tbody><tr><td class="empty">没有可显示的档案字段，请先在「字段」页新增。</td></tr></tbody>`;
-    return;
-  }
-  const head = fields.map((f) => `<th>${esc(f.label)}</th>`).join("");
-  const rows = state.parties.map((party) => {
-    const cells = fields.map((f) =>
-      `<td class="${f.key === "note" || f.key === "address" ? "wrap" : ""}">${esc(partyFieldValue(party, f))}</td>`).join("");
-    return `<tr data-id="${esc(party.id)}">${cells}
-      <td><div class="actions">
-        <button type="button" data-action="new-contract">以此档案新建合同</button>
-        <button type="button" data-action="edit">编辑</button>
-        <button type="button" class="danger" data-action="delete">删除</button>
-      </div></td></tr>`;
-  }).join("");
-  table.innerHTML = `<thead><tr>${head}<th>操作</th></tr></thead>
-    <tbody>${rows || `<tr><td class="empty" colspan="${fields.length + 1}">还没有相对方档案。</td></tr>`}</tbody>`;
-  $$("#partyTable tbody tr[data-id]").forEach((tr) => {
-    tr.addEventListener("click", (e) => {
-      const button = e.target.closest("button[data-action]");
-      const party = state.parties.find((p) => p.id === tr.dataset.id);
-      if (!party) return;
-      if (button && button.dataset.action === "delete") {
-        e.stopPropagation();
-        deleteParty(party);
-        return;
-      }
-      if (button && button.dataset.action === "new-contract") {
-        e.stopPropagation();
-        openContractForm(null, { partyB: party });
-        return;
-      }
-      openPartyForm(party);
-    });
-  });
-}
-
-function partyControlValue(f, party) {
-  if (!party) return f.built_in && f.key === "kind" ? "个人" : (f.default_value || "");
-  switch (f.key) {
-    case "name": return party.name;
-    case "kind": return kindLabel(party.kind);
-    case "id_number": return party.id_number || "";
-    case "phone": return party.phone || "";
-    case "address": return party.address || "";
-    case "note": return party.note || "";
-  }
-  return party.data ? party.data[f.key] : "";
-}
-
-function openPartyForm(party) {
-  const fields = activeField("party");
-  const modal = openModal(party ? `编辑相对方 · ${party.name}` : "新建相对方");
-  const form = fields.map((f) =>
-    fieldControlHTML("party", f, partyControlValue(f, party), {})).join("");
-  modal.body.innerHTML = `<div id="partyErrors"></div><div class="form-grid">${form}</div>
-    ${party ? `<div id="partyContracts" class="audit-host"></div>` : ""}
-    ${party ? `<div id="partyHistory" class="audit-host"></div>` : ""}`;
-  if (party) {
-    state.auditTarget = { entity: "party", id: party.id, selector: "#partyHistory" };
-    loadAuditHistory("party", party.id, "#partyHistory");
-    loadPartyContracts(modal, party);
-  }
-  footerButton(modal, "取消", "", closeModal);
-  if (party) footerButton(modal, "删除", "danger", () => deleteParty(party, modal));
-  const save = footerButton(modal, "保存", "primary", async () => {
-    save.disabled = true;
-    $("#partyErrors", modal.body).innerHTML = "";
-    try {
-      const input = collectPartyInput(fields);
-      const res = await api(party
-        ? `/app/api/v1/parties/${encodeURIComponent(party.id)}`
-        : "/app/api/v1/parties",
-        { method: party ? "PUT" : "POST", body: input });
-      closeModal();
-      toast("相对方档案已保存");
-      if (res.warnings && res.warnings.length) {
-        setTimeout(() => toast(res.warnings.join("；")), 350);
-      }
-      await refreshAfterWrite();
-    } catch (err) {
-      save.disabled = false;
-      $("#partyErrors", modal.body).innerHTML = fieldErrorsHTML(err);
-      modal.body.scrollTop = 0;
-    }
-  });
-}
-
-// loadPartyContracts lists the archive's historical contracts (B7). Rows can
-// be opened or used to start a renewal draft, so repeat signings begin from
-// the counterparty record without retyping its information.
-async function loadPartyContracts(modal, party) {
-  const host = $("#partyContracts", modal.body);
-  if (!host) return;
-  host.innerHTML = `<div class="audit-block"><div class="audit-head">历史合同</div>
-    <p class="muted">加载中…</p></div>`;
-  try {
-    const res = await api(`/app/api/v1/contracts?party_id=${encodeURIComponent(party.id)}&limit=20`);
-    const items = res.items || [];
-    const rows = items.map((c) => `
-      <li>
-        <div class="audit-line">
-          <span class="mono">${esc(c.contract_no)}</span>
-          <span class="audit-summary">「${esc(c.title)}」${c.year} 年 · ${esc(statusLabel(c.status))}</span>
-          <button type="button" data-id="${esc(c.id)}" data-action="open">查看</button>
-          <button type="button" data-id="${esc(c.id)}" data-action="renew">续签</button>
-        </div>
-      </li>`).join("");
-    host.innerHTML = `<div class="audit-block">
-      <div class="audit-head">历史合同（${res.total != null ? res.total : items.length}）</div>
-      ${items.length ? `<ul class="audit-list">${rows}</ul>` :
-        `<p class="muted">该相对方还没有合同记录。保存新合同后会自动关联到这份档案。</p>`}
-    </div>`;
-    $$("button[data-action]", host).forEach((button) => button.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const contract = items.find((c) => c.id === button.dataset.id);
-      if (!contract) return;
-      closeModal();
-      openContractForm(contract, { renew: button.dataset.action === "renew" })
-        .catch((err) => toast(err.message, true));
-    }));
-  } catch (err) {
-    host.innerHTML = `<div class="audit-block error"><div class="audit-head">历史合同</div>${esc(err.message)}</div>`;
-  }
-}
-
-function collectPartyInput(fields) {
-  const input = { data: {} };
-  for (const f of fields) {
-    const el = document.getElementById(`f_party_${f.key}`);
-    const value = el ? el.value.trim() : "";
-    if (!f.built_in) {
-      input.data[f.key] = value;
-      continue;
-    }
-    switch (f.key) {
-      case "name": input.name = value; break;
-      case "kind": input.kind = value; break;
-      case "id_number": input.id_number = value; break;
-      case "phone": input.phone = value; break;
-      case "address": input.address = value; break;
-      case "note": input.note = value; break;
-    }
-  }
-  return input;
-}
-
-async function deleteParty(party, modal) {
-  if (!window.confirm(`确定删除相对方「${party.name}」吗？`)) return;
-  try {
-    await api(`/app/api/v1/parties/${encodeURIComponent(party.id)}`, { method: "DELETE" });
-    if (modal) closeModal();
-    toast("相对方已删除");
-    await refreshAfterWrite();
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
 /* ---------- 字段管理 ---------- */
 
 function renderFields() {
@@ -4214,6 +4024,12 @@ function setLiveStatus(mode, detail) {
   window.dispatchEvent(new CustomEvent("tengshou:live-status", { detail: live }));
 }
 
+// 迁移期数据变更广播：Vue 域（目前是相对方档案）监听后重取自己的数据。
+// 与 tengshou:change（单条变更）配对使用，退役时随 app.js 一起删除。
+function notifyDataChanged(entities) {
+  window.dispatchEvent(new CustomEvent("tengshou:data-changed", { detail: { entities } }));
+}
+
 function eventStreamURL() {
   const params = new URLSearchParams();
   if (state.lastEventId) params.set("after", state.lastEventId);
@@ -4316,6 +4132,7 @@ function requestCatchUpRefresh() {
     pendingEntities.add(entity);
   }
   if (state.tab === "settings") pendingEntities.add("settings");
+  notifyDataChanged(Array.from(pendingEntities));
   scheduleRealtimeRefresh(150);
 }
 
@@ -4326,6 +4143,8 @@ function handleChangeEvent(item) {
     seenEventIds.delete(seenEventIds.values().next().value);
   }
   state.lastEventId = item.id;
+  window.dispatchEvent(new CustomEvent("tengshou:change", { detail: item }));
+  notifyDataChanged([item.entity || ""]);
   pendingEntities.add(item.entity || "");
   if (isAgentEntry(item)) pendingAgentActivity = true;
   if (state.auditTarget &&
@@ -4372,7 +4191,6 @@ async function flushRealtimeRefresh() {
     }
   }
   if (entities.has("contract") || needFields) renderContracts();
-  if (entities.has("party") || needFields) renderParties();
   if (needFields) renderFields();
   if (entities.has("seal")) renderSeals();
   if (entities.has("template")) renderTemplates();
@@ -4427,10 +4245,11 @@ async function refreshAfterWrite() {
     renderMeta();
   }
   renderContracts();
-  renderParties();
   renderFields();
   renderSeals();
   renderTemplates();
+  // Vue 域（相对方档案）不复用这里的 DOM，但需要知道数据已经变了。
+  notifyDataChanged(["field", "party", "contract", "seal", "template"]);
   if (state.tab === "onboarding") {
     loadOnboarding();
     loadOnboardingTemplateCheck();
@@ -4473,13 +4292,6 @@ function bindEvents() {
     try {
       await loadContracts();
       renderContracts();
-    } catch (err) { toast(err.message, true); }
-  }, 250));
-  $("#partySearch").addEventListener("input", debounce(async (e) => {
-    state.partyQ = e.target.value.trim();
-    try {
-      await loadParties();
-      renderParties();
     } catch (err) { toast(err.message, true); }
   }, 250));
   $("#sealSearch").addEventListener("input", debounce(async (e) => {
@@ -4541,7 +4353,6 @@ function bindEvents() {
       contracts,
     }).catch((err) => toast(err.message, true));
   });
-  $("#newPartyBtn").addEventListener("click", () => openPartyForm(null));
   $("#newFieldBtn").addEventListener("click", () => openFieldForm(null));
   $("#downloadTemplateBtn").addEventListener("click", () => downloadWorkbook("template"));
   $("#exportLedgerBtn").addEventListener("click", () => downloadWorkbook("ledger"));
@@ -4599,7 +4410,6 @@ async function boot() {
     await loadContracts();
     renderMeta();
     renderContracts();
-    renderParties();
     renderFields();
     renderSeals();
     renderTemplates();
@@ -4617,5 +4427,8 @@ async function boot() {
   // surfaces data written by agents while the page is open.
   startRealtime();
 }
+
+// 迁移期跨域桥：相对方档案（Vue）借用合同表单与整体刷新；随对应域迁完移除。
+window.__tengshouApp = { openContractForm, toast, refreshAfterWrite };
 
 document.addEventListener("DOMContentLoaded", boot);

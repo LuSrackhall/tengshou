@@ -2,6 +2,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,11 +10,14 @@ import (
 
 	"github.com/tdewolff/canvas"
 
+	"github.com/LuSrackhall/tengshou/internal/backup"
 	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/logging"
+	"github.com/LuSrackhall/tengshou/internal/model"
 	"github.com/LuSrackhall/tengshou/internal/pdfdoc"
 	"github.com/LuSrackhall/tengshou/internal/service"
 	"github.com/LuSrackhall/tengshou/internal/store"
+	"github.com/LuSrackhall/tengshou/internal/version"
 )
 
 // App owns the long-lived application resources.
@@ -38,6 +42,10 @@ func Open(dataDir string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A restore staged through the UI is applied before the database is
+	// opened, so the running process never swaps SQLite files underneath its
+	// readers. Failures leave the original data untouched.
+	restore, restoreErr := backup.ApplyPending(paths)
 	cfg, err := config.Load(paths)
 	if err != nil {
 		return nil, err
@@ -45,6 +53,12 @@ func Open(dataDir string) (*App, error) {
 	logger, closer, err := logging.New(paths, cfg.Log)
 	if err != nil {
 		return nil, err
+	}
+	if restoreErr != nil {
+		logger.Warn("pending backup restore was not applied", "error", restoreErr)
+	}
+	if err := paths.HardenPermissions(); err != nil {
+		logger.Warn("could not tighten data directory permissions", "error", err)
 	}
 	st, err := store.Open(paths.DB)
 	if err != nil {
@@ -59,6 +73,10 @@ func Open(dataDir string) (*App, error) {
 	}
 	svc := service.New(st, reader, cfg.Operator)
 	svc.SetDataDir(paths.Root)
+	svc.SetBackupManager(backup.New(paths, version.String(),
+		func(ctx context.Context, dest string) error { return st.Snapshot(dest) },
+		func(ctx context.Context) (int, error) { return st.SchemaVersion() },
+	))
 	a := &App{
 		Paths:     paths,
 		Config:    cfg,
@@ -67,6 +85,37 @@ func Open(dataDir string) (*App, error) {
 		Reader:    reader,
 		Service:   svc,
 		logCloser: closer,
+	}
+	if restore.Applied {
+		logger.Info("backup restore applied at startup", "backup", restore.Manifest.ID,
+			"files", len(restore.Manifest.Files), "safety_copy", restore.SafetyDir)
+		actor := cfg.Operator
+		if actor == "" {
+			actor = service.OSUser()
+		}
+		_ = st.AppendChangeLog(context.Background(), &model.ChangeLog{
+			Entity:   model.ChangeEntityBackup,
+			EntityID: restore.Manifest.ID,
+			Action:   model.ChangeActionRestore,
+			Actor:    actor,
+			Summary: fmt.Sprintf("启动时应用备份包（%d 个文件，schema v%d）；恢复前数据已留存到 %s",
+				len(restore.Manifest.Files), restore.Manifest.SchemaVersion, restore.SafetyDir),
+			CreatedAt: model.Now(),
+		})
+	}
+	// Report orphan or missing assets at startup. This never deletes files.
+	if report, err := svc.CheckIntegrity(context.Background()); err != nil {
+		logger.Warn("asset consistency check failed", "error", err)
+	} else {
+		if !report.DatabaseOK {
+			logger.Error("database integrity check failed", "error", report.DatabaseError)
+		}
+		if len(report.MissingFiles) > 0 || len(report.OrphanFiles) > 0 {
+			logger.Warn("asset consistency check found issues",
+				"missing_files", len(report.MissingFiles), "orphan_files", len(report.OrphanFiles))
+		} else {
+			logger.Info("asset consistency check passed", "checked_files", report.CheckedFiles)
+		}
 	}
 	// PDF template overlays share the HTML generator's CJK font, so a single
 	// font resolution serves both pipelines.

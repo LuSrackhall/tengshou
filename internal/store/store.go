@@ -46,6 +46,18 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
+	// Crash/power-loss guard (B9): verify the file before applying migrations
+	// or serving reads. A damaged database fails startup loudly instead of
+	// silently producing wrong documents.
+	var check string
+	if err := db.QueryRow(`PRAGMA integrity_check`).Scan(&check); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("database integrity check: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(check), "ok") {
+		db.Close()
+		return nil, fmt.Errorf("数据库完整性检查失败：%s", check)
+	}
 	s := &Store{db: db, path: path}
 	if err := s.migrate(); err != nil {
 		db.Close()
@@ -201,6 +213,62 @@ func (s *Store) Reader() (*Reader, error) {
 	return &Reader{db: db}, nil
 }
 
+// LatestSchemaVersion returns the highest migration version embedded in the
+// binary. Backups from newer versions are rejected before restore.
+func LatestSchemaVersion() int {
+	migrations, err := loadMigrations()
+	if err != nil || len(migrations) == 0 {
+		return 0
+	}
+	return migrations[len(migrations)-1].version
+}
+
+// Snapshot writes a consistent copy of the database using VACUUM INTO. The
+// destination must not exist.
+func (s *Store) Snapshot(dest string) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return err
+	}
+	_ = os.Remove(dest)
+	if _, err := s.db.Exec(`VACUUM INTO ?`, dest); err != nil {
+		return fmt.Errorf("snapshot database: %w", err)
+	}
+	_ = os.Chmod(dest, 0o600)
+	return nil
+}
+
+// IntegrityCheck runs PRAGMA integrity_check on the live database.
+func (s *Store) IntegrityCheck() error {
+	var result string
+	if err := s.db.QueryRow(`PRAGMA integrity_check`).Scan(&result); err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(result), "ok") {
+		return fmt.Errorf("database integrity check failed: %s", result)
+	}
+	return nil
+}
+
+// IntegrityCheckFile verifies a standalone SQLite file (for example a backup
+// snapshot) without touching the live connection. immutable=1 keeps the check
+// read-only even when the file has no WAL sidecars.
+func IntegrityCheckFile(path string) error {
+	dsn := "file:" + filepath.ToSlash(path) + "?mode=ro&immutable=1"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var result string
+	if err := db.QueryRow(`PRAGMA integrity_check`).Scan(&result); err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(result), "ok") {
+		return fmt.Errorf("database integrity check failed: %s", result)
+	}
+	return nil
+}
+
 // Backup writes a consistent copy of the database using VACUUM INTO.
 func (s *Store) Backup(destDir string) (string, error) {
 	if err := os.MkdirAll(destDir, 0o700); err != nil {
@@ -209,9 +277,8 @@ func (s *Store) Backup(destDir string) (string, error) {
 	name := "tengshou-" + time.Now().Format("20060102-150405") + ".db"
 	dest := filepath.Join(destDir, name)
 	tmp := dest + ".tmp"
-	_ = os.Remove(tmp)
-	if _, err := s.db.Exec(`VACUUM INTO ?`, tmp); err != nil {
-		return "", fmt.Errorf("backup database: %w", err)
+	if err := s.Snapshot(tmp); err != nil {
+		return "", err
 	}
 	if err := os.Rename(tmp, dest); err != nil {
 		return "", err

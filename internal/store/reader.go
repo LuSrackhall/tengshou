@@ -544,6 +544,52 @@ func (r *Reader) GetTemplate(ctx context.Context, id string) (model.Template, er
 	return t, err
 }
 
+// GetSignature returns one signature metadata row.
+func (r *Reader) GetSignature(ctx context.Context, id string) (model.Signature, error) {
+	sig, err := scanSignature(r.db.QueryRowContext(ctx,
+		`SELECT `+signatureColumns+` FROM signature_assets WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Signature{}, ErrNotFound
+	}
+	return sig, err
+}
+
+// ReferencedAssetPaths returns every asset path recorded by the database.
+// B9 uses it to report orphan files and missing files without deleting
+// anything. Unknown future asset tables are intentionally not guessed.
+func (r *Reader) ReferencedAssetPaths(ctx context.Context) ([]string, error) {
+	queries := []string{
+		`SELECT asset_path FROM signature_assets`,
+		`SELECT asset_path FROM seal_assets`,
+		`SELECT source_path FROM templates WHERE source_path <> ''`,
+		`SELECT pdf_path FROM templates WHERE pdf_path <> ''`,
+		`SELECT file_path FROM output_documents`,
+	}
+	out := []string{}
+	for _, query := range queries {
+		rows, err := r.db.QueryContext(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var p string
+			if err := rows.Scan(&p); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return out, nil
+}
+
 // ListSignatures returns signature metadata.
 func (r *Reader) ListSignatures(ctx context.Context, f model.ListFilter) (model.List[model.Signature], error) {
 	f.Normalize()

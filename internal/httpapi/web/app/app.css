@@ -178,6 +178,10 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 }
 .signature-summary ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); display: grid; gap: 3px; }
 .signature-summary code { color: var(--ink); }
+.signature-summary button { min-height: 24px; padding: 1px 8px; font-size: 12px; margin-left: 6px; }
+#integrityReport h3 { margin: 14px 0 4px; font-size: 14px; }
+#integrityReport ul { margin: 4px 0; padding-left: 22px; color: var(--muted); font-size: 13px; }
+#integrityReport code { color: var(--ink); }
 .sign-qr-empty {
   border: 1px dashed var(--line); border-radius: 12px; padding: 26px 18px; text-align: center;
   color: var(--muted); font-size: 13.5px;

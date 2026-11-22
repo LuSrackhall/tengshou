@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -122,6 +124,43 @@ func (s *Service) SaveSignature(ctx context.Context, in SignatureInput) (model.S
 		s.logChange(ctx, entity, entityID, model.ChangeActionUpdate, summary, nil)
 	}
 	return sig, nil
+}
+
+// ExportSignature reads one retained signature image after verifying its
+// SHA-256 against the database, then records the export in the change log.
+// Signature images live under the private data directory and are never served
+// as static files; this method is the only way out (B9).
+func (s *Service) ExportSignature(ctx context.Context, id string) ([]byte, string, error) {
+	sig, err := s.rd.GetSignature(ctx, strings.TrimSpace(id))
+	if err != nil {
+		if isNotFound(err) {
+			return nil, "", business("not_found", "签名不存在")
+		}
+		return nil, "", err
+	}
+	full, err := s.assetFile(sig.AssetPath)
+	if err != nil {
+		return nil, "", err
+	}
+	raw, err := os.ReadFile(full)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, "", business("missing_asset", "签名文件不在数据目录中，无法导出")
+		}
+		return nil, "", err
+	}
+	sum := sha256.Sum256(raw)
+	if !strings.EqualFold(hex.EncodeToString(sum[:]), strings.TrimSpace(sig.SHA256)) {
+		return nil, "", business("checksum_mismatch", "签名文件校验失败（摘要与记录不符），已拒绝导出")
+	}
+	summary := fmt.Sprintf("导出签名图片「%s」（sha256 %s…）", sig.SignerName, shortSHA(sig.SHA256))
+	if sig.ContractID != "" {
+		if contract, err := s.rd.GetContract(ctx, sig.ContractID); err == nil {
+			summary += "，合同 " + contract.ContractNo
+		}
+	}
+	s.logChange(ctx, model.ChangeEntitySignature, sig.ID, model.ChangeActionExport, summary, nil)
+	return raw, sig.ID + ".png", nil
 }
 
 // ContentSHA256 returns the content version digest of a contract: SHA-256 over

@@ -52,6 +52,11 @@ func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 			"/app/api/v1/signature-sessions",
 			"/app/api/v1/signature-sessions/{id}",
 			"/app/api/v1/signature-sessions/{id}/qr.png",
+			"/app/api/v1/signatures/{id}/export",
+			"/app/api/v1/backup/export",
+			"/app/api/v1/backup/status",
+			"/app/api/v1/backup/restore",
+			"/app/api/v1/integrity",
 		},
 	})
 }
@@ -477,9 +482,10 @@ func (s *Server) writeServiceError(w http.ResponseWriter, msg string, err error)
 			"preview_required", "missing_asset", "invalid_template":
 			status = http.StatusConflict
 		case "import_errors", "converter_unavailable", "convert_failed",
-			"invalid_pdf", "invalid_kind", "too_many_placements":
+			"invalid_pdf", "invalid_kind", "too_many_placements",
+			"invalid_backup", "confirm_required":
 			status = http.StatusUnprocessableEntity
-		case "file_too_large":
+		case "file_too_large", "backup_too_large":
 			status = http.StatusRequestEntityTooLarge
 		case "font_unavailable":
 			status = http.StatusServiceUnavailable

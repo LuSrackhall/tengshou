@@ -183,6 +183,49 @@ func (p Paths) EnsureDirs() error {
 	return nil
 }
 
+// HardenPermissions applies least-privilege permissions to the data directory:
+// directories 0700 and regular files 0600. Signature and seal images are
+// sensitive assets, so assets/ and templates/ are walked on startup. On
+// Windows the POSIX bits are largely advisory; ACLs still decide access.
+func (p Paths) HardenPermissions() error {
+	dirs := []string{p.Root, p.Assets, p.Templates, p.Outputs, p.Backups, p.Logs, p.Fonts}
+	for _, dir := range dirs {
+		if err := os.Chmod(dir, 0o700); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("tighten %s: %w", dir, err)
+		}
+	}
+	for _, file := range []string{p.ConfigFile, p.DB} {
+		if err := os.Chmod(file, 0o600); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("tighten %s: %w", file, err)
+		}
+	}
+	for _, dir := range []string{p.Assets, p.Templates} {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					return nil
+				}
+				return err
+			}
+			if d.IsDir() {
+				return os.Chmod(path, 0o700)
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if info.Mode().IsRegular() {
+				return os.Chmod(path, 0o600)
+			}
+			return nil
+		})
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("tighten %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
 // Default returns the built-in configuration.
 func Default() Config {
 	return Config{

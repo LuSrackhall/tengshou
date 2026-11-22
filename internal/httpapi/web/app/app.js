@@ -37,8 +37,14 @@ const TYPE_LABELS = {
   select: "单选", bool: "是/否", image: "图片路径", party: "相对方", status: "状态",
 };
 
-const ENTITY_LABELS = { contract: "合同", party: "相对方", field: "字段", seal: "公章", template: "模板" };
-const ACTION_LABELS = { create: "新建", update: "修改", delete: "删除", archive: "归档", import: "导入" };
+const ENTITY_LABELS = {
+  contract: "合同", party: "相对方", field: "字段", seal: "公章", template: "模板",
+  signature: "签名", backup: "备份",
+};
+const ACTION_LABELS = {
+  create: "新建", update: "修改", delete: "删除", archive: "归档", import: "导入",
+  export: "导出", restore: "恢复", generate: "生成",
+};
 
 /* ---------- 基础工具 ---------- */
 
@@ -602,7 +608,8 @@ function signaturesSummaryHTML(detail) {
   };
   const items = detail.signatures.map((sig) => {
     const version = sig.content_sha256 ? ` · 内容版本 <code>${esc(sig.content_sha256.slice(0, 12))}</code>` : "";
-    return `<li><span class="badge active">${esc(roleOf(sig.party_id))}</span> ${esc(sig.signer_name)} · ${esc(fmtDate(sig.captured_at))}${version}</li>`;
+    return `<li><span class="badge active">${esc(roleOf(sig.party_id))}</span> ${esc(sig.signer_name)} · ${esc(fmtDate(sig.captured_at))}${version}
+      <button type="button" data-export-signature="${esc(sig.id)}">导出</button></li>`;
   }).join("");
   return `<div class="signature-summary"><strong>已采集签名 ${detail.signatures.length} 个</strong>
     <ul>${items}</ul></div>`;
@@ -2536,6 +2543,161 @@ function showImportResult(modal, result, blocked) {
   target.scrollIntoView({ block: "nearest" });
 }
 
+/* ---------- 数据安全（B9 备份 / 恢复 / 一致性） ---------- */
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+async function loadBackupStatus() {
+  const status = await api("/app/api/v1/backup/status");
+  renderBackupStatus(status);
+}
+
+function renderBackupStatus(status) {
+  const el = $("#backupStatus");
+  if (!el) return;
+  if (!status) { el.innerHTML = ""; return; }
+  const pending = status.pending;
+  const pendingHTML = pending
+    ? `<span class="badge update">待重启生效</span> 备份包 ${esc(pending.id)}（${esc(fmtDate(pending.staged_at))} 校验通过，${pending.file_count} 个文件）`
+    : `<span class="badge active">已就绪</span> 恢复包会在校验通过后暂存，重启腾手才生效`;
+  el.innerHTML = `
+    <span>数据目录：<code>${esc(status.data_dir || "")}</code></span>
+    <span>${pendingHTML}</span>`;
+}
+
+async function exportBackup() {
+  const btn = $("#exportBackupBtn");
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "正在打包…";
+  try {
+    const res = await fetch("/app/api/v1/backup/export", { headers: { "X-Tengshou-App": "1" } });
+    if (!res.ok) {
+      let message = `导出失败（${res.status}）`;
+      try {
+        const data = await res.json();
+        if (data && data.error && data.error.message) message = data.error.message;
+      } catch (_) { /* ignore */ }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    let filename = "tengshou-backup.zip";
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = /filename="([^"]+)"/.exec(disposition);
+    if (match) filename = match[1];
+    downloadBlob(blob, filename);
+    toast("完整备份包已开始下载；导出记录已写入变更记录");
+    await loadBackupStatus().catch(() => {});
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+async function restoreBackupFromFile(event) {
+  const input = event.target;
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return;
+  if (!/\.zip$/i.test(file.name)) {
+    toast("请选择 .zip 备份包", true);
+    return;
+  }
+  const ok = window.confirm(
+    `将使用「${file.name}」整体替换当前数据：数据库、签名/公章图片、模板、已生成 PDF 和配置。\n\n` +
+    "恢复包会先做完整性与摘要校验；校验通过后暂存，重启腾手才生效。\n" +
+    "当前数据会先自动留一份“恢复前副本”；校验失败时原数据完全不动。\n\n确认恢复？");
+  if (!ok) return;
+  const btn = $("#restoreBackupBtn");
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "正在校验…";
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/app/api/v1/backup/restore", {
+      method: "POST",
+      headers: { "X-Tengshou-App": "1" },
+      body: form,
+    });
+    let data = null;
+    try { data = await res.json(); } catch (_) { /* ignore */ }
+    if (!res.ok) {
+      const message = (data && data.error && data.error.message) || `恢复失败（${res.status}）`;
+      throw new Error(message);
+    }
+    toast("备份包校验通过并已暂存。请重启腾手，恢复才会生效。");
+    await loadBackupStatus().catch(() => {});
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+async function checkIntegrity() {
+  const box = $("#integrityReport");
+  box.innerHTML = `<p class="hint">正在检查数据库与资产文件…</p>`;
+  try {
+    const report = await api("/app/api/v1/integrity");
+    const missing = report.missing_files || [];
+    const orphans = report.orphan_files || [];
+    const db = report.database_ok
+      ? `<span class="badge active">数据库完整性检查通过</span>`
+      : `<span class="badge error">数据库完整性检查失败</span> ${esc(report.database_error || "")}`;
+    const list = (items) => items.length
+      ? `<ul>${items.map((item) =>
+          `<li><code>${esc(typeof item === "string" ? item : item.path)}</code></li>`).join("")}</ul>`
+      : `<p class="hint">无</p>`;
+    box.innerHTML = `
+      <div class="change-card">
+        <div class="change-head">${db}
+          <span class="who">${esc(fmtDate(report.checked_at))} · 已核对 ${report.checked_files || 0} 个文件</span></div>
+        <h3>数据库有记录但文件缺失（${missing.length}）</h3>${list(missing)}
+        <h3>文件存在但数据库没有记录（${orphans.length}）</h3>${list(orphans)}
+        <p class="hint">此检查只报告，不自动删除任何文件。</p>
+      </div>`;
+  } catch (err) {
+    box.innerHTML = `<div class="form-errors">${esc(err.message)}</div>`;
+  }
+}
+
+async function exportSignature(id) {
+  if (!window.confirm("签名图片是敏感资产：导出后可能被复制、传播，离开本机数据目录。\n\n确认导出这份签名？")) {
+    return;
+  }
+  try {
+    const res = await fetch(`/app/api/v1/signatures/${encodeURIComponent(id)}/export`, {
+      method: "POST",
+      headers: { "X-Tengshou-App": "1", "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: true }),
+    });
+    if (!res.ok) {
+      let data = null;
+      try { data = await res.json(); } catch (_) { /* ignore */ }
+      const message = (data && data.error && data.error.message) || `导出失败（${res.status}）`;
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    downloadBlob(blob, `${id}.png`);
+    toast("签名图片已导出；导出操作已写入变更记录");
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
 /* ---------- 页面切换 ---------- */
 
 function switchTab(tab) {
@@ -2545,6 +2707,7 @@ function switchTab(tab) {
   if (tab === "changelog") loadChangelog().catch((err) => toast(err.message, true));
   if (tab === "seals") loadSeals().then(renderSeals).catch((err) => toast(err.message, true));
   if (tab === "templates") loadTemplates().then(renderTemplates).catch((err) => toast(err.message, true));
+  if (tab === "data") loadBackupStatus().catch((err) => toast(err.message, true));
 }
 
 async function refreshAfterWrite() {
@@ -2576,6 +2739,14 @@ async function refreshAfterWrite() {
 function bindEvents() {
   $$("#tabs button").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
+  });
+  $("#exportBackupBtn").addEventListener("click", exportBackup);
+  $("#restoreBackupBtn").addEventListener("click", () => $("#backupFileInput").click());
+  $("#backupFileInput").addEventListener("change", restoreBackupFromFile);
+  $("#checkIntegrityBtn").addEventListener("click", checkIntegrity);
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-export-signature]");
+    if (button) exportSignature(button.dataset.exportSignature);
   });
   $("#yearSelect").addEventListener("change", async (e) => {
     state.year = e.target.value;

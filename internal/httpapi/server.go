@@ -243,6 +243,15 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /app/api/v1/templates/{id}/generate", s.handleAppGenerateContract)
 	m.HandleFunc("GET /app/api/v1/converters", s.handleAppConverters)
 	m.HandleFunc("GET /app/api/v1/documents/{id}/file", s.handleAppDocumentFile)
+
+	// B9 data security: complete backup export, staged restore, consistency
+	// report and audited signature export.
+	m.HandleFunc("GET /app/api/v1/backup/export", s.handleAppBackupExport)
+	m.HandleFunc("GET /app/api/v1/backup/status", s.handleAppBackupStatus)
+	m.HandleFunc("POST /app/api/v1/backup/restore", s.handleAppBackupRestore)
+	m.HandleFunc("GET /app/api/v1/integrity", s.handleAppIntegrity)
+	m.HandleFunc("POST /app/api/v1/signatures/{id}/export", s.handleAppExportSignature)
+
 	m.HandleFunc("GET /app/api/v1", s.handleAppAPIRoot)
 
 	// B5 LAN signature capture. Signing sessions are created from the
@@ -315,7 +324,13 @@ func (s *Server) withAppGuard(next http.Handler) http.Handler {
 						"缺少 X-Tengshou-App 请求头")
 					return
 				}
-				if ct := r.Header.Get("Content-Type"); ct != "" &&
+				// Narrow B9 exception: the restore endpoint accepts a streamed
+				// multipart zip instead of a base64 JSON body. Loopback, Origin
+				// and X-Tengshou-App checks above still apply.
+				multipartRestore := r.Method == http.MethodPost &&
+					r.URL.Path == "/app/api/v1/backup/restore" &&
+					strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data")
+				if ct := r.Header.Get("Content-Type"); !multipartRestore && ct != "" &&
 					!strings.HasPrefix(strings.ToLower(ct), "application/json") {
 					writeError(w, http.StatusUnsupportedMediaType, "json_required",
 						"请求体必须是 application/json")

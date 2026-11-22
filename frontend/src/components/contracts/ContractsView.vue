@@ -6,9 +6,10 @@
 // 结构与 app.js renderContracts 的输出一致（toolbar / summary / data-table /
 // actions 类名不变），数据走 frontend/src/api 的 typed 端点。
 //
-// 跨域：生成/签名/批量对话框与 Excel 导入仍属 app.js，经 bridge/app.ts 调用；
-// 「以此档案新建合同」「历史合同」等入口经 tengshou:open-contract-form 事件
-// 打开本域表单。外部写入经 app.js 派发的 tengshou:data-changed 到达后重取。
+// 跨域：扫码签名、批量生成对话框与 Excel 导入仍属 app.js，经 bridge/app.ts
+// 调用；「以此档案新建合同」「历史合同」等入口经 tengshou:open-contract-form
+// 事件打开本域表单。合同详情里的生成面板由本域 Vue 组件渲染；外部写入经
+// app.js 派发的 tengshou:data-changed 到达后重取。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   deleteContract as deleteContractRequest,

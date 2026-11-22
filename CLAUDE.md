@@ -28,7 +28,7 @@
 阶段 0 已引入 Vite + Vue 3 构建管线（详见 `docs/frontend.md`），界面主体
 仍由 `internal/httpapi/web/app/app.js` 驱动。迁移完成前：
 
-- **存量 `app.js` 只许减不许增**：基线 3372 行（阶段 1 迁出合同台账后），
+- **存量 `app.js` 只许减不许增**：基线 3139 行（阶段 1 迁出合同详情生成面板后），
   `scripts/check-frontend-structure.sh` 在 CI 中把关，上浮即失败。
 - **新功能一律落 Vue 组件**：不再向 `app.js` 添加新功能；新增功能与较大改造
   应在 Vue 组件中实现，并同步减少 `app.js`（至少不增加）。

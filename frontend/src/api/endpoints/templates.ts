@@ -11,8 +11,10 @@ import {
   del,
   encodePathSegment,
   get,
+  getFile,
   post,
   put,
+  type DownloadedFile,
   type RequestOptions,
 } from "../client";
 import type {
@@ -169,6 +171,14 @@ export function listDocuments(
 /** 生成 PDF 的下载/预览地址。 */
 export function documentFileUrl(id: string): string {
   return apiUrl(`/documents/${enc(id)}/file`);
+}
+
+/** 下载一份生成记录的 PDF（GET /documents/{id}/file）。 */
+export function downloadDocumentFile(
+  id: string,
+  options: RequestOptions = {},
+): Promise<DownloadedFile> {
+  return getFile(`/documents/${enc(id)}/file`, options);
 }
 
 /** GET /converters：Word→PDF 转换程序可用性。 */

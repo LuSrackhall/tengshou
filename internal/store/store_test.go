@@ -360,3 +360,34 @@ func TestMigrationUpgradesB1Database(t *testing.T) {
 		t.Fatalf("legacy signature should have empty B5 links: %+v", sigs.Items[0])
 	}
 }
+
+// TestLatestSuccessfulDocumentUsesInsertionOrder pins the regenerate source to
+// the most recently inserted document. created_at is second-precision, so the
+// ids are chosen to make the old ORDER BY created_at DESC, id DESC pick the
+// wrong row: only rowid ordering returns the second document.
+func TestLatestSuccessfulDocumentUsesInsertionOrder(t *testing.T) {
+	st, _ := openStore(t)
+	ctx := context.Background()
+	contract := model.Contract{Title: "B4 排序测试"}
+	if err := st.PutContract(ctx, &contract); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	first := model.OutputDocument{ID: "doc_z", ContractID: contract.ID, FilePath: "outputs/first.pdf",
+		SHA256: "a", Status: model.DocumentStatusSuccess, CreatedAt: at}
+	second := model.OutputDocument{ID: "doc_a", ContractID: contract.ID, FilePath: "outputs/second.pdf",
+		SHA256: "b", Status: model.DocumentStatusSuccess, CreatedAt: at}
+	for _, d := range []*model.OutputDocument{&first, &second} {
+		if err := st.PutOutputDocument(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reader := mustReader(t, st)
+	got, err := reader.LatestSuccessfulDocument(ctx, contract.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != second.ID {
+		t.Fatalf("latest = %s, want %s (insertion order; id order would pick %s)", got.ID, second.ID, first.ID)
+	}
+}

@@ -187,10 +187,14 @@ func (r *Reader) GetDocument(ctx context.Context, id string) (model.OutputDocume
 
 // LatestSuccessfulDocument returns the newest successful PDF of a contract.
 // Regenerate flows use it as the default source document.
+//
+// created_at has second precision, so several documents can share a timestamp;
+// rowid gives strict insertion order. Ordering by id would pick a random row
+// within the same second and make regenerate point at an older document.
 func (r *Reader) LatestSuccessfulDocument(ctx context.Context, contractID string) (model.OutputDocument, error) {
 	d, err := scanDocument(r.db.QueryRowContext(ctx,
 		`SELECT `+documentColumns+` FROM output_documents
-		 WHERE contract_id = ? AND status = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
+		 WHERE contract_id = ? AND status = ? ORDER BY rowid DESC LIMIT 1`,
 		contractID, model.DocumentStatusSuccess))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.OutputDocument{}, ErrNotFound
@@ -471,7 +475,7 @@ func (r *Reader) listSignaturesForContract(ctx context.Context, contractID strin
 func (r *Reader) listDocumentsForContract(ctx context.Context, contractID string) ([]model.OutputDocument, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+documentColumns+` FROM output_documents WHERE contract_id = ?
-		 ORDER BY created_at DESC, id`, contractID)
+		 ORDER BY created_at DESC, rowid DESC`, contractID)
 	if err != nil {
 		return nil, err
 	}
@@ -794,7 +798,7 @@ func (r *Reader) ListDocuments(ctx context.Context, f model.ListFilter) (model.L
 		return model.List[model.OutputDocument]{}, err
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT `+documentColumns+` FROM output_documents WHERE `+clause+
-		` ORDER BY created_at DESC, id LIMIT ? OFFSET ?`, append(args, f.Limit, f.Offset)...)
+		` ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`, append(args, f.Limit, f.Offset)...)
 	if err != nil {
 		return model.List[model.OutputDocument]{}, err
 	}

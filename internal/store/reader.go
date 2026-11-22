@@ -79,23 +79,25 @@ func scanParty(sc scanner) (model.Party, error) {
 func scanContract(sc scanner) (model.Contract, error) {
 	var c model.Contract
 	var templateID, partyAID, partyBID sql.NullString
-	var contractNo, title, ctype, status, signedOn, validFrom, validTo, dataJSON, createdAt, updatedAt string
+	var contractNo, title, ctype, status, signedOn, validFrom, validTo, dataJSON string
+	var sourceContractID, createdAt, updatedAt string
 	if err := sc.Scan(&c.ID, &contractNo, &c.Year, &title, &ctype, &templateID,
 		&partyAID, &partyBID, &status, &signedOn, &validFrom, &validTo, &c.Amount,
-		&dataJSON, &createdAt, &updatedAt); err != nil {
+		&dataJSON, &sourceContractID, &createdAt, &updatedAt); err != nil {
 		return c, err
 	}
 	c.ContractNo, c.Title, c.Type, c.Status = contractNo, title, ctype, status
 	c.TemplateID, c.PartyAID, c.PartyBID = templateID.String, partyAID.String, partyBID.String
 	c.SignedOn, c.ValidFrom, c.ValidTo = signedOn, validFrom, validTo
 	c.Data = parseJSONMap(dataJSON)
+	c.SourceContractID = sourceContractID
 	c.CreatedAt, c.UpdatedAt = parseTime(createdAt), parseTime(updatedAt)
 	return c, nil
 }
 
 const contractColumns = `id, contract_no, year, title, type, template_id, party_a_id,
 	party_b_id, status, signed_on, valid_from, valid_to, amount, data_json,
-	created_at, updated_at`
+	source_contract_id, created_at, updated_at`
 
 func scanSignature(sc scanner) (model.Signature, error) {
 	var sig model.Signature
@@ -265,6 +267,10 @@ func (r *Reader) ListContracts(ctx context.Context, f model.ListFilter) (model.L
 	if f.Year > 0 {
 		where = append(where, "year = ?")
 		args = append(args, f.Year)
+	}
+	if partyID := strings.TrimSpace(f.PartyID); partyID != "" {
+		where = append(where, "(party_a_id = ? OR party_b_id = ?)")
+		args = append(args, partyID, partyID)
 	}
 	clause := strings.Join(where, " AND ")
 	var total int

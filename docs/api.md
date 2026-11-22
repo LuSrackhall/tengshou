@@ -61,7 +61,7 @@ X-Api-Token: <token>
 | GET | `/api/v1/fields?entity=contract\|party` | 字段定义（运行时新增字段立即可见） |
 | GET | `/api/v1/parties?q=&limit=&offset=` | 相对方列表（按姓名 / 证件号 / 电话搜索） |
 | GET | `/api/v1/parties/{id}` | 相对方详情 |
-| GET | `/api/v1/contracts?q=&status=&year=&limit=&offset=` | 合同列表；`year` 省略即跨年查询 |
+| GET | `/api/v1/contracts?q=&status=&year=&party_id=&limit=&offset=` | 合同列表；`year` 省略即跨年查询；`party_id` 按相对方（甲方或乙方）过滤 |
 | GET | `/api/v1/contracts/{id}` | 合同详情（相对方、签名、公章关联、模板版本、PDF 记录） |
 | GET | `/api/v1/templates?q=&limit=&offset=` | 模板版本列表（不含 HTML 正文；PDF 模板含 kind / 页数 / 位置映射元数据） |
 | GET | `/api/v1/templates/{id}` | 模板详情（HTML 模板含正文；PDF 模板含 placements 标定位置） |

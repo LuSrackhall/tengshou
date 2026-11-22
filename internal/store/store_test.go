@@ -361,6 +361,132 @@ func TestMigrationUpgradesB1Database(t *testing.T) {
 	}
 }
 
+// TestContractSourceRoundTrip pins the B7 provenance column: it is written on
+// insert, readable through every contract query, and ignored by updates.
+func TestContractSourceRoundTrip(t *testing.T) {
+	st, _ := openStore(t)
+	ctx := context.Background()
+	party := model.Party{Name: "张三"}
+	if err := st.PutParty(ctx, &party); err != nil {
+		t.Fatal(err)
+	}
+	source := model.Contract{Title: "2025 房屋租赁合同", Year: 2025, PartyBID: party.ID}
+	if err := st.PutContract(ctx, &source); err != nil {
+		t.Fatal(err)
+	}
+	renewed := model.Contract{Title: "2026 房屋租赁合同", Year: 2026,
+		PartyBID: party.ID, SourceContractID: source.ID}
+	if err := st.PutContract(ctx, &renewed); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := model.Contract{Title: "无关合同", Year: 2026}
+	if err := st.PutContract(ctx, &unrelated); err != nil {
+		t.Fatal(err)
+	}
+	reader := mustReader(t, st)
+	got, err := reader.GetContract(ctx, renewed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SourceContractID != source.ID {
+		t.Fatalf("source_contract_id = %q, want %q", got.SourceContractID, source.ID)
+	}
+	// Party history filtering uses either side of the contract.
+	byParty, err := reader.ListContracts(ctx, model.ListFilter{PartyID: party.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byParty.Total != 2 {
+		t.Fatalf("party filter total = %d, want 2", byParty.Total)
+	}
+
+	// Updates ignore the provenance column: clearing it in the input keeps the
+	// stored link instead of erasing the audit trail.
+	got.SourceContractID = ""
+	got.Title = "2026 房屋租赁合同（修订）"
+	if err := st.PutContract(ctx, &got); err != nil {
+		t.Fatal(err)
+	}
+	again, err := reader.GetContract(ctx, renewed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.SourceContractID != source.ID {
+		t.Fatalf("update erased source link: %q", again.SourceContractID)
+	}
+	if again.Title != "2026 房屋租赁合同（修订）" {
+		t.Fatalf("update lost title: %q", again.Title)
+	}
+}
+
+// TestMigrationAddsContractSourceColumn simulates a database created before B7
+// (schema version 7, no source column) and checks the upgrade keeps every row
+// while adding the new column with an empty default.
+func TestMigrationAddsContractSourceColumn(t *testing.T) {
+	st, path := openStore(t)
+	ctx := context.Background()
+	legacy := model.Contract{Title: "B7 之前的合同", Year: 2025, Data: map[string]any{"rent": 800.0}}
+	if err := st.PutContract(ctx, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP INDEX idx_contracts_source`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE contracts DROP COLUMN source_contract_id`); err != nil {
+		t.Fatalf("drop source column: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM schema_migrations WHERE version = 8`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	upgraded, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("upgrade v7 database: %v", err)
+	}
+	defer upgraded.Close()
+	if v, _ := upgraded.SchemaVersion(); v != store.LatestSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", v, store.LatestSchemaVersion())
+	}
+	reader := mustReader(t, upgraded)
+	got, err := reader.GetContract(ctx, legacy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "B7 之前的合同" || got.Year != 2025 || got.Data["rent"] != 800.0 {
+		t.Fatalf("legacy contract changed by migration: %+v", got)
+	}
+	if got.SourceContractID != "" {
+		t.Fatalf("new column default = %q, want empty", got.SourceContractID)
+	}
+	// New contracts written after the upgrade can carry a source link; the
+	// legacy row keeps its empty provenance because updates never write it.
+	fresh := model.Contract{Title: "升级后续签合同", Year: 2026, SourceContractID: legacy.ID}
+	if err := upgraded.PutContract(ctx, &fresh); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := reader.GetContract(ctx, fresh.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.SourceContractID != legacy.ID {
+		t.Fatalf("post-upgrade source = %q", reloaded.SourceContractID)
+	}
+	legacyAgain, err := reader.GetContract(ctx, legacy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyAgain.SourceContractID != "" {
+		t.Fatalf("legacy row gained a source link: %q", legacyAgain.SourceContractID)
+	}
+}
+
 // TestLatestSuccessfulDocumentUsesInsertionOrder pins the regenerate source to
 // the most recently inserted document. created_at is second-precision, so the
 // ids are chosen to make the old ORDER BY created_at DESC, id DESC pick the

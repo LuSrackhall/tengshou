@@ -154,7 +154,9 @@ func (s *Server) handleGetParty(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListContracts(w http.ResponseWriter, r *http.Request) {
-	items, err := s.opts.Reader.ListContracts(r.Context(), filter(r))
+	f := filter(r)
+	f.PartyID = strings.TrimSpace(r.URL.Query().Get("party_id"))
+	items, err := s.opts.Reader.ListContracts(r.Context(), f)
 	if err != nil {
 		s.internalError(w, "list contracts", err)
 		return

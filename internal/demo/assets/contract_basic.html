@@ -4,7 +4,7 @@
 <body>
 <h1 style="text-align:center;font-size:22pt">{{.Contract.Title}}</h1>
 
-<p style="text-align:center;color:#666">合同编号：{{.Contract.ID}}</p>
+<p style="text-align:center;color:#666">合同编号：{{.Contract.ContractNo}}</p>
 
 <p><strong>甲方（出租方）：</strong>{{.PartyA.Name}}</p>
 <p>统一社会信用代码/身份证号：{{default "—" .PartyA.IDNumber}}</p>
@@ -21,7 +21,7 @@
 <table style="font-size:10pt">
   <tr><th style="width:35mm">项目</th><th>内容</th></tr>
   <tr><td>房屋坐落</td><td>{{.Data.address}}</td></tr>
-  <tr><td>建筑面积</td><td>{{.Data.area}}</td></tr>
+  <tr><td>建筑面积</td><td>{{.Data.area_sqm}} 平方米</td></tr>
   <tr><td>租赁用途</td><td>{{.Data.usage}}</td></tr>
   <tr><td>月租金</td><td>{{money .Data.rent}} 元</td></tr>
   <tr><td>押金</td><td>{{money .Data.deposit}} 元</td></tr>
@@ -50,6 +50,6 @@
 <p style="margin-top:8mm">乙方（签字）：</p>
 <p><img src="{{.Data.signature}}" style="width:45mm"></p>
 
-<p style="margin-top:10mm">签署日期：{{cnDate .Data.signed_on}}</p>
+<p style="margin-top:10mm">签署日期：{{cnDate .Contract.SignedOn}}</p>
 </body>
 </html>

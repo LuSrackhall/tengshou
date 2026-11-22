@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,8 +42,8 @@ func TestMigrationsOnEmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 {
-		t.Fatalf("schema version = %d, want 2", version)
+	if version != 3 {
+		t.Fatalf("schema version = %d, want 3", version)
 	}
 	// Re-opening is idempotent.
 	st2, err := store.Open(st.Path())
@@ -50,7 +51,7 @@ func TestMigrationsOnEmptyDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	if v, _ := st2.SchemaVersion(); v != 2 {
+	if v, _ := st2.SchemaVersion(); v != 3 {
 		t.Fatalf("version after reopen = %d", v)
 	}
 }
@@ -84,7 +85,7 @@ func TestMigrationFromOldDatabase(t *testing.T) {
 		t.Fatalf("migrate old db: %v", err)
 	}
 	defer reopened.Close()
-	if v, _ := reopened.SchemaVersion(); v != 2 {
+	if v, _ := reopened.SchemaVersion(); v != 3 {
 		t.Fatalf("version = %d", v)
 	}
 	db2, err := sql.Open("sqlite", "file:"+path)
@@ -249,5 +250,70 @@ func TestBackup(t *testing.T) {
 	stats, err := reader.Stats(ctx)
 	if err != nil || stats.Parties != 1 {
 		t.Fatalf("backup stats = %+v err=%v", stats, err)
+	}
+}
+
+func TestMigrationUpgradesB1Database(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "b1.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Minimal B1 schema: contracts without B2 columns, migrations 1 and 2
+	// already recorded. Legacy rows must survive the upgrade.
+	_, err = db.Exec(`
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL
+		);
+		INSERT INTO schema_migrations VALUES (1, '0001_init.sql', '2026-11-01T00:00:00Z');
+		INSERT INTO schema_migrations VALUES (2, '0002_api_indexes.sql', '2026-11-01T00:00:00Z');
+		CREATE TABLE contracts (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			template_id TEXT,
+			party_a_id TEXT,
+			party_b_id TEXT,
+			status TEXT NOT NULL DEFAULT 'draft',
+			signed_on TEXT NOT NULL DEFAULT '',
+			valid_from TEXT NOT NULL DEFAULT '',
+			valid_to TEXT NOT NULL DEFAULT '',
+			data_json TEXT NOT NULL DEFAULT '{}',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		INSERT INTO contracts (id, title, status, signed_on, data_json, created_at, updated_at)
+		VALUES ('legacy-1', '老合同', 'active', '2024-05-01', '{"rent":800}',
+		        '2024-05-01T09:00:00Z', '2024-05-01T09:00:00Z');
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("upgrade B1 database: %v", err)
+	}
+	defer st.Close()
+	reader := mustReader(t, st)
+	ctx := context.Background()
+	contract, err := reader.GetContract(ctx, "legacy-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contract.ContractNo != "LEGACY-legacy-1" || contract.Year != 2024 {
+		t.Fatalf("backfill = %q %d", contract.ContractNo, contract.Year)
+	}
+	if contract.Data["rent"] != 800.0 {
+		t.Fatalf("legacy data lost: %#v", contract.Data)
+	}
+	fields, err := reader.ListFieldDefinitions(ctx, model.FieldEntityContract, false)
+	if err != nil || len(fields) != 10 {
+		t.Fatalf("seeded contract fields = %d err=%v", len(fields), err)
+	}
+	dup := model.Contract{ID: "legacy-2", ContractNo: "LEGACY-legacy-1", Year: 2024, Title: "重复"}
+	if err := st.PutContract(ctx, &dup); !errors.Is(err, store.ErrDuplicateContractNo) {
+		t.Fatalf("duplicate number error = %v", err)
 	}
 }

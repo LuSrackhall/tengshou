@@ -54,9 +54,10 @@ X-Api-Token: <token>
 | GET | `/api/v1/health` | 健康检查（公开） |
 | GET | `/api/v1/schema` | 机器可读的数据契约与字段说明 |
 | GET | `/api/v1/stats` | 各类记录数量 |
+| GET | `/api/v1/fields?entity=contract\|party` | 字段定义（运行时新增字段立即可见） |
 | GET | `/api/v1/parties?q=&limit=&offset=` | 相对方列表（按姓名 / 证件号 / 电话搜索） |
 | GET | `/api/v1/parties/{id}` | 相对方详情 |
-| GET | `/api/v1/contracts?q=&status=&limit=&offset=` | 合同列表（`draft/active/archived`） |
+| GET | `/api/v1/contracts?q=&status=&year=&limit=&offset=` | 合同列表；`year` 省略即跨年查询 |
 | GET | `/api/v1/contracts/{id}` | 合同详情（相对方、签名、模板版本、PDF 记录） |
 | GET | `/api/v1/templates?q=&limit=&offset=` | 模板列表（不含 HTML 正文） |
 | GET | `/api/v1/templates/{id}` | 模板详情（含 HTML） |
@@ -85,7 +86,11 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 {
   "contract": {
     "id": "demo-contract-1",
+    "contract_no": "DEMO-2026-001",
+    "year": 2026,
     "title": "幸福村 3 组 12 号房屋租赁合同",
+    "type": "房屋租赁",
+    "amount": 1200,
     "status": "active",
     "party_a_id": "demo-party-a",
     "party_b_id": "demo-party-b",
@@ -102,6 +107,13 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   "documents": [{"id": "demo-document-1", "page_count": 2, "sha256": "...", "..." : "..."}]
 }
 ```
+
+## 应用写入接口（仅本机）
+
+台账界面使用 `/app/api/v1/*`：字段、档案、合同 CRUD，变更记录，Excel 模板 /
+台账下载与导入预览/提交。该接口**只接受回环地址**，写请求必须带
+`X-Tengshou-App: 1`；跨站 Origin 会被拒绝。它不面向外部 agent，契约也不承诺稳定。
+字段、合并与验收细节见 [b2-data.md](b2-data.md)。
 
 ## 稳定性
 

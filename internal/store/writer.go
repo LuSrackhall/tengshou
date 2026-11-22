@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/LuSrackhall/tengshou/internal/model"
 )
@@ -76,6 +79,15 @@ func (s *Store) PutContract(ctx context.Context, c *model.Contract) error {
 	default:
 		return fmt.Errorf("invalid contract status %q", c.Status)
 	}
+	if c.ContractNo == "" {
+		// Direct store callers bypass the service numbering; keep a stable,
+		// unique fallback so the uniqueness index never sees an empty number
+		// on a persisted row.
+		c.ContractNo = "C-" + c.ID
+	}
+	if c.Year == 0 {
+		c.Year = guessYear(c.SignedOn, model.Now())
+	}
 	now := model.Now()
 	if c.CreatedAt.IsZero() {
 		c.CreatedAt = now
@@ -86,22 +98,39 @@ func (s *Store) PutContract(ctx context.Context, c *model.Contract) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO contracts (id, title, template_id, party_a_id, party_b_id, status,
-			signed_on, valid_from, valid_to, data_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO contracts (id, contract_no, year, title, type, template_id, party_a_id,
+			party_b_id, status, signed_on, valid_from, valid_to, amount, data_json,
+			created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
-			title = excluded.title, template_id = excluded.template_id,
+			contract_no = excluded.contract_no, year = excluded.year,
+			title = excluded.title, type = excluded.type,
+			template_id = excluded.template_id,
 			party_a_id = excluded.party_a_id, party_b_id = excluded.party_b_id,
 			status = excluded.status, signed_on = excluded.signed_on,
 			valid_from = excluded.valid_from, valid_to = excluded.valid_to,
+			amount = excluded.amount,
 			data_json = excluded.data_json, updated_at = excluded.updated_at`,
-		c.ID, c.Title, nullString(c.TemplateID), nullString(c.PartyAID), nullString(c.PartyBID),
-		c.Status, c.SignedOn, c.ValidFrom, c.ValidTo, string(data),
+		c.ID, c.ContractNo, c.Year, c.Title, c.Type, nullString(c.TemplateID),
+		nullString(c.PartyAID), nullString(c.PartyBID), c.Status,
+		c.SignedOn, c.ValidFrom, c.ValidTo, c.Amount, string(data),
 		formatTime(c.CreatedAt), formatTime(c.UpdatedAt))
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return fmt.Errorf("%w: %s", ErrDuplicateContractNo, c.ContractNo)
+		}
 		return fmt.Errorf("put contract: %w", err)
 	}
 	return nil
+}
+
+func guessYear(date string, now time.Time) int {
+	if len(date) >= 4 {
+		if y, err := strconv.Atoi(date[:4]); err == nil && y >= 1900 && y <= 2200 {
+			return y
+		}
+	}
+	return now.Year()
 }
 
 // PutTemplate inserts or updates a template.

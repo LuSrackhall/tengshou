@@ -94,6 +94,8 @@ type Config struct {
 	HTTP    HTTP `json:"http"`
 	PDF     PDF  `json:"pdf"`
 	Log     Log  `json:"log"`
+	// Operator is the name recorded in the change log. Empty means the OS user.
+	Operator string `json:"operator,omitempty"`
 }
 
 // ResolvePaths returns the data directory layout for dir. An empty dir means

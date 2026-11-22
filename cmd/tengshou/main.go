@@ -69,7 +69,7 @@ func run() error {
 		Title:  "腾手",
 		Width:  1080,
 		Height: 760,
-		URL:    "/",
+		URL:    "/app/",
 		Mac: application.MacWindow{
 			TitleBar: application.MacTitleBarDefault,
 		},
@@ -93,6 +93,7 @@ func listenWithFallback(a *app.App) (*httpapi.Server, net.Listener, error) {
 		cfg.HTTP.Port = port
 		server := httpapi.New(httpapi.Options{
 			Reader:  a.Reader,
+			Service: a.Service,
 			Logger:  a.Logger,
 			Config:  cfg,
 			Version: version.String(),

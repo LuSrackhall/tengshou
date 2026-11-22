@@ -79,12 +79,13 @@ func scanParty(sc scanner) (model.Party, error) {
 func scanContract(sc scanner) (model.Contract, error) {
 	var c model.Contract
 	var templateID, partyAID, partyBID sql.NullString
-	var title, status, signedOn, validFrom, validTo, dataJSON, createdAt, updatedAt string
-	if err := sc.Scan(&c.ID, &title, &templateID, &partyAID, &partyBID, &status,
-		&signedOn, &validFrom, &validTo, &dataJSON, &createdAt, &updatedAt); err != nil {
+	var contractNo, title, ctype, status, signedOn, validFrom, validTo, dataJSON, createdAt, updatedAt string
+	if err := sc.Scan(&c.ID, &contractNo, &c.Year, &title, &ctype, &templateID,
+		&partyAID, &partyBID, &status, &signedOn, &validFrom, &validTo, &c.Amount,
+		&dataJSON, &createdAt, &updatedAt); err != nil {
 		return c, err
 	}
-	c.Title, c.Status = title, status
+	c.ContractNo, c.Title, c.Type, c.Status = contractNo, title, ctype, status
 	c.TemplateID, c.PartyAID, c.PartyBID = templateID.String, partyAID.String, partyBID.String
 	c.SignedOn, c.ValidFrom, c.ValidTo = signedOn, validFrom, validTo
 	c.Data = parseJSONMap(dataJSON)
@@ -92,8 +93,9 @@ func scanContract(sc scanner) (model.Contract, error) {
 	return c, nil
 }
 
-const contractColumns = `id, title, template_id, party_a_id, party_b_id, status,
-	signed_on, valid_from, valid_to, data_json, created_at, updated_at`
+const contractColumns = `id, contract_no, year, title, type, template_id, party_a_id,
+	party_b_id, status, signed_on, valid_from, valid_to, amount, data_json,
+	created_at, updated_at`
 
 func scanSignature(sc scanner) (model.Signature, error) {
 	var sig model.Signature
@@ -178,18 +180,25 @@ func (r *Reader) GetParty(ctx context.Context, id string) (model.Party, error) {
 	return p, err
 }
 
-// ListContracts returns contracts matching f.
+// ListContracts returns contracts matching f. Year 0 means all years, so the
+// same query backs both the annual view and cross-year reports.
 func (r *Reader) ListContracts(ctx context.Context, f model.ListFilter) (model.List[model.Contract], error) {
 	f.Normalize()
 	where := []string{"1=1"}
 	args := []any{}
 	if q := strings.TrimSpace(f.Query); q != "" {
-		where = append(where, "title LIKE ?")
-		args = append(args, "%"+q+"%")
+		where = append(where, `(contract_no LIKE ? OR title LIKE ? OR party_b_id IN
+			(SELECT id FROM parties WHERE name LIKE ?))`)
+		like := "%" + q + "%"
+		args = append(args, like, like, like)
 	}
 	if f.Status != "" {
 		where = append(where, "status = ?")
 		args = append(args, f.Status)
+	}
+	if f.Year > 0 {
+		where = append(where, "year = ?")
+		args = append(args, f.Year)
 	}
 	clause := strings.Join(where, " AND ")
 	var total int
@@ -197,7 +206,7 @@ func (r *Reader) ListContracts(ctx context.Context, f model.ListFilter) (model.L
 		return model.List[model.Contract]{}, err
 	}
 	query := `SELECT ` + contractColumns + ` FROM contracts WHERE ` + clause +
-		` ORDER BY created_at DESC, id LIMIT ? OFFSET ?`
+		` ORDER BY year DESC, contract_no, created_at DESC, id LIMIT ? OFFSET ?`
 	rows, err := r.db.QueryContext(ctx, query, append(args, f.Limit, f.Offset)...)
 	if err != nil {
 		return model.List[model.Contract]{}, err
@@ -221,6 +230,87 @@ func (r *Reader) GetContract(ctx context.Context, id string) (model.Contract, er
 		return model.Contract{}, ErrNotFound
 	}
 	return c, err
+}
+
+// GetContractByNo returns one contract by its stable contract number.
+func (r *Reader) GetContractByNo(ctx context.Context, number string) (model.Contract, error) {
+	c, err := scanContract(r.db.QueryRowContext(ctx, `SELECT `+contractColumns+` FROM contracts WHERE contract_no = ?`, number))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Contract{}, ErrNotFound
+	}
+	return c, err
+}
+
+// ContractYears returns per-year contract counts, newest first.
+func (r *Reader) ContractYears(ctx context.Context) ([]model.YearCount, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT year, COUNT(*) FROM contracts GROUP BY year ORDER BY year DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.YearCount{}
+	for rows.Next() {
+		var yc model.YearCount
+		if err := rows.Scan(&yc.Year, &yc.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, yc)
+	}
+	return out, rows.Err()
+}
+
+// CountContractsForParty counts contracts that reference the party on either side.
+func (r *Reader) CountContractsForParty(ctx context.Context, partyID string) (int, error) {
+	var n int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM contracts WHERE party_a_id = ? OR party_b_id = ?`,
+		partyID, partyID).Scan(&n)
+	return n, err
+}
+
+// FindSimilarContracts returns contracts with the same counterparty, year and
+// title; used for non-blocking duplicate warnings.
+func (r *Reader) FindSimilarContracts(ctx context.Context, partyBID string, year int, title, excludeID string) ([]model.Contract, error) {
+	if partyBID == "" || year == 0 || strings.TrimSpace(title) == "" {
+		return []model.Contract{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+contractColumns+` FROM contracts
+		 WHERE party_b_id = ? AND year = ? AND title = ? AND id <> ?
+		 ORDER BY contract_no LIMIT 20`, partyBID, year, title, excludeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Contract{}
+	for rows.Next() {
+		c, err := scanContract(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// FindPartiesByName returns parties whose trimmed name equals name.
+func (r *Reader) FindPartiesByName(ctx context.Context, name string) ([]model.Party, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+partyColumns+` FROM parties WHERE trim(name) = ? ORDER BY created_at, id`, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Party{}
+	for rows.Next() {
+		p, err := scanParty(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // GetContractDetail bundles a contract with parties, signatures and outputs.
@@ -447,6 +537,7 @@ func (r *Reader) Stats(ctx context.Context) (model.Stats, error) {
 		{`SELECT COUNT(*) FROM templates`, &s.Templates},
 		{`SELECT COUNT(*) FROM signature_assets`, &s.Signatures},
 		{`SELECT COUNT(*) FROM output_documents`, &s.Documents},
+		{`SELECT COUNT(*) FROM field_definitions WHERE archived = 0`, &s.Fields},
 	} {
 		if err := r.db.QueryRowContext(ctx, q.sql).Scan(q.dst); err != nil {
 			return s, err

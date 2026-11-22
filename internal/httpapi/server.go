@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/LuSrackhall/tengshou/internal/config"
+	"github.com/LuSrackhall/tengshou/internal/service"
 	"github.com/LuSrackhall/tengshou/internal/store"
 	"github.com/LuSrackhall/tengshou/internal/version"
 )
@@ -24,6 +26,7 @@ import (
 // Options wires the server to the application.
 type Options struct {
 	Reader  *store.Reader
+	Service *service.Service
 	Logger  *slog.Logger
 	Config  config.Config
 	Version string
@@ -43,7 +46,7 @@ type Server struct {
 func New(opts Options) *Server {
 	s := &Server{opts: opts, mux: http.NewServeMux()}
 	s.routes()
-	handler := s.withLogging(s.withRecover(s.withSecurityHeaders(s.mux)))
+	handler := s.withLogging(s.withRecover(s.withSecurityHeaders(s.withAppGuard(s.mux))))
 	s.srv = &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -158,9 +161,13 @@ func localIPv4s() []string {
 func (s *Server) routes() {
 	m := s.mux
 	m.HandleFunc("GET /", s.handleIndex)
+	m.HandleFunc("GET /app/", s.handleAppIndex)
+	m.HandleFunc("GET /app/app.js", s.handleAppAsset("app.js", "application/javascript; charset=utf-8"))
+	m.HandleFunc("GET /app/app.css", s.handleAppAsset("app.css", "text/css; charset=utf-8"))
 	m.HandleFunc("GET /api/v1/health", s.handleHealth)
 	m.HandleFunc("GET /api/v1/schema", s.auth(s.handleSchema))
 	m.HandleFunc("GET /api/v1/stats", s.auth(s.handleStats))
+	m.HandleFunc("GET /api/v1/fields", s.auth(s.handleListFields))
 	m.HandleFunc("GET /api/v1/parties", s.auth(s.handleListParties))
 	m.HandleFunc("GET /api/v1/parties/{id}", s.auth(s.handleGetParty))
 	m.HandleFunc("GET /api/v1/contracts", s.auth(s.handleListContracts))
@@ -170,6 +177,31 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/signature-assets", s.auth(s.handleListSignatures))
 	m.HandleFunc("GET /api/v1/documents", s.auth(s.handleListDocuments))
 	m.HandleFunc("GET /api/v1", s.auth(s.handleAPIRoot))
+
+	// Application write surface. It is loopback-only and requires the
+	// X-Tengshou-App header on mutating requests (see withAppGuard).
+	m.HandleFunc("GET /app/api/v1/bootstrap", s.handleAppBootstrap)
+	m.HandleFunc("GET /app/api/v1/fields", s.handleAppListFields)
+	m.HandleFunc("POST /app/api/v1/fields", s.handleAppCreateField)
+	m.HandleFunc("PUT /app/api/v1/fields/{id}", s.handleAppUpdateField)
+	m.HandleFunc("POST /app/api/v1/fields/{id}/archive", s.handleAppArchiveField)
+	m.HandleFunc("GET /app/api/v1/parties", s.handleAppListParties)
+	m.HandleFunc("POST /app/api/v1/parties", s.handleAppSaveParty)
+	m.HandleFunc("GET /app/api/v1/parties/{id}", s.handleAppGetParty)
+	m.HandleFunc("PUT /app/api/v1/parties/{id}", s.handleAppSaveParty)
+	m.HandleFunc("DELETE /app/api/v1/parties/{id}", s.handleAppDeleteParty)
+	m.HandleFunc("GET /app/api/v1/contracts", s.handleAppListContracts)
+	m.HandleFunc("POST /app/api/v1/contracts", s.handleAppSaveContract)
+	m.HandleFunc("GET /app/api/v1/contracts/years", s.handleAppContractYears)
+	m.HandleFunc("GET /app/api/v1/contracts/{id}", s.handleAppGetContract)
+	m.HandleFunc("PUT /app/api/v1/contracts/{id}", s.handleAppSaveContract)
+	m.HandleFunc("DELETE /app/api/v1/contracts/{id}", s.handleAppDeleteContract)
+	m.HandleFunc("GET /app/api/v1/changelog", s.handleAppChangeLog)
+	m.HandleFunc("GET /app/api/v1/excel/template", s.handleAppExcelTemplate)
+	m.HandleFunc("GET /app/api/v1/excel/ledger", s.handleAppExcelLedger)
+	m.HandleFunc("POST /app/api/v1/excel/preview", s.handleAppExcelPreview)
+	m.HandleFunc("POST /app/api/v1/excel/commit", s.handleAppExcelCommit)
+	m.HandleFunc("GET /app/api/v1", s.handleAppAPIRoot)
 }
 
 // auth enforces bearer-token access for data endpoints. The test page and
@@ -201,6 +233,78 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// withAppGuard protects the application write surface: it must be reached
+// from loopback, mutating requests must carry X-Tengshou-App: 1 (forcing a
+// CORS preflight for foreign pages) and cross-site origins are rejected.
+func (s *Server) withAppGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/app/api/") {
+			if !isLoopbackRemote(r.RemoteAddr) {
+				writeError(w, http.StatusForbidden, "loopback_required",
+					"应用写入接口只允许在本机访问")
+				return
+			}
+			if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin, r.Host) {
+				writeError(w, http.StatusForbidden, "origin_rejected", "跨站请求被拒绝")
+				return
+			}
+			switch r.Method {
+			case http.MethodGet, http.MethodHead:
+			default:
+				if r.Header.Get("X-Tengshou-App") != "1" {
+					writeError(w, http.StatusForbidden, "app_header_required",
+						"缺少 X-Tengshou-App 请求头")
+					return
+				}
+				if ct := r.Header.Get("Content-Type"); ct != "" &&
+					!strings.HasPrefix(strings.ToLower(ct), "application/json") {
+					writeError(w, http.StatusUnsupportedMediaType, "json_required",
+						"请求体必须是 application/json")
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isLoopbackRemote(remote string) bool {
+	remote = strings.TrimSpace(remote)
+	// In-process desktop webview handlers may not set RemoteAddr at all.
+	if remote == "" {
+		return true
+	}
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	host = strings.TrimSpace(host)
+	if host == "" || host == "@" || strings.EqualFold(host, "wails") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// originAllowed accepts same-origin requests, loopback origins and the custom
+// schemes used by desktop webviews. Everything else is cross-site.
+func originAllowed(origin, host string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(u.Host, host) {
+		return true
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "wails", "wails3", "file", "tauri":
+		return true
+	}
+	hostname := strings.ToLower(u.Hostname())
+	return hostname == "localhost" || hostname == "127.0.0.1" ||
+		hostname == "::1" || hostname == "wails.localhost"
+}
+
 func (s *Server) withRecover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
@@ -220,7 +324,11 @@ func (s *Server) withSecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
+		if strings.HasPrefix(r.URL.Path, "/app/") && !strings.HasPrefix(r.URL.Path, "/app/api/") {
+			w.Header().Set("Content-Security-Policy",
+				"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
+					"img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+		} else if !strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasPrefix(r.URL.Path, "/app/api/") {
 			w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'")
 		}
 		next.ServeHTTP(w, r)

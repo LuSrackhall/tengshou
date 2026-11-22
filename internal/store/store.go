@@ -222,6 +222,8 @@ func (s *Store) Backup(destDir string) (string, error) {
 var (
 	// ErrNotFound is returned when a record does not exist.
 	ErrNotFound = errors.New("not found")
+	// ErrDuplicateContractNo is returned when a contract number is already used.
+	ErrDuplicateContractNo = errors.New("duplicate contract number")
 )
 
 func formatTime(t time.Time) string {

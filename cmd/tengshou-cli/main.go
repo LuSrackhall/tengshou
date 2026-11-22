@@ -144,18 +144,17 @@ func runDemo(dataDir, fontPath string, fontIndex int) error {
 		return err
 	}
 	defer a.Close()
-	gen, err := a.Generator()
-	if err != nil {
-		return err
-	}
 	ctx := context.Background()
-	res, err := demo.Run(ctx, a.Store, gen, a.Paths, time.Now())
+	res, err := demo.Run(ctx, a, time.Now())
 	if err != nil {
 		return err
 	}
-	fmt.Println("示例数据已生成：")
+	fmt.Println("示例数据已生成（字段均通过产品「新建字段」功能创建）：")
 	fmt.Printf("  数据目录      %s\n", a.Paths.Root)
-	fmt.Printf("  合同          %s (%s)\n", res.Contract.Title, res.Contract.ID)
+	fmt.Printf("  字段          %d 个\n", len(res.Fields))
+	fmt.Printf("  合同          %s（%s，%d 年度）\n", res.Contract.Title, res.Contract.ContractNo, res.Contract.Year)
+	fmt.Printf("  历史合同      %s（%s，%d 年度）\n", res.HistoricalContract.Title,
+		res.HistoricalContract.ContractNo, res.HistoricalContract.Year)
 	fmt.Printf("  甲方          %s\n", res.PartyA.Name)
 	fmt.Printf("  乙方          %s\n", res.PartyB.Name)
 	fmt.Printf("  模板          %s v%d\n", res.Template.Name, res.Template.Version)
@@ -163,6 +162,7 @@ func runDemo(dataDir, fontPath string, fontIndex int) error {
 	fmt.Printf("  PDF           %s\n", res.PDFPath)
 	fmt.Printf("  PDF 页数      %d\n", res.Document.PageCount)
 	fmt.Printf("  字体          %s\n", res.FontPath)
+	fmt.Println("  台账界面      tengshou-cli serve 后打开 /app/")
 	return nil
 }
 
@@ -182,6 +182,7 @@ func runServe(dataDir, fontPath string, fontIndex, port int, loopback bool) erro
 	}
 	server := httpapi.New(httpapi.Options{
 		Reader:  a.Reader,
+		Service: a.Service,
 		Logger:  a.Logger,
 		Config:  cfg,
 		Version: version.String(),

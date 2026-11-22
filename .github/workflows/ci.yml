@@ -171,9 +171,12 @@ jobs:
     needs: [test, cli, desktop]
     runs-on: ubuntu-latest
     steps:
+      # 只取构建产物：frontend-dist 是 cli/desktop 的构建输入，不属于发布资产
+      #（发布固定 8 个文件，与 alpha.6 及以前一致）。
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: tengshou-*
           merge-multiple: true
       - name: 列出产物
         run: ls -lh dist

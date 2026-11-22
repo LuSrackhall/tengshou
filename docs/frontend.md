@@ -16,7 +16,10 @@ frontend/                         # 前端工程（Vite root）
   src/
     main.ts                       # 生产入口：挂载 Vue 岛
     dev.ts                        # 开发预览入口（额外引入真实 app.css）
-    api/types.ts                  # 首批 API 契约类型
+    api/client.ts                 # fetch 封装：base/错误信封/query/超时归类
+    api/endpoints.ts              # typed 端点调用面（按域拆分到 endpoints/）
+    api/types.ts                  # API 契约类型入口（按域拆分到 types/）
+    api/README.md                 # 类型 ↔ Go 源码对照、端点覆盖清单
     bridge/live-status.ts         # app.js ↔ Vue 岛的状态桥
     components/LiveStatusBadge.vue
     styles/island.css
@@ -64,18 +67,46 @@ npm run dev           # 打开提示的地址，页面里可切换同步状态�
 迁移的岛，不参与生产构建（`vite build` 只以 `src/main.ts` 为入口）。
 完整界面仍通过 `make serve` 后打开 `/app/` 查看。
 
-## API 契约类型
+## API 客户端与类型
 
-`frontend/src/api/types.ts` 首批覆盖 Bootstrap、Contract、Party、Seal、
-Template、Field、Onboarding、Stats 等，逐字段对照：
+阶段 1 起，所有 `/app/api/v1` 调用统一走 `frontend/src/api/`：
 
-- `internal/model/model.go`
-- `internal/httpapi/appapi.go`（bootstrap 响应）
-- `internal/httpapi/onboarding.go`
-- `internal/service/onboarding.go`
+- `client.ts`：唯一 fetch 封装。固定 base `/app/api/v1`，自动带
+  `X-Tengshou-App: 1`，JSON 请求/响应，`buildQuery` 拼 query（省略
+  `undefined`/`null`/空串），`encodePathSegment` 编码路径段，支持
+  `AbortSignal` 与可选 `timeoutMs`，并导出 typed `get/post/put/del`
+  以及 `getFile/postFile/postForm`（下载、签名导出、备份上传）。
+- `endpoints.ts`（按域拆到 `endpoints/`）：每个后端端点一个 typed 函数，
+  调用方只从 `api/endpoints` 引入；组件里禁止裸 `fetch`。
+- `types.ts`（按域拆到 `types/`）：请求体与响应契约。动态字段值用
+  `Record<string, unknown>`，禁止 `any` 兜底（例外须在调用点写明原因）。
 
-契约变更时先改类型再改调用点；禁止用 `any` 兜底（确需例外时在代码里写明
-原因）。
+### 错误处理
+
+所有失败抛 `ApiError`（`code`/`status`/`fields`/`payload`）：
+
+- 服务端错误信封 `{"error":{"code","message","fields?"}}` 原样映射，
+  `fields` 用于表单逐字段提示；
+- 连接失败归为 `network`、超过 `timeoutMs` 归为 `timeout`，状态码为 0；
+- 成功响应无法解析归为 `invalid_response`；
+- 调用方自己的 `AbortSignal` 触发时原样抛 `AbortError`，便于区分取消。
+
+`timeoutMs` 默认不设：生成/导入/备份等长任务不要设超时。Excel 提交的
+422 响应同时带 `error` 与 `result`，从 `ApiError.payload` 取
+`ImportCommitErrorPayload` 展示逐行错误。
+
+### 契约变更流程
+
+1. 先改 Go 结构或 handler 响应；
+2. 先改 `api/types/` 对应类型与 `api/endpoints/` 函数签名，再改调用点；
+3. `npm run typecheck` 必须通过；禁止用 `any` 掩盖不一致；
+4. 在 PR 说明里记录契约变化。
+
+逐字段核对过的 Go 文件清单、端点覆盖表与序列化约定（int/time/
+omitempty/nil slice）见 `frontend/src/api/README.md`。单文件 ≤ 600 行的
+预算同样适用于 `api/` 下的 TS 文件，因此类型与端点按域拆分，入口保持
+barrel 形式，调用点无需感知拆分。
+
 
 ## CI 与结构预算
 

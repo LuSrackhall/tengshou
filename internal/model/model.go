@@ -122,8 +122,13 @@ type Contract struct {
 	ValidTo    string         `json:"valid_to,omitempty"`
 	Amount     float64        `json:"amount"`
 	Data       map[string]any `json:"data"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	// SourceContractID records the contract this one was renewed from (B7).
+	// It is provenance metadata: set once at creation, never changed, and
+	// deliberately excluded from ContentSHA256 so an existing signature's
+	// content version is not invalidated by the link alone.
+	SourceContractID string    `json:"source_contract_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // FieldDefinition describes one configurable data field. Built-in fields are
@@ -424,7 +429,8 @@ type ListFilter struct {
 	TemplateID string
 	// BatchID limits output documents to one batch run.
 	BatchID string
-	// PartyID limits seal assets to one party; empty means all.
+	// PartyID limits seal assets to one party, and contracts to records where
+	// either side references the party (B7 archive history); empty means all.
 	PartyID string
 	// Kind limits templates to html or pdf; empty means both.
 	Kind string

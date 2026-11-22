@@ -61,7 +61,7 @@
 | 表 | 作用 |
 | --- | --- |
 | `parties` | 相对方档案（个人 / 组织），`data_json` 存动态字段 |
-| `contracts` | 合同台账（`contract_no` 唯一不可变、`year`、类型、金额、双方、状态、日期、`data_json`） |
+| `contracts` | 合同台账（`contract_no` 唯一不可变、`year`、类型、金额、双方、状态、日期、`data_json`；`source_contract_id` 记录续签来源，仅创建时写入且不进入内容指纹） |
 | `field_definitions` | 可配置字段定义（实体、键、类型、必填、默认值、台账/模板开关、内置、归档、排序） |
 | `change_log` | 追加式变更记录（谁、何时、改了什么、字段级 diff） |
 | `templates` | 模板版本，按 `(name, version)` 唯一；`kind=html` 存 HTML，`kind=pdf` 存原始 Word/PDF 路径、转换 PDF、页数与位置映射（`mapping_json`） |
@@ -107,6 +107,10 @@
   校验同源/回环/桌面 WebView 的 Origin；所有写入经 `internal/service`。
 - Excel 模板与台账列由当前字段定义生成；导入支持列名映射、预览、错误行报告、
   同编号合并更新（空白单元格保持原值）。导出→改→导回与 B14 共用合并语义。
+- 续签（B7）走 `GET /app/api/v1/contracts/{id}/renewal-draft`：服务端返回预填的
+  新建合同输入与来源摘要，保存时在 `POST /app/api/v1/contracts` 带
+  `source_contract_id`。续签只复制合同字段与动态数据，不复制签名 / 公章 / PDF；
+  新合同仍按 B4 预检与签名流程出件。详见 [b7-renewal.md](b7-renewal.md)。
 
 ## PDF 模板与套印（B3）
 
@@ -174,6 +178,7 @@
 | B2 数据底座 / 动态字段 | 已交付：`field_definitions` + `/app/` + service + xlsx |
 | B3 模板管理 | 已交付：Word → PDF 转换、PDF.js 标定、pdfcpu 套印、版本与影响统计；见 [b3-templates.md](b3-templates.md) |
 | B5 局域网签名页 | 已交付：`internal/sign` + `/sign/<token>` + 一次性令牌；签名关联合同与内容版本，`signaturePath` 模板占位 |
+| B7 续签与档案复用 | 已交付：续签草稿端点 + `contracts.source_contract_id` 溯源 + 档案历史合同；不复制签名，第三层按 D3 不提供；见 [b7-renewal.md](b7-renewal.md) |
 | B6 MCP 连接器 | 已交付：`tengshou-cli mcp` stdio 服务 + `internal/mcp`；读 `/api/v1`，写经 `/app/api/v1`，不直接开库；见 [mcp.md](mcp.md) |
 | B9 备份恢复 | `store.Backup` 已有；恢复 = 校验 + 原子替换 + 重启 |
 | B10 Windows 打包 | `scripts/build-windows.ps1` + CI 产物；补安装器 / 签名 |

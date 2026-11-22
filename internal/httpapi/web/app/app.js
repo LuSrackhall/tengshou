@@ -548,7 +548,7 @@ function contractControlValue(f, contract, partyBName) {
     if (f.built_in) {
       if (f.key === "year") return state.bootstrap ? state.bootstrap.current_year : "";
       if (f.key === "status") return "草稿";
-      if (f.key === "party_b") return "";
+      if (f.key === "party_b") return partyBName || "";
       return f.default_value || "";
     }
     return f.default_value || "";
@@ -570,24 +570,39 @@ function contractControlValue(f, contract, partyBName) {
 
 async function openContractForm(contract, opts) {
   const options = opts || {};
-  let detail = null;
-  if (contract) {
+  if (options.renew) {
+    if (!contract) return;
+    let draft;
     try {
-      detail = await api(`/app/api/v1/contracts/${encodeURIComponent(contract.id)}`);
+      draft = await api(`/app/api/v1/contracts/${encodeURIComponent(contract.id)}/renewal-draft`);
     } catch (err) {
       toast(err.message, true);
       return;
     }
+    openContractCreateForm({ renewal: draft });
+    return;
+  }
+  if (!contract) {
+    openContractCreateForm({ partyB: options.partyB || null });
+    return;
+  }
+  let detail = null;
+  try {
+    detail = await api(`/app/api/v1/contracts/${encodeURIComponent(contract.id)}`);
+  } catch (err) {
+    toast(err.message, true);
+    return;
   }
   const partyBName = detail && detail.party_b ? detail.party_b.name : partyName(contract && contract.party_b_id);
   const partyBID = detail && detail.party_b ? detail.party_b.id : (contract ? contract.party_b_id || "" : "");
   const fields = activeField("contract");
-  const modal = openModal(contract ? `编辑合同 · ${contract.contract_no}` : "新建合同", { wide: true });
+  const modal = openModal(`编辑合同 · ${contract.contract_no}`, { wide: true });
   const form = fields.map((f) => fieldControlHTML("contract", f,
     contractControlValue(f, contract, partyBName),
-    { readonly: contract && f.key === "contract_no" })).join("");
+    { readonly: f.key === "contract_no" })).join("");
   modal.body.innerHTML = `
     <div id="contractErrors"></div>
+    ${contract.source_contract_id ? `<div class="renewal-banner" id="renewalSource">正在加载续签来源…</div>` : ""}
     ${contract ? `<div class="warning-list">合同编号创建后不可修改。修改会写入变更记录。</div>` : ""}
     ${detail && detail.signatures && detail.signatures.length ? signaturesSummaryHTML(detail) : ""}
     ${detail && detail.seals && detail.seals.length ? sealsSummaryHTML(detail) : ""}
@@ -601,24 +616,25 @@ async function openContractForm(contract, opts) {
     state.auditTarget = { entity: "contract", id: contract.id, selector: "#contractHistory" };
     loadAuditHistory("contract", contract.id, "#contractHistory");
     renderContractGeneration(modal, contract, detail);
+    if (contract.source_contract_id) loadRenewalSource(modal, contract);
     if (options.focusGenerate) {
       const panel = $("#contractGeneration", modal.body);
       if (panel) panel.scrollIntoView({ block: "start", behavior: "smooth" });
     }
   }
+  footerButton(modal, "续签", "", () => {
+    closeModal();
+    openContractForm(contract, { renew: true }).catch((err) => toast(err.message, true));
+  });
   footerButton(modal, "取消", "", closeModal);
-  if (contract) {
-    footerButton(modal, "删除", "danger", () => deleteContract(contract, modal));
-  }
+  footerButton(modal, "删除", "danger", () => deleteContract(contract, modal));
   const save = footerButton(modal, "保存", "primary", async () => {
     save.disabled = true;
     $("#contractErrors", modal.body).innerHTML = "";
     try {
       const input = collectContractInput(fields, contract, partyBID, partyBName);
-      const res = await api(contract
-        ? `/app/api/v1/contracts/${encodeURIComponent(contract.id)}`
-        : "/app/api/v1/contracts",
-        { method: contract ? "PUT" : "POST", body: input });
+      const res = await api(`/app/api/v1/contracts/${encodeURIComponent(contract.id)}`,
+        { method: "PUT", body: input });
       closeModal();
       toast("合同已保存");
       if (res.warnings && res.warnings.length) {
@@ -631,6 +647,99 @@ async function openContractForm(contract, opts) {
       modal.body.scrollTop = 0;
     }
   });
+}
+
+// openContractCreateForm opens the new-contract form. Two B7 entry points
+// prefill it: a renewal draft (all contract values carried over, dates and
+// number cleared) and a counterparty archive (only the party is prefilled;
+// template and dynamic fields stay as the user chooses them).
+function openContractCreateForm(opts) {
+  const options = opts || {};
+  const draft = options.renewal || null;
+  const partyB = options.partyB || null;
+  let seed = null;
+  if (draft) {
+    const input = draft.input || {};
+    seed = {
+      contract_no: "", year: input.year, title: input.title, type: input.type,
+      party_a_id: input.party_a_id || "", party_b_id: input.party_b_id || "",
+      template_id: input.template_id || "", amount: input.amount || 0,
+      signed_on: "", valid_from: "", valid_to: "", status: "draft",
+      data: input.data || {},
+    };
+  }
+  const partyBID = seed ? seed.party_b_id : (partyB ? partyB.id : "");
+  const partyBName = seed
+    ? ((draft.input && draft.input.party_b) || partyName(seed.party_b_id))
+    : (partyB ? partyB.name : "");
+  const fields = activeField("contract");
+  const title = draft ? `新建合同 · 续签自 ${draft.source.contract_no}` : "新建合同";
+  const modal = openModal(title, { wide: true });
+  const form = fields.map((f) => fieldControlHTML("contract", f,
+    contractControlValue(f, seed, partyBName), {})).join("");
+  let banner = "";
+  if (draft) {
+    const reused = Array.isArray(draft.reused) ? draft.reused.length : 0;
+    banner = `<div class="renewal-banner">续签自 <strong>${esc(draft.source.contract_no)}「${esc(draft.source.title)}」</strong>：
+      已带出 ${reused} 项信息，均可修改。合同编号自动分配，签订 / 生效 / 到期日期与状态已重置；
+      签名与公章不会沿用，生成 PDF 前需按新内容重新采集。</div>`;
+  } else if (partyB) {
+    banner = `<div class="renewal-banner">以相对方档案「${esc(partyB.name)}」新建合同：
+      仅带出档案信息，不复制旧合同内容；模板与字段由你选择，保存后按正常流程采集签名。</div>`;
+  }
+  modal.body.innerHTML = `
+    <div id="contractErrors"></div>
+    ${banner}
+    <datalist id="partyNameList">
+      ${state.parties.map((p) => `<option value="${esc(p.name)}"></option>`).join("")}
+    </datalist>
+    <div class="form-grid">${form}</div>`;
+  footerButton(modal, "取消", "", closeModal);
+  const save = footerButton(modal, "保存", "primary", async () => {
+    save.disabled = true;
+    $("#contractErrors", modal.body).innerHTML = "";
+    try {
+      const input = collectContractInput(fields, seed, partyBID, partyBName);
+      if (draft) input.source_contract_id = draft.source.id;
+      const res = await api("/app/api/v1/contracts", { method: "POST", body: input });
+      closeModal();
+      toast(draft ? `合同已创建（续签自 ${draft.source.contract_no}）` : "合同已保存");
+      if (res.warnings && res.warnings.length) {
+        setTimeout(() => toast(res.warnings.join("；")), 350);
+      }
+      await refreshAfterWrite();
+      if (draft && res.item) {
+        openContractForm(res.item).catch((err) => toast(err.message, true));
+      }
+    } catch (err) {
+      save.disabled = false;
+      $("#contractErrors", modal.body).innerHTML = fieldErrorsHTML(err);
+      modal.body.scrollTop = 0;
+    }
+  });
+}
+
+// loadRenewalSource fills the provenance banner of an existing renewal and
+// lets the user jump to the source contract.
+async function loadRenewalSource(modal, contract) {
+  const host = $("#renewalSource", modal.body);
+  if (!host) return;
+  try {
+    const detail = await api(`/app/api/v1/contracts/${encodeURIComponent(contract.source_contract_id)}`);
+    const source = detail.contract;
+    host.innerHTML = `续签自 <strong>${esc(source.contract_no)}「${esc(source.title)}」</strong>
+      <button type="button" id="openSourceContract">查看来源合同</button>`;
+    const button = $("#openSourceContract", host);
+    if (button) {
+      button.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeModal();
+        openContractForm(source).catch((err) => toast(err.message, true));
+      });
+    }
+  } catch (_) {
+    host.textContent = "续签来源合同已不存在（来源编号仍保留在本合同记录中）。";
+  }
 }
 
 function collectContractInput(fields, contract, partyBID, partyBName) {
@@ -2770,6 +2879,7 @@ function renderParties() {
       `<td class="${f.key === "note" || f.key === "address" ? "wrap" : ""}">${esc(partyFieldValue(party, f))}</td>`).join("");
     return `<tr data-id="${esc(party.id)}">${cells}
       <td><div class="actions">
+        <button type="button" data-action="new-contract">以此档案新建合同</button>
         <button type="button" data-action="edit">编辑</button>
         <button type="button" class="danger" data-action="delete">删除</button>
       </div></td></tr>`;
@@ -2784,6 +2894,11 @@ function renderParties() {
       if (button && button.dataset.action === "delete") {
         e.stopPropagation();
         deleteParty(party);
+        return;
+      }
+      if (button && button.dataset.action === "new-contract") {
+        e.stopPropagation();
+        openContractForm(null, { partyB: party });
         return;
       }
       openPartyForm(party);
@@ -2810,10 +2925,12 @@ function openPartyForm(party) {
   const form = fields.map((f) =>
     fieldControlHTML("party", f, partyControlValue(f, party), {})).join("");
   modal.body.innerHTML = `<div id="partyErrors"></div><div class="form-grid">${form}</div>
+    ${party ? `<div id="partyContracts" class="audit-host"></div>` : ""}
     ${party ? `<div id="partyHistory" class="audit-host"></div>` : ""}`;
   if (party) {
     state.auditTarget = { entity: "party", id: party.id, selector: "#partyHistory" };
     loadAuditHistory("party", party.id, "#partyHistory");
+    loadPartyContracts(modal, party);
   }
   footerButton(modal, "取消", "", closeModal);
   if (party) footerButton(modal, "删除", "danger", () => deleteParty(party, modal));
@@ -2838,6 +2955,44 @@ function openPartyForm(party) {
       modal.body.scrollTop = 0;
     }
   });
+}
+
+// loadPartyContracts lists the archive's historical contracts (B7). Rows can
+// be opened or used to start a renewal draft, so repeat signings begin from
+// the counterparty record without retyping its information.
+async function loadPartyContracts(modal, party) {
+  const host = $("#partyContracts", modal.body);
+  if (!host) return;
+  host.innerHTML = `<div class="audit-block"><div class="audit-head">历史合同</div>
+    <p class="muted">加载中…</p></div>`;
+  try {
+    const res = await api(`/app/api/v1/contracts?party_id=${encodeURIComponent(party.id)}&limit=20`);
+    const items = res.items || [];
+    const rows = items.map((c) => `
+      <li>
+        <div class="audit-line">
+          <span class="mono">${esc(c.contract_no)}</span>
+          <span class="audit-summary">「${esc(c.title)}」${c.year} 年 · ${esc(statusLabel(c.status))}</span>
+          <button type="button" data-id="${esc(c.id)}" data-action="open">查看</button>
+          <button type="button" data-id="${esc(c.id)}" data-action="renew">续签</button>
+        </div>
+      </li>`).join("");
+    host.innerHTML = `<div class="audit-block">
+      <div class="audit-head">历史合同（${res.total != null ? res.total : items.length}）</div>
+      ${items.length ? `<ul class="audit-list">${rows}</ul>` :
+        `<p class="muted">该相对方还没有合同记录。保存新合同后会自动关联到这份档案。</p>`}
+    </div>`;
+    $$("button[data-action]", host).forEach((button) => button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const contract = items.find((c) => c.id === button.dataset.id);
+      if (!contract) return;
+      closeModal();
+      openContractForm(contract, { renew: button.dataset.action === "renew" })
+        .catch((err) => toast(err.message, true));
+    }));
+  } catch (err) {
+    host.innerHTML = `<div class="audit-block error"><div class="audit-head">历史合同</div>${esc(err.message)}</div>`;
+  }
 }
 
 function collectPartyInput(fields) {

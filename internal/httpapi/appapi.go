@@ -35,6 +35,7 @@ func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 			"/app/api/v1/parties",
 			"/app/api/v1/contracts",
 			"/app/api/v1/contracts/years",
+			"/app/api/v1/contracts/{id}/renewal-draft",
 			"/app/api/v1/changelog",
 			"/app/api/v1/seals",
 			"/app/api/v1/seals/{id}",
@@ -243,7 +244,9 @@ func (s *Server) handleAppListContracts(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	items, err := svc.ListContracts(r.Context(), filter(r))
+	f := filter(r)
+	f.PartyID = strings.TrimSpace(r.URL.Query().Get("party_id"))
+	items, err := svc.ListContracts(r.Context(), f)
 	if err != nil {
 		s.internalError(w, "list contracts", err)
 		return
@@ -275,6 +278,22 @@ func (s *Server) handleAppGetContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// handleAppContractRenewalDraft returns a prefilled contract input based on an
+// existing contract (B7). It is read-only: nothing is created until the user
+// saves the draft through POST /app/api/v1/contracts.
+func (s *Server) handleAppContractRenewalDraft(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appService(w)
+	if !ok {
+		return
+	}
+	draft, err := svc.RenewalDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeServiceError(w, "renewal draft", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, draft)
 }
 
 func (s *Server) handleAppSaveContract(w http.ResponseWriter, r *http.Request) {

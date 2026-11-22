@@ -17,23 +17,26 @@ import (
 // because they are first-class columns; Data carries dynamic field values by
 // field key. Source is only used for audit summaries ("excel" during import).
 type ContractInput struct {
-	ID          string         `json:"id"`
-	ContractNo  string         `json:"contract_no"`
-	Year        int            `json:"year"`
-	Title       string         `json:"title"`
-	Type        string         `json:"type"`
-	PartyAID    string         `json:"party_a_id"`
-	PartyBID    string         `json:"party_b_id"`
-	PartyB      string         `json:"party_b"`
-	Status      string         `json:"status"`
-	SignedOn    string         `json:"signed_on"`
-	ValidFrom   string         `json:"valid_from"`
-	ValidTo     string         `json:"valid_to"`
-	Amount      float64        `json:"amount"`
-	TemplateID  string         `json:"template_id"`
-	Data        map[string]any `json:"data"`
-	Source      string         `json:"-"`
-	CreateParty *bool          `json:"create_party,omitempty"`
+	ID         string  `json:"id"`
+	ContractNo string  `json:"contract_no"`
+	Year       int     `json:"year"`
+	Title      string  `json:"title"`
+	Type       string  `json:"type"`
+	PartyAID   string  `json:"party_a_id"`
+	PartyBID   string  `json:"party_b_id"`
+	PartyB     string  `json:"party_b"`
+	Status     string  `json:"status"`
+	SignedOn   string  `json:"signed_on"`
+	ValidFrom  string  `json:"valid_from"`
+	ValidTo    string  `json:"valid_to"`
+	Amount     float64 `json:"amount"`
+	TemplateID string  `json:"template_id"`
+	// SourceContractID records the contract a new contract is renewed from
+	// (B7 provenance). It is only honored when creating; updates ignore it.
+	SourceContractID string         `json:"source_contract_id,omitempty"`
+	Data             map[string]any `json:"data"`
+	Source           string         `json:"-"`
+	CreateParty      *bool          `json:"create_party,omitempty"`
 }
 
 // SaveContract creates or updates a contract. Contract numbers are allocated
@@ -88,6 +91,14 @@ func (s *Service) SaveContract(ctx context.Context, in ContractInput) (model.Con
 		changes = s.diffContract(ctx, existing, &contract)
 	} else {
 		changes = s.contractChanges(ctx, &contract)
+		if contract.SourceContractID != "" {
+			// B7: the audit entry names the source contract number so the
+			// reuse (who, when, from which contract) stays traceable.
+			if source, err := s.rd.GetContract(ctx, contract.SourceContractID); err == nil {
+				summary = fmt.Sprintf("续签（来源 %s）：新建合同 %s「%s」",
+					source.ContractNo, contract.ContractNo, contract.Title)
+			}
+		}
 	}
 	s.logChange(ctx, model.ChangeEntityContract, contract.ID, action, summary, changes)
 	return contract, warnings, nil
@@ -108,6 +119,21 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 		contract.Data = copyData(existing.Data)
 	} else {
 		contract.Data = map[string]any{}
+	}
+
+	// B7: a renewal source must exist when creating. The link is create-only
+	// and never copies signatures, seals or documents from the source; a new
+	// contract must collect its own signatures before generation.
+	if existing == nil {
+		if sourceID := strings.TrimSpace(in.SourceContractID); sourceID != "" {
+			if _, err := s.rd.GetContract(ctx, sourceID); err != nil {
+				if isNotFound(err) {
+					return model.Contract{}, nil, business("not_found", "续签来源合同不存在")
+				}
+				return model.Contract{}, nil, err
+			}
+			contract.SourceContractID = sourceID
+		}
 	}
 
 	// Year first: auto numbers are scoped to a year.

@@ -153,6 +153,12 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .form-errors { background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line)); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; color: var(--danger); font-size: 13.5px; }
 .form-errors ul { margin: 4px 0 0; padding-left: 18px; }
 .warning-list { background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 8px 14px; margin-bottom: 14px; font-size: 13px; }
+.renewal-banner {
+  background: var(--accent-soft); color: var(--ink); border-radius: 10px;
+  padding: 9px 14px; margin-bottom: 14px; font-size: 13px; line-height: 1.6;
+}
+.renewal-banner strong { color: var(--accent); }
+.renewal-banner button { min-height: 24px; padding: 1px 8px; font-size: 12px; margin-left: 6px; }
 
 .import-options { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
 .import-mapping { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px 14px; margin-bottom: 16px; }

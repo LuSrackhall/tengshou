@@ -103,14 +103,31 @@ type MCP struct {
 	WriteEnabled bool `json:"write_enabled"`
 }
 
+// Onboarding records first-run guide state (B8). It is UI bookkeeping only:
+// completing, skipping or reopening the guide never writes business data.
+// First-run detection itself is computed from the data directory (no template
+// and no contract), so an existing vault copied to a new machine is not
+// mistaken for a fresh install.
+type Onboarding struct {
+	Completed   bool   `json:"completed"`
+	Skipped     bool   `json:"skipped"`
+	CompletedAt string `json:"completed_at,omitempty"`
+	SkippedAt   string `json:"skipped_at,omitempty"`
+	// Steps records the wizard steps that leave no business data behind
+	// (sample preview and trial PDF generation). Data-backed steps are derived
+	// from the database on every read.
+	Steps map[string]string `json:"steps,omitempty"`
+}
+
 // Config is the application configuration persisted as config.json.
 type Config struct {
-	Version   int       `json:"version"`
-	HTTP      HTTP      `json:"http"`
-	PDF       PDF       `json:"pdf"`
-	Log       Log       `json:"log"`
-	Signature Signature `json:"signature"`
-	MCP       MCP       `json:"mcp"`
+	Version    int        `json:"version"`
+	HTTP       HTTP       `json:"http"`
+	PDF        PDF        `json:"pdf"`
+	Log        Log        `json:"log"`
+	Signature  Signature  `json:"signature"`
+	MCP        MCP        `json:"mcp"`
+	Onboarding Onboarding `json:"onboarding"`
 	// Operator is the name recorded in the change log. Empty means the OS user.
 	Operator string `json:"operator,omitempty"`
 }

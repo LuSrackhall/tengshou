@@ -153,6 +153,22 @@ func (s *Server) handleAppTemplateUsage(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, usage)
 }
 
+// handleAppTemplateCheck validates the calibrated placements of one template
+// version against the current field definitions (B8 template wizard). It is
+// read-only and never changes the template.
+func (s *Server) handleAppTemplateCheck(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appService(w)
+	if !ok {
+		return
+	}
+	res, err := svc.CheckTemplate(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeServiceError(w, "check template", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // handleAppTemplatePDF serves the converted template PDF for the calibration
 // editor (PDF.js fetches it same-origin).
 func (s *Server) handleAppTemplatePDF(w http.ResponseWriter, r *http.Request) {

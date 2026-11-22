@@ -58,6 +58,39 @@ func (s *Settings) SetMCPWriteEnabled(enabled bool) error {
 	return nil
 }
 
+// Onboarding returns a copy of the first-run guide state (B8).
+func (s *Settings) Onboarding() Onboarding {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneOnboarding(s.cfg.Onboarding)
+}
+
+// SetOnboarding persists the first-run guide state with the atomic 0600
+// writer. The in-memory value only changes when the file write succeeds, so a
+// failed save never leaves the UI advertising a state that would revert.
+func (s *Settings) SetOnboarding(next Onboarding) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cfg := s.cfg
+	cfg.Onboarding = cloneOnboarding(next)
+	if err := Save(s.paths, cfg); err != nil {
+		return err
+	}
+	s.cfg = cfg
+	return nil
+}
+
+func cloneOnboarding(in Onboarding) Onboarding {
+	out := in
+	if len(in.Steps) > 0 {
+		out.Steps = make(map[string]string, len(in.Steps))
+		for k, v := range in.Steps {
+			out.Steps[k] = v
+		}
+	}
+	return out
+}
+
 // MCPWriteGate returns a function that reports the current mcp.write_enabled
 // value from config.json. The MCP connector calls it before running a write
 // tool, so a switch flipped in the desktop app applies to the next tool call

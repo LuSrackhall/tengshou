@@ -28,6 +28,9 @@ func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 		"header":   "写操作需携带 X-Tengshou-App: 1",
 		"resources": []string{
 			"/app/api/v1/bootstrap",
+			"/app/api/v1/onboarding",
+			"/app/api/v1/onboarding/check",
+			"/app/api/v1/onboarding/state",
 			"/app/api/v1/events",
 			"/app/api/v1/mcp/status",
 			"/app/api/v1/settings/mcp",
@@ -46,6 +49,7 @@ func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 			"/app/api/v1/templates/{id}",
 			"/app/api/v1/templates/{id}/mapping",
 			"/app/api/v1/templates/{id}/usage",
+			"/app/api/v1/templates/{id}/check",
 			"/app/api/v1/templates/{id}/pdf",
 			"/app/api/v1/templates/{id}/source",
 			"/app/api/v1/templates/{id}/preview",
@@ -96,6 +100,7 @@ func (s *Server) handleAppBootstrap(w http.ResponseWriter, r *http.Request) {
 		"years":             years,
 		"stats":             stats,
 		"mcp_write_enabled": s.mcpWriteEnabled(),
+		"onboarding":        s.onboardingPayload(r.Context(), svc),
 		"now":               time.Now().UTC().Format(time.RFC3339),
 	})
 }

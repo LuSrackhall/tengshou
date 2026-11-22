@@ -42,6 +42,9 @@ type fixtureOptions struct {
 	sign           *sign.Manager
 	eventPoll      time.Duration
 	eventHeartbeat time.Duration
+	// empty skips the seeded party/template/contract records so tests can
+	// exercise first-run behaviour (B8).
+	empty bool
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -63,31 +66,35 @@ func newFixtureWithOptions(t *testing.T, opts fixtureOptions) *fixture {
 	t.Cleanup(func() { reader.Close() })
 
 	ctx := context.Background()
-	partyA := model.Party{Kind: model.PartyOrganization, Name: "幸福村合作社"}
-	partyB := model.Party{Kind: model.PartyPerson, Name: "张三", Phone: "13800000002"}
-	if err := st.PutParty(ctx, &partyA); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.PutParty(ctx, &partyB); err != nil {
-		t.Fatal(err)
-	}
-	tpl := model.Template{Name: "租赁模板", Version: 1, HTML: "<p>{{.Data.rent}}</p>", Variables: []string{"rent"}, IsActive: true}
-	if err := st.PutTemplate(ctx, &tpl); err != nil {
-		t.Fatal(err)
-	}
-	contract := model.Contract{Title: "幸福村房屋租赁合同", PartyAID: partyA.ID, PartyBID: partyB.ID,
-		TemplateID: tpl.ID, Status: model.ContractActive, Data: map[string]any{"rent": 1200.0}}
-	if err := st.PutContract(ctx, &contract); err != nil {
-		t.Fatal(err)
-	}
-	sig := model.Signature{PartyID: partyB.ID, SignerName: "张三", AssetPath: "assets/sig.png", SHA256: "abc", WidthPx: 10, HeightPx: 5}
-	if err := st.PutSignature(ctx, &sig); err != nil {
-		t.Fatal(err)
-	}
-	doc := model.OutputDocument{ContractID: contract.ID, TemplateID: tpl.ID, TemplateVersion: 1,
-		FilePath: "outputs/a.pdf", SHA256: "def", PageCount: 2}
-	if err := st.PutOutputDocument(ctx, &doc); err != nil {
-		t.Fatal(err)
+	var partyAID, partyBID, contractID string
+	if !opts.empty {
+		partyA := model.Party{Kind: model.PartyOrganization, Name: "幸福村合作社"}
+		partyB := model.Party{Kind: model.PartyPerson, Name: "张三", Phone: "13800000002"}
+		if err := st.PutParty(ctx, &partyA); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.PutParty(ctx, &partyB); err != nil {
+			t.Fatal(err)
+		}
+		tpl := model.Template{Name: "租赁模板", Version: 1, HTML: "<p>{{.Data.rent}}</p>", Variables: []string{"rent"}, IsActive: true}
+		if err := st.PutTemplate(ctx, &tpl); err != nil {
+			t.Fatal(err)
+		}
+		contract := model.Contract{Title: "幸福村房屋租赁合同", PartyAID: partyA.ID, PartyBID: partyB.ID,
+			TemplateID: tpl.ID, Status: model.ContractActive, Data: map[string]any{"rent": 1200.0}}
+		if err := st.PutContract(ctx, &contract); err != nil {
+			t.Fatal(err)
+		}
+		sig := model.Signature{PartyID: partyB.ID, SignerName: "张三", AssetPath: "assets/sig.png", SHA256: "abc", WidthPx: 10, HeightPx: 5}
+		if err := st.PutSignature(ctx, &sig); err != nil {
+			t.Fatal(err)
+		}
+		doc := model.OutputDocument{ContractID: contract.ID, TemplateID: tpl.ID, TemplateVersion: 1,
+			FilePath: "outputs/a.pdf", SHA256: "def", PageCount: 2}
+		if err := st.PutOutputDocument(ctx, &doc); err != nil {
+			t.Fatal(err)
+		}
+		partyAID, partyBID, contractID = partyA.ID, partyB.ID, contract.ID
 	}
 
 	cfg := config.Default()
@@ -124,8 +131,8 @@ func newFixtureWithOptions(t *testing.T, opts fixtureOptions) *fixture {
 	})
 	ts := httptest.NewServer(server.Handler())
 	t.Cleanup(ts.Close)
-	return &fixture{server: ts, apiServer: server, handler: server.Handler(), partyID: partyA.ID,
-		partyBID: partyB.ID, contractID: contract.ID, dataDir: dataDir, service: svc,
+	return &fixture{server: ts, apiServer: server, handler: server.Handler(), partyID: partyAID,
+		partyBID: partyBID, contractID: contractID, dataDir: dataDir, service: svc,
 		store: st, reader: reader}
 }
 

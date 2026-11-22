@@ -34,6 +34,9 @@ func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 			"/app/api/v1/excel/ledger",
 			"/app/api/v1/excel/preview",
 			"/app/api/v1/excel/commit",
+			"/app/api/v1/signature-sessions",
+			"/app/api/v1/signature-sessions/{id}",
+			"/app/api/v1/signature-sessions/{id}/qr.png",
 		},
 	})
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LuSrackhall/tengshou/internal/model"
 	ledongthucpdf "github.com/ledongthuc/pdf"
@@ -187,5 +188,45 @@ func TestRejectUnsafeImagePath(t *testing.T) {
 	_, err := gen.RenderHTML(`<p><img src="../../etc/passwd"></p>`, TemplateData{}, dir, "")
 	if err == nil {
 		t.Fatal("expected unsafe image path to fail")
+	}
+}
+
+func TestSignaturePathHelper(t *testing.T) {
+	partyA := model.Party{ID: "pty_a", Name: "甲方"}
+	partyB := model.Party{ID: "pty_b", Name: "乙方"}
+	sigs := []model.Signature{
+		{PartyID: "pty_b", AssetPath: "assets/signatures/old.png",
+			CapturedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{PartyID: "pty_b", AssetPath: "assets/signatures/new.png",
+			CapturedAt: time.Date(2026, 11, 22, 0, 0, 0, 0, time.UTC)},
+		{PartyID: "pty_a", AssetPath: "assets/signatures/a.png",
+			CapturedAt: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)},
+	}
+	data := TemplateData{PartyA: &partyA, PartyB: &partyB, Signatures: sigs}
+	out, err := ExecuteTemplate(
+		`{{with signaturePath .Signatures .PartyB}}<p><img src="{{.}}" style="width:45mm"></p>{{else}}<p>没有签名</p>{{end}}`,
+		data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "assets/signatures/new.png") || strings.Contains(out, "old.png") {
+		t.Fatalf("signature path output = %q", out)
+	}
+	out, err = ExecuteTemplate(
+		`{{with signaturePath .Signatures "pty_a"}}<img src="{{.}}">{{else}}<p>没有签名</p>{{end}}`, data)
+	if err != nil || !strings.Contains(out, "assets/signatures/a.png") {
+		t.Fatalf("party id output = %q err=%v", out, err)
+	}
+	// Nil party means "any" and no signatures means the else branch.
+	out, err = ExecuteTemplate(
+		`{{with signaturePath .Signatures nil}}<img src="{{.}}">{{else}}<p>没有签名</p>{{end}}`, data)
+	if err != nil || !strings.Contains(out, "assets/signatures/new.png") {
+		t.Fatalf("any party output = %q err=%v", out, err)
+	}
+	out, err = ExecuteTemplate(
+		`{{with signaturePath .Signatures .PartyA}}<img src="{{.}}">{{else}}<p>没有签名</p>{{end}}`,
+		TemplateData{PartyA: &partyA})
+	if err != nil || !strings.Contains(out, "没有签名") {
+		t.Fatalf("empty output = %q err=%v", out, err)
 	}
 }

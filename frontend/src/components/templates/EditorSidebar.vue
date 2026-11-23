@@ -20,6 +20,8 @@ import type {
 const props = defineProps<{
   placements: Placement[];
   selectedId: string | null;
+  /** 模板总页数（PDF 已加载时以页数为准），用于「新增位置」的页码选择。 */
+  pageCount: number;
   fields: FieldsByEntityResponse;
   seals: Seal[];
   contracts: Contract[];
@@ -50,6 +52,8 @@ const emit = defineEmits<{
 }>();
 
 const kind = ref<Placement["type"]>("field");
+/** 新框所在页码（1 起）；页数变化后若超出范围则回落到第 1 页。 */
+const page = ref(1);
 const fieldKey = ref("");
 const party = ref("");
 const sealMode = ref("contract");
@@ -87,6 +91,15 @@ watch(
 );
 
 watch(
+  () => props.pageCount,
+  (count) => {
+    if (count > 0 && page.value > count) {
+      page.value = 1;
+    }
+  },
+);
+
+watch(
   () => props.seals,
   (seals) => {
     if (seals.length && !seals.some((seal) => seal.id === sealId.value)) {
@@ -103,6 +116,7 @@ function labelOf(placement: Placement): string {
 function submitAdd(): void {
   emit("add", {
     kind: kind.value,
+    page: page.value,
     field: kind.value === "field" ? fieldKey.value : "",
     party: party.value,
     sealMode: kind.value === "seal" ? sealMode.value : "",
@@ -134,6 +148,14 @@ function onContractChange(event: Event): void {
   <aside class="tpl-side">
     <h3>新增位置</h3>
     <div class="tpl-add">
+      <div class="field">
+        <label for="tplAddPage">页码</label>
+        <select id="tplAddPage" v-model.number="page">
+          <option v-for="n in Math.max(pageCount, 1)" :key="n" :value="n">
+            第 {{ n }} 页
+          </option>
+        </select>
+      </div>
       <div class="field">
         <label for="tplAddKind">类型</label>
         <select id="tplAddKind" v-model="kind">

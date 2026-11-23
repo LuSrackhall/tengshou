@@ -118,6 +118,7 @@ const {
                 :contract-id="contractId"
                 :placements="placements"
                 :selected-id="selectedId"
+                :page-count="pageCount"
                 :fields="fields"
                 :seals="seals"
                 :contracts="contracts"

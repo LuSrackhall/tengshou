@@ -76,7 +76,7 @@ export function useTemplateEditor(
   // 标定框编辑：任何修改都会置脏并让当前预览失效。
   const editing = usePlacementEditing({
     initialPlacements: props.template.placements,
-    pageSize: () => pdf.pageSizes.value[0],
+    pageSize: (page) => pdf.pageSizes.value[page - 1],
     onChanged: markDirty,
   });
 

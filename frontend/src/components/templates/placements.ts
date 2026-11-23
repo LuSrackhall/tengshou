@@ -14,13 +14,13 @@ function isParty(value: string): value is "party_a" | "party_b" {
   return value === "party_a" || value === "party_b";
 }
 
-/** 新建标定框：字段/签名/公章的默认尺寸与校验顺序照旧。 */
+/** 新建标定框：字段/签名/公章的默认尺寸与校验顺序照旧；页码取自表单。 */
 export function createPlacement(
   payload: AddPlacementPayload,
   pageSize: { width: number; height: number },
   existing: Placement[],
 ): CreatePlacementResult {
-  const page = 1;
+  const page = payload.page;
   const placement: Placement = {
     id: newPlacementId(),
     page,

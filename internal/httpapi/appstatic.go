@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-//go:embed web/app/index.html web/app/app.js web/app/app.css web/app/vendor/pdfjs/pdf.min.js web/app/vendor/pdfjs/pdf.worker.min.js all:web/app/dist
+//go:embed web/app/index.html web/app/app.css web/app/vendor/pdfjs/pdf.min.js web/app/vendor/pdfjs/pdf.worker.min.js all:web/app/dist
 var appFS embed.FS
 
 // appDistFS 是 Vite 构建产物目录（frontend/ → web/app/dist）。入库的
@@ -24,6 +24,13 @@ var appDistFS = func() fs.FS {
 }()
 
 func (s *Server) handleAppIndex(w http.ResponseWriter, r *http.Request) {
+	// GET /app/ is a subtree pattern: only the app entry itself may fall back
+	// to index.html. Retired or unknown assets must 404 instead of becoming
+	// the page (app.js is retired as of phase 1).
+	if r.URL.Path != "/app/" && r.URL.Path != "/app/index.html" {
+		http.NotFound(w, r)
+		return
+	}
 	s.serveAppFile(w, r, "web/app/index.html", "text/html; charset=utf-8")
 }
 
@@ -33,7 +40,7 @@ func (s *Server) handleAppAsset(name, contentType string) http.HandlerFunc {
 	}
 }
 
-// handleAppDist serves the Vue island bundle built by Vite. File names are
+// handleAppDist serves the Vue app bundle built by Vite. File names are
 // fixed (tengshou-ui.js / tengshou-ui.css), so responses are always
 // revalidated instead of cache-busted.
 func (s *Server) handleAppDist(w http.ResponseWriter, r *http.Request) {

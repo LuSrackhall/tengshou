@@ -1,0 +1,5 @@
+/* 应用外壳：index.html 只保留 #app 宿主。display: contents 让 Vue 渲染的
+   topbar 与 main 成为 body 的直接布局子项，保持迁移前 index.html 的结构。 */
+#app {
+  display: contents;
+}

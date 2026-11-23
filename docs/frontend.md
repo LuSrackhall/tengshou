@@ -1,8 +1,8 @@
-# 前端工程（阶段 0：Vite + Vue 3 + TypeScript）
+# 前端工程（Vite + Vue 3 + TypeScript）
 
-阶段 0 的目标是先把构建管线立起来，不迁移业务视图：界面仍由存量
-`internal/httpapi/web/app/app.js` 驱动，Vue 先以一个最小「岛」（顶栏同步状态
-徽标）接入，新旧入口共存。后续阶段按域把 `app.js` 逐块迁到 Vue 组件。
+阶段 1 收口后，整个界面由一个 Vue 应用渲染：`frontend/src/main.ts` 挂载
+`App.vue`，`internal/httpapi/web/app/index.html` 只保留 `#app` 宿主、本地
+pdf.js vendor 与 Vite 产物。存量 `app.js` 已退役，不得重新引入。
 
 ## 目录
 
@@ -14,15 +14,18 @@ frontend/                         # 前端工程（Vite root）
   index.html                      # 仅开发预览页，不参与生产构建
   scripts/clean-dist.mjs          # 清理产物，保留入库的 dist/.keep
   src/
-    main.ts                       # 生产入口：挂载 Vue 岛
+    main.ts                       # 生产入口：挂载 App.vue
+    App.vue                       # 外壳：顶栏/tab/统计/toast/视图宿主
     dev.ts                        # 开发预览入口（额外引入真实 app.css）
     api/client.ts                 # fetch 封装：base/错误信封/query/超时归类
     api/endpoints.ts              # typed 端点调用面（按域拆分到 endpoints/）
     api/types.ts                  # API 契约类型入口（按域拆分到 types/）
     api/README.md                 # 类型 ↔ Go 源码对照、端点覆盖清单
-    bridge/live-status.ts         # app.js ↔ Vue 岛的状态桥
-    components/LiveStatusBadge.vue
-    styles/island.css
+    bridge/app.ts                 # 跨域事件、toast/刷新/切 tab 的统一入口
+    bridge/live-status.ts         # 顶栏同步状态桥（realtime → 徽标）
+    shell/                        # tab 状态、事件契约、SSE/轮询调度
+    ui/                           # toast、modal/backdrop、格式化、下载
+    components/                   # 按域拆分的 Vue 视图与弹窗
 internal/httpapi/web/app/dist/    # Vite 产物（tengshou-ui.js / .css）
 ```
 
@@ -38,7 +41,7 @@ npm run build         # 清理 dist（保留 .keep）后 vite build
 产物固定为 `internal/httpapi/web/app/dist/tengshou-ui.js` 与
 `tengshou-ui.css`，由 `internal/httpapi/appstatic.go` 的
 `//go:embed ... all:web/app/dist` 打进单二进制，运行时不访问公网、不依赖
-CDN。`index.html` 同时保留旧 `app.js` 与新的 module 入口。
+CDN。`index.html` 只加载本地 pdf.js vendor 与 module 入口。
 
 一键构建（前端 + Go）：
 
@@ -52,9 +55,9 @@ make serve            # 先构建前端，再启动本地服务
 ### 没有 node 时
 
 `dist/.keep` 入库，保证 `go build` / `go test ./...` 在干净 clone、未安装
-node 的机器上仍然可编译（只是没有 Vue 岛产物：徽标不显示，其余界面不受
-影响）。**发布产物不受影响**：CI 的 `frontend` job 始终执行 `npm ci`、
-类型检查与构建，`cli` / `desktop` 构建 job 会先取回该产物再 `go build`。
+node 的机器上仍然可编译（此时没有界面产物，页面需要前端构建后才完整）。
+**发布产物不受影响**：CI 的 `frontend` job 始终执行 `npm ci`、类型检查与
+构建，`cli` / `desktop` 构建 job 会先取回该产物再 `go build`。
 
 ## 开发预览
 
@@ -63,9 +66,9 @@ cd frontend
 npm run dev           # 打开提示的地址，页面里可切换同步状态各档位
 ```
 
-预览页直接引用仓库里真实的 `app.css`，观感与正式页面一致；它只用于开发已
-迁移的岛，不参与生产构建（`vite build` 只以 `src/main.ts` 为入口）。
-完整界面仍通过 `make serve` 后打开 `/app/` 查看。
+预览页直接引用仓库里真实的 `app.css`，观感与正式页面一致；它只用于开发
+同步状态徽标，不参与生产构建（`vite build` 只以 `src/main.ts` 为入口）。
+完整界面通过 `make serve` 后打开 `/app/` 查看。
 
 ## API 客户端与类型
 
@@ -112,11 +115,11 @@ barrel 形式，调用点无需感知拆分。
 
 `.github/workflows/ci.yml` 的 `frontend` job：
 
-1. `bash scripts/check-frontend-structure.sh`（app.js 基线棘轮 + 单文件 ≤ 600 行）；
+1. `bash scripts/check-frontend-structure.sh`（app.js 退役检查 + 单文件 ≤ 600 行）；
 2. `npm ci` → `npm run typecheck` → `npm run build`；
 3. 校验 `tengshou-ui.js` / `tengshou-ui.css` 存在并上传 `frontend-dist` 产物；
 4. `cli` / `desktop` job 依赖该 job，下载产物后再 `go build`（`go:embed`
    要求编译期目录存在）。
 
-存量 `app.js` 只许减不许增：迁移代码时同步删除旧逻辑；显著缩小后下调
-`scripts/check-frontend-structure.sh` 里的 `APP_JS_BASELINE`，保持棘轮单调下降。
+存量 `app.js` 已退役：`scripts/check-frontend-structure.sh` 在它重新出现时
+直接失败；新功能一律落 `frontend/src/` 的 Vue 组件。

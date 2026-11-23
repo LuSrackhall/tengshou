@@ -2,7 +2,7 @@
 // 共用一份全局声明），这里只保留模板域用到的加载/渲染函数。
 //
 // index.html 以 classic script 先加载 /app/vendor/pdf.min.js（全局
-// pdfjsLib）再加载 app.js 与 Vue 产物；worker 也来自 /app/vendor/。
+// pdfjsLib）再加载 Vue 产物；worker 也来自 /app/vendor/。
 // 不引入 npm 包、不访问 CDN，保持离线单二进制。禁止 any / ts-ignore。
 import type {
   PdfDocument,

@@ -3,7 +3,7 @@
 //   - 字段键创建后不可修改（编辑时禁用）；
 //   - 内置字段类型不可修改（类型下拉禁用），但名称/必填/默认值等仍可编辑；
 //   - 选项仅单选字段展示；新建时台账/模板默认勾选；
-//   - 保存后走 app.js 的整体刷新，使未迁移域的 state.fields 同步更新。
+//   - 保存后调用 refreshAfterWrite() 广播变更，各域按需重取字段。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { ApiError } from "../../api/client";
 import { createField, updateField } from "../../api/endpoints";

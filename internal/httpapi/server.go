@@ -193,7 +193,6 @@ func (s *Server) routes() {
 	m := s.mux
 	m.HandleFunc("GET /", s.handleIndex)
 	m.HandleFunc("GET /app/", s.handleAppIndex)
-	m.HandleFunc("GET /app/app.js", s.handleAppAsset("app.js", "application/javascript; charset=utf-8"))
 	m.HandleFunc("GET /app/app.css", s.handleAppAsset("app.css", "text/css; charset=utf-8"))
 	m.HandleFunc("GET /app/vendor/pdf.min.js",
 		s.handleAppAsset("vendor/pdfjs/pdf.min.js", "application/javascript; charset=utf-8"))

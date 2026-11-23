@@ -1,9 +1,9 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 
-// 阶段 0：Vue 以「岛」的形式挂在存量页面里。构建产物固定文件名
+// 阶段 1 收口：整个界面由一个 Vue 应用渲染。构建产物固定文件名
 // tengshou-ui.js / tengshou-ui.css，由 Go 侧 //go:embed 打进单二进制；
-// 页面仍然先加载旧 app.js，新旧入口共存。
+// index.html 只保留 #app 宿主、本地 pdf.js vendor 与 module 入口。
 export default defineConfig(({ mode }) => ({
   plugins: [vue()],
   define: {

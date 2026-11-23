@@ -3,9 +3,9 @@
 // 结构与 app.js renderSeals 的输出一致（toolbar / hint / summary / seal-grid /
 // seal-card 类名不变），数据走 frontend/src/api 的 typed 端点。
 //
-// 实时刷新：app.js 仍是 SSE/轮询的持有者，收到变更后派发
+// 实时刷新：shell/realtime.ts 持有 SSE/轮询调度，收到变更后派发
 // tengshou:data-changed；本组件在 entities 含 seal 或为空时重取（外部写入
-// 数秒内可见）。写操作后调用 refreshAfterWrite()，app.js 整体刷新并派发该
+// 数秒内可见）。写操作后调用 refreshAfterWrite()，由 bridge/app.ts 派发该
 // 事件，本域与其它已迁移域随之刷新。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {

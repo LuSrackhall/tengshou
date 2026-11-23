@@ -1,30 +1,54 @@
-// app.js ↔ Vue 迁移期桥（相对方、合同、公章与新手引导域共用）。
+// Vue 域之间的跨域桥（app.js 退役后由 Vue 壳自身提供这些能力）。
 //
-// 相对方域的跨域动作只有一个：借用合同表单（「以此档案新建合同」与历史
-// 合同的查看/续签），另外写入后需要触发 app.js 的整体刷新。合同表单已迁到
-// Vue（components/contracts/），因此这些入口改为派发
-// tengshou:open-contract-form，由台账岛打开表单；引导岛的合同新建步骤与
-// app.js 的模板页同样经该事件打开新建表单。
+// 跨域动作：
+//   - 相对方 → 合同表单：「以此档案新建合同」与历史合同的查看/续签，经
+//     tengshou:open-contract-form 由台账岛打开表单；
+//   - 新手引导 → 模板导入/标定编辑器/合同表单，经 tengshou:open-* 事件；
+//   - 模板页/台账 → 批量生成，经 tengshou:open-batch-generate 由台账岛渲染；
+//   - 台账「导入 Excel」→ tengshou:open-excel-import，由外壳的导入宿主弹出
+//     文件选择并渲染 Vue 导入对话框。
 //
-// 新手引导已迁到 Vue（components/onboarding/）：深链需要切换主 tab（走
-// app.js 的 switchTab），并派发模板导入 / 标定编辑器 / 合同表单事件。
+// 公共能力：
+//   - toast() 走 ui/toast.ts 的 ToastHost；
+//   - refreshAfterWrite() 派发 tengshou:data-changed，让各域重取数据；
+//   - switchTab() 走 shell/tabs.ts，保持激活态与 tab-change 事件一致。
 //
-// 反向调用（Vue → app.js）：toast、整体刷新与 Excel 导入仍由 app.js 实现，
-// 统一经 window.__tengshouApp 调用；组件不直接读 window。扫码签名、合同
-// 详情里的签名摘要、生成面板与批量生成对话框都已迁到 Vue
-// （components/signatures/、components/contracts/），批量生成由合同台账岛
-// 监听 tengshou:open-batch-generate 后打开。
-//
-// 实时刷新：app.js 收到 SSE / 轮询事件或本地写入完成后派发两个 window 事件：
+// 实时刷新：shell/realtime.ts 收到 SSE / 轮询事件或本地写入完成后派发两个
+// window 事件：
 //   - tengshou:change       一条变更（detail 是 appEvent 的紧凑子集）
 //   - tengshou:data-changed 需要重取的实体列表（detail.entities）
-// 迁移期新旧入口都靠它们保持自动刷新；退役时随 app.js 一起删除。
 
+import { showToast } from "../ui/toast";
+import {
+  CHANGE_EVENT,
+  DATA_CHANGED_EVENT,
+  OPEN_BATCH_GENERATE_EVENT,
+  OPEN_CONTRACT_FORM_EVENT,
+  OPEN_EXCEL_IMPORT_EVENT,
+  OPEN_TEMPLATE_EDITOR_EVENT,
+  OPEN_TEMPLATE_IMPORT_EVENT,
+  TAB_CHANGE_EVENT,
+  notifyDataChanged,
+  type DataChangedDetail,
+} from "../shell/events";
+import { switchTab as switchTabImpl } from "../shell/tabs";
 import type {
   ChangeEntity,
   Contract,
   DocumentKind,
 } from "../api/types";
+
+export {
+  CHANGE_EVENT,
+  DATA_CHANGED_EVENT,
+  OPEN_BATCH_GENERATE_EVENT,
+  OPEN_CONTRACT_FORM_EVENT,
+  OPEN_EXCEL_IMPORT_EVENT,
+  OPEN_TEMPLATE_EDITOR_EVENT,
+  OPEN_TEMPLATE_IMPORT_EVENT,
+  TAB_CHANGE_EVENT,
+  type DataChangedDetail,
+};
 
 export interface PartyRef {
   id: string;
@@ -46,15 +70,6 @@ export interface BatchGenerateOptions {
   kind?: DocumentKind | "";
 }
 
-export interface AppBridge {
-  toast(message: string, isError?: boolean): void;
-  refreshAfterWrite(): Promise<void>;
-  /** 切换主 tab（引导步骤深链：模板页 / 合同台账 / 字段页）。 */
-  switchTab(tab: string): void;
-  /** 触发 app.js 的隐藏文件输入，导入 Excel 对话框仍归 app.js。 */
-  openExcelImport(): void;
-}
-
 /** app.js → Vue：台账岛注册的只读视图（模板页批量生成按钮使用）。 */
 export interface LedgerBridge {
   currentContracts(): Contract[];
@@ -62,29 +77,9 @@ export interface LedgerBridge {
 
 declare global {
   interface Window {
-    /** 存量 app.js 在文件末尾设置；迁移完成后移除。 */
-    __tengshouApp?: AppBridge;
     /** 合同台账岛在挂载期间注册；模板页批量生成读取当前台账。 */
     __tengshouContracts?: LedgerBridge;
   }
-}
-
-export const DATA_CHANGED_EVENT = "tengshou:data-changed";
-export const CHANGE_EVENT = "tengshou:change";
-// app.js 的 switchTab 切换后派发；已迁移域据此在重新显示时刷新
-// （等价于迁移前 switchTab 内联的 loadXxx 调用）。
-export const TAB_CHANGE_EVENT = "tengshou:tab-change";
-export const OPEN_CONTRACT_FORM_EVENT = "tengshou:open-contract-form";
-// 批量生成域（阶段 1 迁出 app.js）：台账与模板页都经该事件打开对话框，
-// 由合同台账岛渲染（模板页所在的 tab 不承载 overlay）。
-export const OPEN_BATCH_GENERATE_EVENT = "tengshou:open-batch-generate";
-// 模板域（阶段 1 迁出 app.js）：新手引导与模板页都需要打开标定编辑器或
-// 导入流程；模板岛监听这两个事件后接管。
-export const OPEN_TEMPLATE_EDITOR_EVENT = "tengshou:open-template-editor";
-export const OPEN_TEMPLATE_IMPORT_EVENT = "tengshou:open-template-import";
-
-export interface DataChangedDetail {
-  entities: string[];
 }
 
 export interface OpenContractFormDetail {
@@ -123,10 +118,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-export function getAppBridge(): AppBridge | null {
-  return window.__tengshouApp ?? null;
-}
-
 /** 统一错误文案：Error 取 message，其余转字符串。 */
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -135,19 +126,19 @@ export function errorMessage(error: unknown): string {
   return String(error);
 }
 
-/** 走 app.js 的顶栏 toast；桥缺席（开发预览页）时静默。 */
+/** 顶栏 toast（公共实现见 ui/toast.ts）。 */
 export function toast(message: string, isError = false): void {
-  window.__tengshouApp?.toast(message, isError);
+  showToast(message, isError);
 }
 
-/** 本地写入后让 app.js 重载自己的缓存并派发 data-changed。 */
+/** 本地写入后让各域重取自己的数据；与迁移前 refreshAfterWrite 的实体集一致。 */
 export async function refreshAfterWrite(): Promise<void> {
-  await window.__tengshouApp?.refreshAfterWrite();
+  notifyDataChanged(["field", "party", "contract", "seal", "template"]);
 }
 
-/** 切换主 tab：走 app.js 的 switchTab，保持 active class 与页面刷新一致。 */
+/** 切换主 tab：更新壳的激活态并派发 tab-change。 */
 export function switchTab(tab: string): void {
-  window.__tengshouApp?.switchTab(tab);
+  switchTabImpl(tab);
 }
 
 /** 打开合同表单（新建/编辑/续签）：由台账岛监听事件后打开 Vue 弹窗。 */
@@ -212,9 +203,9 @@ export function subscribeOpenBatchGenerate(
   return () => window.removeEventListener(OPEN_BATCH_GENERATE_EVENT, listener);
 }
 
-/** 触发 app.js 的 Excel 导入文件选择（对话框仍归 app.js）。 */
+/** 触发外壳的 Excel 导入文件选择（对话框由 Vue 渲染）。 */
 export function openExcelImport(): void {
-  getAppBridge()?.openExcelImport();
+  window.dispatchEvent(new CustomEvent(OPEN_EXCEL_IMPORT_EVENT));
 }
 
 function normalizeDataChanged(raw: unknown): DataChangedDetail {
@@ -227,7 +218,7 @@ function normalizeDataChanged(raw: unknown): DataChangedDetail {
   return { entities };
 }
 
-/** 订阅 app.js 的「需要重取」通知；返回取消订阅函数。 */
+/** 订阅「需要重取」通知；返回取消订阅函数。 */
 export function subscribeDataChanged(
   handler: (detail: DataChangedDetail) => void,
 ): () => void {

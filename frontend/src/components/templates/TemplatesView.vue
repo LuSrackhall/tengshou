@@ -4,11 +4,12 @@
 // 结构与 app.js renderTemplates 的输出一致（toolbar / hint / summary /
 // data-table / actions 类名不变），数据走 frontend/src/api 的 typed 端点。
 //
-// 跨域：导入后的标定、预览与生成在本域 Vue 组件内完成；批量生成对话框仍由
-// app.js 渲染，经 bridge/app.ts 调用。合同台账已迁到 Vue，批量生成读取
-// window.__tengshouContracts 的当前筛选结果（缺席时退回接口全量）。
-// 引导（app.js）通过 tengshou:open-template-editor / -import 打开本域。
-// 外部写入经 app.js 派发的 tengshou:data-changed 到达后重取列表。
+// 跨域：导入后的标定、预览与生成在本域 Vue 组件内完成；批量生成对话框由
+// components/contracts 的 Vue 组件承接，经 bridge/app.ts 调用。合同台账已
+// 迁到 Vue，批量生成读取 window.__tengshouContracts 的当前筛选结果（缺席时
+// 退回接口全量）。引导（components/onboarding）通过
+// tengshou:open-template-editor / -import 打开本域。
+// 外部写入经 shell/realtime.ts 派发的 tengshou:data-changed 到达后重取列表。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   deleteTemplate as deleteTemplateRequest,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 合同详情弹窗里的「已关联公章」摘要（公章域已迁出 app.js）。
-// app.js 打开合同详情时经 bridge/seal-summary.ts 把宿主交给本组件渲染；
+// 合同详情表单（components/contracts/ContractFormModal.vue）直接挂载本组件；
 // 结构与迁移前 sealsSummaryHTML 的输出一致。
 import type { Seal } from "../../api/types";
 

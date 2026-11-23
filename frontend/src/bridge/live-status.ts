@@ -1,8 +1,8 @@
 // 顶栏同步状态徽标的状态桥。
 //
-// 阶段 0 页面仍以存量 app.js 驱动；app.js 的 setLiveStatus 不再直接改 DOM，
-// 而是把状态写到 window.__tengshouLiveStatus 并派发 tengshou:live-status
-// 事件，由 Vue 岛渲染。这样新旧入口共存，且旧逻辑只减不增。
+// app.js 退役后由 shell/realtime.ts 的调度器发布状态：写到
+// window.__tengshouLiveStatus 并派发 tengshou:live-status 事件，由 Vue 的
+// LiveStatusBadge 渲染。状态档位与迁移前完全一致。
 
 export type LiveStatusMode = "connecting" | "sse" | "poll" | "offline";
 
@@ -16,7 +16,7 @@ export const LIVE_STATUS_EVENT = "tengshou:live-status";
 
 declare global {
   interface Window {
-    /** app.js 写入的最近一次同步状态；Vue 岛挂载时据此补一次当前值。 */
+    /** 最近一次同步状态；徽标挂载时据此补一次当前值。 */
     __tengshouLiveStatus?: Partial<LiveStatusState>;
   }
 }
@@ -34,6 +34,15 @@ export function normalizeLiveStatus(
     mode: isLiveStatusMode(raw?.mode) ? raw.mode : "connecting",
     detail: typeof raw?.detail === "string" ? raw.detail : "",
   };
+}
+
+/** 发布一次同步状态：写 window 并派发事件，供徽标与开发预览使用。 */
+export function publishLiveStatus(mode: LiveStatusMode, detail = ""): void {
+  const state: LiveStatusState = { mode, detail };
+  window.__tengshouLiveStatus = state;
+  window.dispatchEvent(
+    new CustomEvent<LiveStatusState>(LIVE_STATUS_EVENT, { detail: state }),
+  );
 }
 
 /**

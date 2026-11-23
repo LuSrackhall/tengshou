@@ -3,14 +3,10 @@
 // 来源（与 Go 侧逐字段核对）：
 //   internal/model/model.go          List / Stats / YearCount / ChangeLog / FieldChange
 //   internal/httpapi/handlers.go     writeError 的 {"error":{code,message}} 信封
-//   internal/httpapi/appapi.go       appEvent（SSE 负载）
 //   internal/service/service.go      FieldError / ValidationErrors
 //   internal/httpapi/appapi.go       filter() 支持的 list 查询参数
 
 export type ISODateTime = string;
-
-/** 纯日期，YYYY-MM-DD（合同的 signed_on / valid_from / valid_to）。 */
-export type ISODate = string;
 
 /** 分页集合信封（model.List[T]）。 */
 export interface List<T> {
@@ -79,16 +75,20 @@ export type CheckStatus = "ok" | "warn" | "error";
 
 // ---------- 变更记录（审计） ----------
 
-export type ChangeEntity =
-  | "contract"
-  | "party"
-  | "field"
-  | "seal"
-  | "template"
-  | "signature"
-  | "backup"
-  | "settings"
-  | "import";
+/** 变更实体清单：运行时过滤（SSE/筛选项）与类型共用的单一来源。 */
+export const CHANGE_ENTITIES = [
+  "contract",
+  "party",
+  "field",
+  "seal",
+  "template",
+  "signature",
+  "backup",
+  "settings",
+  "import",
+] as const;
+
+export type ChangeEntity = (typeof CHANGE_ENTITIES)[number];
 
 export type ChangeAction =
   | "create"
@@ -120,16 +120,5 @@ export interface ChangeLog {
   actor: string;
   summary: string;
   changes: FieldChange[];
-  created_at: ISODateTime;
-}
-
-/** SSE / 轮询事件负载（httpapi.appEvent，字段是 ChangeLog 的紧凑子集）。 */
-export interface AppChangeEvent {
-  id: string;
-  entity: ChangeEntity;
-  entity_id: string;
-  action: ChangeAction;
-  actor: string;
-  summary: string;
   created_at: ISODateTime;
 }

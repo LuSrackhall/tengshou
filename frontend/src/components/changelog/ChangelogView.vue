@@ -8,6 +8,7 @@
 
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { listChangelog } from "../../api/endpoints";
+import { CHANGE_ENTITIES } from "../../api/types";
 import type {
   ChangeEntity,
   ChangeLog,
@@ -28,18 +29,6 @@ import {
   fmtDate,
   isAgentEntry,
 } from "../../ui/format";
-
-const ENTITIES: readonly ChangeEntity[] = [
-  "contract",
-  "party",
-  "field",
-  "seal",
-  "template",
-  "signature",
-  "backup",
-  "settings",
-  "import",
-];
 
 const entity = ref<ChangeEntity | "">("");
 const source = ref<ChangeSource | "">("");
@@ -112,7 +101,7 @@ function reload(): void {
 
 function onEntityChange(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
-  entity.value = (ENTITIES as readonly string[]).includes(value)
+  entity.value = (CHANGE_ENTITIES as readonly string[]).includes(value)
     ? (value as ChangeEntity)
     : "";
   void load();

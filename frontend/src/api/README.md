@@ -94,7 +94,7 @@ async function load(): Promise<void> {
 | 类型模块 | Go 来源 |
 | --- | --- |
 | `types/bootstrap.ts` | `internal/httpapi/appapi.go`（handleAppBootstrap）、`internal/model/model.go`（Stats/YearCount）、`internal/httpapi/onboarding.go` |
-| `types/common.ts` | `internal/model/model.go`（List/Stats/YearCount/ChangeLog/FieldChange）、`internal/httpapi/handlers.go`（writeError/filter）、`internal/httpapi/appapi.go`（appEvent）、`internal/service/service.go`（FieldError/ValidationErrors） |
+| `types/common.ts` | `internal/model/model.go`（List/Stats/YearCount/ChangeLog/FieldChange）、`internal/httpapi/handlers.go`（writeError/filter）、`internal/service/service.go`（FieldError/ValidationErrors） |
 | `types/records.ts` | `internal/model/model.go`（Party/Contract/FieldDefinition/Seal/Placement/Template/TemplateUsage/ContractDetail） |
 | `types/documents.ts` | `internal/model/model.go`（Signature/OutputDocument/DocumentSignatureSnapshot）、`internal/overlay/overlay.go`（Warning）、`internal/service/documents.go`（Preflight/Batch） |
 | `types/imports.ts` | `internal/service/excel.go`、`internal/httpapi/appapi.go`（importRequest） |

@@ -274,7 +274,7 @@ onBeforeUnmount(() => {
       @click="openPreview(seal)"
     >
       <div class="seal-thumb">
-        <img :src="sealImageUrl(seal.id)" :alt="seal.name" loading="lazy">
+        <img :key="seal.sha256" :src="sealImageUrl(seal.id)" :alt="seal.name" loading="lazy">
       </div>
       <div class="seal-card-body">
         <div class="seal-name">{{ seal.name }}</div>

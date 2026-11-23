@@ -103,7 +103,6 @@ async function restore(field: FieldDefinition): Promise<void> {
     await updateField(field.id, { archived: false });
     toast("字段已恢复");
     await refreshAfterWrite();
-    scheduleFetch(0);
   } catch (error) {
     toast(errorMessage(error), true);
   }
@@ -121,7 +120,6 @@ async function archive(field: FieldDefinition): Promise<void> {
     await archiveFieldRequest(field.id);
     toast("字段已归档");
     await refreshAfterWrite();
-    scheduleFetch(0);
   } catch (error) {
     toast(errorMessage(error), true);
   }
@@ -149,30 +147,28 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="toolbar">
-    <div id="fieldEntityTabs" class="segmented">
+    <div class="segmented">
       <button
         type="button"
-        data-entity="contract"
         :class="{ active: entity === 'contract' }"
         @click="entity = 'contract'"
       >合同字段</button>
       <button
         type="button"
-        data-entity="party"
         :class="{ active: entity === 'party' }"
         @click="entity = 'party'"
       >相对方字段</button>
     </div>
     <label class="inline">
-      <input id="showArchivedFields" v-model="showArchived" type="checkbox"> 显示已归档
+      <input v-model="showArchived" type="checkbox"> 显示已归档
     </label>
     <span class="spacer"></span>
-    <button type="button" id="newFieldBtn" class="primary" @click="openCreate">新建字段</button>
+    <button type="button" class="primary" @click="openCreate">新建字段</button>
   </div>
   <p class="hint">字段是您自己的：新增后立刻可用于录入表单、Excel 导入导出与模板占位符，无需重启或更新软件。旧数据始终保留。</p>
-  <div id="fieldSummary" class="summary">{{ loaded ? summary : "" }}</div>
+  <div class="summary">{{ loaded ? summary : "" }}</div>
   <div class="table-wrap">
-    <table id="fieldTable" class="data-table">
+    <table class="data-table">
       <template v-if="loaded">
         <thead>
           <tr>
@@ -192,7 +188,6 @@ onBeforeUnmount(() => {
           <tr
             v-for="field in visibleFields"
             :key="field.id"
-            :data-id="field.id"
             :class="{ 'archived-row': field.archived }"
             @click="openEdit(field)"
           >

@@ -141,7 +141,7 @@ go run ./cmd/tengshou-cli restore --data-dir ./data --file <备份包.zip>
   config.json     # 服务端口、API 令牌、字体、页边距、签名有效期
   tengshou.db     # SQLite 数据库（WAL）
   assets/         # 签名（signatures/）、公章（seals/）等模板资源
-  templates/      # 用户 HTML 模板；PDF 模板在 templates/pdf/<模板id>/
+  templates/      # 示例 HTML 模板（只读副本，仅 demo 生成）；PDF 模板在 templates/pdf/<模板id>/
   outputs/        # 生成的 PDF
   backups/        # 完整备份包与恢复前安全副本（pre-restore-*/）
   logs/           # JSON 日志（启动时按大小轮转）

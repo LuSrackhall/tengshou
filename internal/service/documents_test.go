@@ -335,3 +335,227 @@ func TestBatchGenerationContinuesPastFailures(t *testing.T) {
 		t.Fatalf("retried documents = %+v err=%v", docs, err)
 	}
 }
+
+// TestRegenerateAfterTemplateVersionChangeKeepsSignature locks the headline
+// acceptance rule: after a template version change, regenerating unchanged
+// content keeps the existing signature, while a later content change blocks
+// regeneration on the new version too.
+func TestRegenerateAfterTemplateVersionChangeKeepsSignature(t *testing.T) {
+	f := newTemplateFixture(t)
+	ctx := context.Background()
+	party := mustParty(t, f.svc, "周九")
+	sealRel, _, _ := f.writePNG(t, "assets/seals/regenerate-seal.png")
+	seal := model.Seal{Name: "换版公章", AssetPath: sealRel, SHA256: "sealsha", WidthPx: 80, HeightPx: 30}
+	if err := f.st.PutSeal(ctx, &seal); err != nil {
+		t.Fatal(err)
+	}
+	tpl := b4Template(t, f, seal.ID)
+
+	contract := mustContract(t, f.svc, service.ContractInput{
+		Year: 2026, Title: "B4 换版重出合同", PartyBID: party.ID, Amount: 900,
+	})
+	digest, err := service.ContentSHA256(contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig := b4Signature(t, f, party, digest)
+
+	preview, err := f.svc.PreviewTemplate(ctx, tpl.ID, service.TemplatePreviewInput{ContractID: contract.ID})
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	first, err := f.svc.GenerateContractDocument(ctx, service.GenerateInput{
+		TemplateID: tpl.ID, ContractID: contract.ID, PreviewSHA256: preview.PreviewSHA256,
+	})
+	if err != nil {
+		t.Fatalf("initial generate: %v", err)
+	}
+	firstDoc := first.Document
+	if firstDoc.Kind != model.DocumentKindInitial || firstDoc.TemplateID != tpl.ID {
+		t.Fatalf("initial document = %+v", firstDoc)
+	}
+
+	// Saving the mapping again creates a new template version while the
+	// contract content fingerprint stays unchanged.
+	nextPlacements := append([]model.Placement(nil), tpl.Placements...)
+	moved := false
+	for i := range nextPlacements {
+		if nextPlacements[i].ID == "no" {
+			nextPlacements[i].Y++
+			moved = true
+		}
+	}
+	if !moved {
+		t.Fatal("template placements missing the contract_no field")
+	}
+	saved, err := f.svc.SaveTemplateMapping(ctx, tpl.ID, service.TemplateSaveInput{Placements: nextPlacements})
+	if err != nil {
+		t.Fatalf("save new template version: %v", err)
+	}
+	next := saved.Template
+	if next.ID == tpl.ID || next.Version <= tpl.Version {
+		t.Fatalf("new template version = %+v (previous %s v%d)", next, tpl.ID, tpl.Version)
+	}
+
+	// The new version reuses the signature because the content did not change.
+	preflight, err := f.svc.PreflightContractGeneration(ctx, next.ID, contract.ID)
+	if err != nil {
+		t.Fatalf("preflight new version: %v", err)
+	}
+	if !preflight.Ready || preflight.Status != service.PreflightReady {
+		t.Fatalf("preflight new version = %+v", preflight)
+	}
+	if preflight.ContentSHA256 != digest || preflight.TemplateVersion != next.Version {
+		t.Fatalf("preflight digests/version = %+v", preflight)
+	}
+	for _, issue := range preflight.Issues {
+		if issue.Code == "content_changed" {
+			t.Fatalf("unexpected content_changed issue: %+v", preflight.Issues)
+		}
+	}
+	if len(preflight.Signatures) != 1 || preflight.Signatures[0].SignatureID != sig.ID ||
+		preflight.Signatures[0].ContentSHA256 != digest {
+		t.Fatalf("preflight signature snapshot = %+v", preflight.Signatures)
+	}
+
+	previewNext, err := f.svc.PreviewTemplate(ctx, next.ID, service.TemplatePreviewInput{ContractID: contract.ID})
+	if err != nil {
+		t.Fatalf("preview new version: %v", err)
+	}
+	second, err := f.svc.GenerateContractDocument(ctx, service.GenerateInput{
+		TemplateID: next.ID, ContractID: contract.ID, PreviewSHA256: previewNext.PreviewSHA256,
+	})
+	if err != nil {
+		t.Fatalf("regenerate on new version: %v", err)
+	}
+	secondDoc := second.Document
+	if secondDoc.Kind != model.DocumentKindRegenerate || secondDoc.SourceDocumentID != firstDoc.ID {
+		t.Fatalf("regenerate document = %+v", secondDoc)
+	}
+	if secondDoc.TemplateID != next.ID || secondDoc.TemplateVersion != next.Version {
+		t.Fatalf("regenerate template = %+v", secondDoc)
+	}
+	if secondDoc.ContentSHA256 != digest || len(secondDoc.Signatures) != 1 ||
+		secondDoc.Signatures[0].SignatureID != sig.ID ||
+		secondDoc.Signatures[0].ContentSHA256 != digest {
+		t.Fatalf("regenerate trace = %+v", secondDoc)
+	}
+
+	// A later content change blocks the new version exactly like the old one.
+	changed := contract
+	changed.Title = "B4 换版重出合同（改名）"
+	if _, _, err := f.svc.SaveContract(ctx, service.ContractInput{
+		ID: changed.ID, ContractNo: changed.ContractNo, Year: changed.Year,
+		Title: changed.Title, PartyBID: changed.PartyBID, Amount: changed.Amount,
+	}); err != nil {
+		t.Fatalf("update contract: %v", err)
+	}
+	changedPreflight, err := f.svc.PreflightContractGeneration(ctx, next.ID, contract.ID)
+	if err != nil {
+		t.Fatalf("preflight changed content: %v", err)
+	}
+	if changedPreflight.Ready || changedPreflight.Status != service.PreflightNeedsResign {
+		t.Fatalf("changed preflight = %+v", changedPreflight)
+	}
+	previewChanged, err := f.svc.PreviewTemplate(ctx, next.ID, service.TemplatePreviewInput{ContractID: contract.ID})
+	if err != nil {
+		t.Fatalf("preview changed content: %v", err)
+	}
+	_, err = f.svc.GenerateContractDocument(ctx, service.GenerateInput{
+		TemplateID: next.ID, ContractID: contract.ID, PreviewSHA256: previewChanged.PreviewSHA256,
+	})
+	mustErrorCode(t, err, "content_changed")
+}
+
+// TestPreflightGatesMissingPartyAndSeal covers the two output gates that had
+// no direct tests: a contract whose counterparty archive disappeared and a
+// seal whose image file is gone.
+func TestPreflightGatesMissingPartyAndSeal(t *testing.T) {
+	t.Run("missing_party", func(t *testing.T) {
+		f := newTemplateFixture(t)
+		ctx := context.Background()
+		party := mustParty(t, f.svc, "缺失相对方")
+		sealRel, _, _ := f.writePNG(t, "assets/seals/party-seal.png")
+		seal := model.Seal{Name: "相对方公章", AssetPath: sealRel, SHA256: "sealsha", WidthPx: 80, HeightPx: 30}
+		if err := f.st.PutSeal(ctx, &seal); err != nil {
+			t.Fatal(err)
+		}
+		// No signature placement so this case isolates the counterparty gate.
+		imported := f.importTemplate(t, "B4 缺相对方模板")
+		saved, err := f.svc.SaveTemplateMapping(ctx, imported.Template.ID, service.TemplateSaveInput{
+			Placements: []model.Placement{
+				{ID: "no", Page: 1, X: 120, Y: 150, W: 200, H: 22, Type: model.PlacementField, Field: "contract.contract_no"},
+				{ID: "seal", Page: 1, X: 120, Y: 600, W: 120, H: 120, Type: model.PlacementSeal,
+					SealMode: model.PlacementSealFixed, SealID: seal.ID},
+			},
+		})
+		if err != nil {
+			t.Fatalf("save mapping: %v", err)
+		}
+		tpl := saved.Template
+		contract := mustContract(t, f.svc, service.ContractInput{
+			Year: 2026, Title: "B4 缺相对方合同", PartyBID: party.ID, Amount: 100,
+		})
+		// Simulate a contract whose counterparty archive disappeared; the
+		// preflight gate must block instead of rendering without a party.
+		if err := f.st.DeleteParty(ctx, party.ID); err != nil {
+			t.Fatalf("delete party: %v", err)
+		}
+		preflight, err := f.svc.PreflightContractGeneration(ctx, tpl.ID, contract.ID)
+		if err != nil {
+			t.Fatalf("preflight: %v", err)
+		}
+		if preflight.Ready || preflight.Status != service.PreflightMissingParty {
+			t.Fatalf("preflight = %+v", preflight)
+		}
+		codes := map[string]bool{}
+		for _, issue := range preflight.Issues {
+			codes[issue.Code] = true
+		}
+		if !codes["missing_party"] {
+			t.Fatalf("issues = %+v", preflight.Issues)
+		}
+		_, err = f.svc.GenerateContractDocument(ctx, service.GenerateInput{
+			TemplateID: tpl.ID, ContractID: contract.ID, PreviewSHA256: preflight.PreviewSHA256,
+		})
+		mustErrorCode(t, err, "missing_party")
+	})
+
+	t.Run("missing_seal", func(t *testing.T) {
+		f := newTemplateFixture(t)
+		ctx := context.Background()
+		party := mustParty(t, f.svc, "缺公章相对方")
+		// The seal record exists but its image file is gone.
+		seal := model.Seal{Name: "缺失公章", AssetPath: "assets/seals/missing.png", SHA256: "sealsha", WidthPx: 80, HeightPx: 30}
+		if err := f.st.PutSeal(ctx, &seal); err != nil {
+			t.Fatal(err)
+		}
+		tpl := b4Template(t, f, seal.ID)
+		contract := mustContract(t, f.svc, service.ContractInput{
+			Year: 2026, Title: "B4 缺公章合同", PartyBID: party.ID, Amount: 100,
+		})
+		digest, err := service.ContentSHA256(contract)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b4Signature(t, f, party, digest)
+		preflight, err := f.svc.PreflightContractGeneration(ctx, tpl.ID, contract.ID)
+		if err != nil {
+			t.Fatalf("preflight: %v", err)
+		}
+		if preflight.Ready || preflight.Status != service.PreflightMissingSeal {
+			t.Fatalf("preflight = %+v", preflight)
+		}
+		codes := map[string]bool{}
+		for _, issue := range preflight.Issues {
+			codes[issue.Code] = true
+		}
+		if !codes["missing_seal"] {
+			t.Fatalf("issues = %+v", preflight.Issues)
+		}
+		_, err = f.svc.GenerateContractDocument(ctx, service.GenerateInput{
+			TemplateID: tpl.ID, ContractID: contract.ID, PreviewSHA256: preflight.PreviewSHA256,
+		})
+		mustErrorCode(t, err, "missing_seal")
+	})
+}

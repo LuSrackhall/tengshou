@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -366,7 +367,11 @@ func (s *Service) generateContractDocument(ctx context.Context, tpl model.Templa
 	kind := s.resolveDocumentKind(ctx, rc.contract.ID, in.Kind)
 	sourceID := strings.TrimSpace(in.SourceDocumentID)
 	if kind == model.DocumentKindRegenerate && sourceID == "" {
-		if latest, err := s.rd.LatestSuccessfulDocument(ctx, rc.contract.ID); err == nil {
+		latest, err := s.rd.LatestSuccessfulDocument(ctx, rc.contract.ID)
+		if err != nil {
+			slog.Warn("整改重出未找到来源文档，继续生成",
+				"contract_id", rc.contract.ID, "error", err)
+		} else {
 			sourceID = latest.ID
 		}
 	}
@@ -717,7 +722,10 @@ func (s *Service) recordFailedDocument(ctx context.Context, tpl model.Template, 
 		SourceDocumentID: strings.TrimSpace(sourceID),
 		CreatedAt:        s.now(),
 	}
-	_ = s.st.PutOutputDocument(ctx, &doc)
+	if err := s.st.PutOutputDocument(ctx, &doc); err != nil {
+		slog.Error("记录生成失败尝试失败",
+			"contract_id", rc.contract.ID, "template_id", tpl.ID, "error", err)
+	}
 	s.logChange(ctx, model.ChangeEntityContract, rc.contract.ID, model.ChangeActionGenerate,
 		fmt.Sprintf("生成 PDF 失败（模板「%s」v%d）：%s", tpl.Name, tpl.Version,
 			truncateRunes(message, 200)), nil)

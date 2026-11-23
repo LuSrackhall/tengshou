@@ -313,6 +313,24 @@ func TestBatchGenerationContinuesPastFailures(t *testing.T) {
 		t.Fatalf("failed batch records = %+v err=%v", failed, err)
 	}
 
+	// F-TE-7：批量生成的每个成功项都写入合约 generate 变更记录（B9 审计要求）。
+	audit, err := f.rd.ListChangeLogs(ctx, store.ChangeFilter{
+		Entity: model.ChangeEntityContract, EntityID: ready.ID, Limit: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := false
+	for _, entry := range audit.Items {
+		if entry.Action == model.ChangeActionGenerate && strings.Contains(entry.Summary, "生成 PDF") {
+			generated = true
+			break
+		}
+	}
+	if !generated {
+		t.Fatalf("batch generation audit missing: %+v", audit.Items)
+	}
+
 	// A single-contract retry after a fresh preview succeeds and is recorded in
 	// the same contract history.
 	retryPreview, err := f.svc.PreflightBatchGeneration(ctx, service.BatchPreviewInput{

@@ -110,6 +110,26 @@ func TestLedgerSnapshotRoundTrip(t *testing.T) {
 	}
 }
 
+// BuildLedger relies on rows and snapshot.Rows being in lockstep; a mismatch
+// must fail loudly instead of writing contract ids onto the wrong rows.
+func TestBuildLedgerRejectsSnapshotLengthMismatch(t *testing.T) {
+	rows := [][]any{
+		{"HT-2026-0001", 1200.5, "居住"},
+		{"HT-2026-0002", 0.0, ""},
+	}
+	snapshot := &xlsx.Snapshot{
+		Version:    xlsx.SnapshotVersion,
+		ExportedAt: "2026-11-23T00:00:00Z",
+		FieldKeys:  []string{"amount", "contract_no", "usage"},
+		Rows: []xlsx.SnapshotRow{
+			{ContractID: "ctr_a", ContractNo: "HT-2026-0001", Fingerprint: strings.Repeat("a", 64)},
+		},
+	}
+	if _, err := xlsx.BuildLedger(testFields(), rows, snapshot); err == nil {
+		t.Fatal("BuildLedger should reject rows/snapshot length mismatch")
+	}
+}
+
 // Files without a snapshot are external/legacy: Read must not invent one and
 // must not treat them as round-trip exports.
 func TestReadWorkbookWithoutSnapshot(t *testing.T) {

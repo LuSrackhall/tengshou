@@ -310,6 +310,28 @@ func TestExcelTemplateImportAndExport(t *testing.T) {
 	if preview.Summary.Total != 2 || preview.Summary.Create != 1 || preview.Summary.Error != 1 {
 		t.Fatalf("preview summary = %+v rows=%+v", preview.Summary, preview.Rows)
 	}
+	var errorRows []service.ImportRow
+	for _, row := range preview.Rows {
+		if row.Action == "error" {
+			errorRows = append(errorRows, row)
+		}
+	}
+	if len(errorRows) != 1 {
+		t.Fatalf("error rows = %+v", preview.Rows)
+	}
+	if len(errorRows[0].Errors) == 0 {
+		t.Fatalf("error row must report per-field details: %+v", errorRows[0])
+	}
+	mentionsAmount := false
+	for _, fieldErr := range errorRows[0].Errors {
+		if strings.Contains(fieldErr.Label, "金额（元）") || strings.Contains(fieldErr.Message, "金额（元）") {
+			mentionsAmount = true
+			break
+		}
+	}
+	if !mentionsAmount {
+		t.Fatalf("error details should mention 金额（元）: %+v", errorRows[0].Errors)
+	}
 	if _, err := svc.CommitImport(ctx, workbook, service.ImportOptions{}); err == nil {
 		t.Fatal("commit without skip_errors should block")
 	}

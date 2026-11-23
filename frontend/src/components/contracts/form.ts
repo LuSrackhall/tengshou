@@ -96,7 +96,8 @@ export function contractControlValue(
     case "party_b":
       return partyBName || "";
     case "amount":
-      return seed.amount === undefined ? "" : String(seed.amount);
+      // 与迁移前 contract.amount || "" 一致：0 也回填空串（审计 RR-1）。
+      return seed.amount ? String(seed.amount) : "";
     case "signed_on":
       return seed.signed_on ?? "";
     case "valid_from":

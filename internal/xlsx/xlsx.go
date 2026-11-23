@@ -273,7 +273,14 @@ func BuildTemplate(fields []model.FieldDefinition) ([]byte, error) {
 // users can sum them in Excel. It also writes the hidden contract-id column
 // and, when snapshot is non-nil, the hidden snapshot worksheet that enables
 // round-trip delete/conflict detection. Image assets are never embedded.
+//
+// rows and snapshot.Rows must be in the same order and have the same length:
+// snapshot.Rows[i] supplies the contract id written for rows[i]. Any mismatch
+// would silently put a contract id on the wrong row, so it is rejected.
 func BuildLedger(fields []model.FieldDefinition, rows [][]any, snapshot *Snapshot) ([]byte, error) {
+	if snapshot != nil && len(snapshot.Rows) != len(rows) {
+		return nil, fmt.Errorf("台账行数与快照行数不一致（%d 行 vs %d 行快照），无法对应合同 ID", len(rows), len(snapshot.Rows))
+	}
 	f := excelize.NewFile()
 	defer f.Close()
 	index, err := f.NewSheet(SheetLedger)

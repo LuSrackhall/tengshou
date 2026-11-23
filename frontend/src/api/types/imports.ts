@@ -73,7 +73,6 @@ export interface ImportRow {
   contract_no: string;
   title: string;
   party_b: string;
-  values: Record<string, string>;
   /** 冲突行显示的差异单元格。 */
   system_values?: Record<string, string>;
   excel_values?: Record<string, string>;

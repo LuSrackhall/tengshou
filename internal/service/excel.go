@@ -59,14 +59,13 @@ type ImportColumn struct {
 type ImportRow struct {
 	// Key is the stable resolution key: the row number for file rows and
 	// "delete:<contract_id>" for rows missing from the file.
-	Key        string            `json:"key"`
-	Row        int               `json:"row"` // 1-based Excel row; 0 for delete candidates
-	ContractID string            `json:"contract_id,omitempty"`
-	Action     string            `json:"action"`
-	ContractNo string            `json:"contract_no"`
-	Title      string            `json:"title"`
-	PartyB     string            `json:"party_b"`
-	Values     map[string]string `json:"values"`
+	Key        string `json:"key"`
+	Row        int    `json:"row"` // 1-based Excel row; 0 for delete candidates
+	ContractID string `json:"contract_id,omitempty"`
+	Action     string `json:"action"`
+	ContractNo string `json:"contract_no"`
+	Title      string `json:"title"`
+	PartyB     string `json:"party_b"`
 	// SystemValues and ExcelValues show the differing cells of a conflict.
 	SystemValues   map[string]string `json:"system_values,omitempty"`
 	ExcelValues    map[string]string `json:"excel_values,omitempty"`
@@ -456,7 +455,6 @@ func (s *Service) previewRow(ctx context.Context, row xlsx.Row, ictx *importCont
 	preview := ImportRow{
 		Key:      strconv.Itoa(row.Number),
 		Row:      row.Number,
-		Values:   map[string]string{},
 		Errors:   plan.errs,
 		Warnings: plan.warnings,
 	}
@@ -466,12 +464,6 @@ func (s *Service) previewRow(ctx context.Context, row xlsx.Row, ictx *importCont
 	partyName := plan.in.PartyB
 	if plan.contract.PartyBID != "" {
 		partyName = s.partyName(ctx, plan.contract.PartyBID)
-	}
-	values := s.contractValues(ctx, &plan.contract, partyName)
-	for _, key := range ictx.mapping {
-		if value, ok := values[key]; ok {
-			preview.Values[key] = value
-		}
 	}
 	preview.ContractNo = plan.contract.ContractNo
 	if preview.ContractNo == "" {
@@ -703,7 +695,6 @@ func (s *Service) deleteCandidates(ctx context.Context, ictx *importContext, see
 			ContractNo: contract.ContractNo,
 			Title:      contract.Title,
 			PartyB:     s.partyName(ctx, contract.PartyBID),
-			Values:     map[string]string{},
 			Errors:     []FieldError{},
 			Warnings:   []string{},
 		}

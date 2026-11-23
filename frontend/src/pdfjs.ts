@@ -1,7 +1,7 @@
 // 本地 vendored pdf.js 的最小类型适配（模板标定域与合同生成域共用一份）。
 //
 // index.html 以 classic script 先加载 /app/vendor/pdf.min.js（全局
-// pdfjsLib）再加载 app.js 与 Vue 产物；worker 也来自 /app/vendor/。
+// pdfjsLib）再加载 Vue 产物；worker 也来自 /app/vendor/。
 // 这里只声明用到的调用面，不引入 npm 包、不访问 CDN，保持离线单二进制。
 // 禁止 any / ts-ignore：未知能力一律按最小接口收敛。
 

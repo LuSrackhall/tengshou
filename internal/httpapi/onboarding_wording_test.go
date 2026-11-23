@@ -17,11 +17,12 @@ func TestOnboardingWordingBoundary(t *testing.T) {
 	}
 	files := []string{
 		"web/app/index.html",
-		"web/app/app.js",
 		"web/app/app.css",
 		"web/sign.html",
 		"../../README.md",
 	}
+	// app.js 退役后界面文案全部在 frontend/src（Vue/SFC + TS）里。
+	files = append(files, frontendSourceFiles(t)...)
 	// 阶段 1：模板页与标定编辑器已迁到 Vue，界面文案落在这里，边界检查随迁移覆盖。
 	templates, err := filepath.Glob("../../frontend/src/components/templates/*.vue")
 	if err != nil {

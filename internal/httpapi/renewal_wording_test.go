@@ -15,11 +15,12 @@ func TestRenewalWordingBoundary(t *testing.T) {
 	forbidden := []string{"直接签订", "在线签约", "代签"}
 	files := []string{
 		"web/app/index.html",
-		"web/app/app.js",
 		"web/app/app.css",
 		"web/sign.html",
 		"../../README.md",
 	}
+	// app.js 退役后界面文案全部在 frontend/src（Vue/SFC + TS）里。
+	files = append(files, frontendSourceFiles(t)...)
 	docs, err := filepath.Glob("../../docs/*.md")
 	if err != nil {
 		t.Fatal(err)

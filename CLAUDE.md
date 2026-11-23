@@ -39,17 +39,17 @@
 - **单文件 ≤ 600 行**：任何 `.js` / `.ts` / `.vue` 源文件不得超过 600 行，
   由 `scripts/check-frontend-structure.sh` 在 CI 中强制。
 
-### 迁移期规则（存量 app.js）
+### 界面结构
 
-界面主体仍由 `internal/httpapi/web/app/app.js` 驱动；迁移完成前：
-
-- **存量 `app.js` 只许减不许增**：由 `scripts/check-frontend-structure.sh`
-  的 `APP_JS_BASELINE` 强制，上浮即失败；`app.js` 显著缩小后同步下调基线，
-  基线以脚本为唯一事实源。
-- **新功能一律落 Vue 组件**：不再向 `app.js` 添加新功能；新增功能与较大改造
-  应在 Vue 组件中实现，并同步减少 `app.js`（至少不增加）。
-- 修复类改动尽量顺手把相关逻辑抽成组件迁出；确实无法当天迁移时，改动本身
-  也不能让 `app.js` 超过基线。
+- 界面全部由 `frontend/src/` 的 Vue 应用渲染，入口为 `frontend/src/main.ts`
+  + `frontend/src/App.vue`；`internal/httpapi/web/app/index.html` 只保留
+  `#app` 宿主、本地 pdf.js vendor 与 Vite 产物引用。
+- 存量 `internal/httpapi/web/app/app.js` 已退役，**不得重新引入**；由
+  `scripts/check-frontend-structure.sh` 强制。
+- 新增功能一律落 Vue 组件；跨域打开弹窗/表单走 `frontend/src/bridge/app.ts`
+  的 window 事件，toast 与 modal 基础设施在 `frontend/src/ui/`。
+- 顶栏、tab 激活态、统计刷新与实时事件调度（SSE/轮询）在
+  `frontend/src/shell/`；各域不自行创建 EventSource。
 
 ### CI 与本地验证
 

@@ -68,21 +68,22 @@ func TestAppIndexAndAssets(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("app index status = %d", resp.StatusCode)
 	}
-	if !strings.Contains(string(body), "合同台账") || !strings.Contains(string(body), "/app/app.js") {
-		t.Fatalf("app index content = %s", body)
-	}
-	// 阶段 0：Vue 岛从 /app/dist/ 载入，页面必须同时保留旧 app.js。
-	if !strings.Contains(string(body), `id="vue-live-status"`) ||
+	// app.js 已退役：index.html 是纯 Vue 入口，只保留 #app 宿主与 Vite 产物。
+	if !strings.Contains(string(body), `id="app"`) ||
 		!strings.Contains(string(body), "/app/dist/tengshou-ui.js") {
-		t.Fatalf("app index missing vue island wiring: %s", body)
+		t.Fatalf("app index missing vue entry wiring: %s", body)
+	}
+	if strings.Contains(string(body), "/app/app.js") {
+		t.Fatalf("app index still references retired app.js: %s", body)
 	}
 	csp := resp.Header.Get("Content-Security-Policy")
 	if !strings.Contains(csp, "script-src 'self'") {
 		t.Fatalf("app CSP = %q", csp)
 	}
-	resp, body = f.get(t, "/app/app.js", false)
-	if resp.StatusCode != 200 || !strings.Contains(string(body), "use strict") {
-		t.Fatalf("app js status=%d", resp.StatusCode)
+	// 退役的存量脚本不再提供，避免旧入口被重新引用。
+	resp, _ = f.get(t, "/app/app.js", false)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("retired app.js status = %d", resp.StatusCode)
 	}
 	resp, body = f.get(t, "/app/app.css", false)
 	if resp.StatusCode != 200 || !strings.Contains(string(body), "--accent") {

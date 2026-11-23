@@ -14,10 +14,11 @@ func TestSealWordingBoundary(t *testing.T) {
 	forbidden := []string{"电子签章", "法定认证", "电子认证", "电子公章"}
 	files := []string{
 		"web/app/index.html",
-		"web/app/app.js",
 		"web/app/app.css",
 		"web/sign.html",
 	}
+	// app.js 退役后界面文案全部在 frontend/src（Vue/SFC + TS）里。
+	files = append(files, frontendSourceFiles(t)...)
 	docs, err := filepath.Glob("../../docs/*.md")
 	if err != nil {
 		t.Fatal(err)

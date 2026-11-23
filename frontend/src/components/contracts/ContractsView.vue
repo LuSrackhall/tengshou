@@ -6,11 +6,12 @@
 // 结构与 app.js renderContracts 的输出一致（toolbar / summary / data-table /
 // actions 类名不变），数据走 frontend/src/api 的 typed 端点。
 //
-// 跨域：扫码签名与 Excel 导入仍属 app.js，经 bridge/app.ts 调用；「以此
-// 档案新建合同」「历史合同」等入口经 tengshou:open-contract-form 事件打开
-// 本域表单。合同详情里的生成面板与批量生成对话框由本域 Vue 组件渲染（模板页
-// 的「批量生成 / 整改重出」也经 tengshou:open-batch-generate 落到这里）；
-// 外部写入经 app.js 派发的 tengshou:data-changed 到达后重取。
+// 跨域：Excel 导入仍属 app.js，经 bridge/app.ts 调用；「以此档案新建合同」
+// 「历史合同」等入口经 tengshou:open-contract-form 事件打开本域表单。扫码
+// 签名对话框与签名摘要已迁到 Vue（components/signatures/），由本岛打开、
+// 合同表单内渲染。合同详情里的生成面板与批量生成对话框由本域 Vue 组件渲染
+// （模板页的「批量生成 / 整改重出」也经 tengshou:open-batch-generate 落到
+// 这里）；外部写入经 app.js 派发的 tengshou:data-changed 到达后重取。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   deleteContract as deleteContractRequest,
@@ -37,7 +38,6 @@ import {
   errorMessage,
   openBatchGenerateDialog,
   openExcelImport,
-  openSignatureDialog,
   refreshAfterWrite,
   subscribeDataChanged,
   subscribeOpenBatchGenerate,
@@ -48,6 +48,8 @@ import {
   type LedgerBridge,
   type PartyRef,
 } from "../../bridge/app";
+import SignatureDialog from "../signatures/SignatureDialog.vue";
+import { useSignatureDialog } from "../signatures/useSignatureDialog";
 import BatchGenerateDialog from "./BatchGenerateDialog.vue";
 import ContractFormModal from "./ContractFormModal.vue";
 import { saveDownloadedFile } from "./download";
@@ -88,6 +90,11 @@ const loaded = ref(false);
 const selectedIds = ref<string[]>([]);
 const formRequest = ref<FormRequest | null>(null);
 const batchRequest = ref<{ key: number; options: BatchGenerateOptions } | null>(null);
+const {
+  signRequest,
+  open: openSignature,
+  close: closeSignature,
+} = useSignatureDialog();
 
 let yearInitialized = false;
 let formSeq = 0;
@@ -533,7 +540,7 @@ onBeforeUnmount(() => {
               <td>
                 <div class="actions">
                   <button type="button" data-action="generate" @click.stop="openEdit(contract, true)">生成 PDF</button>
-                  <button type="button" data-action="sign" @click.stop="openSignatureDialog(contract)">扫码签名</button>
+                  <button type="button" data-action="sign" @click.stop="openSignature(contract)">扫码签名</button>
                   <button type="button" data-action="edit" @click.stop="openEdit(contract)">编辑</button>
                   <button type="button" class="danger" data-action="delete" @click.stop="remove(contract)">删除</button>
                 </div>
@@ -572,5 +579,12 @@ onBeforeUnmount(() => {
     :template-id="batchRequest.options.templateId"
     :kind="batchRequest.options.kind"
     @close="closeBatch"
+  />
+  <SignatureDialog
+    v-if="signRequest"
+    :key="signRequest.key"
+    :contract="signRequest.contract"
+    :detail="signRequest.detail"
+    @close="closeSignature"
   />
 </template>

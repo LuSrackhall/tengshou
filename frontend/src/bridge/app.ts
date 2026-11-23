@@ -9,11 +9,11 @@
 // 新手引导已迁到 Vue（components/onboarding/）：深链需要切换主 tab（走
 // app.js 的 switchTab），并派发模板导入 / 标定编辑器 / 合同表单事件。
 //
-// 反向调用（Vue → app.js）：toast、整体刷新、扫码签名、Excel 导入与合同
-// 详情里的签名摘要仍由 app.js 实现，统一经 window.__tengshouApp 调用；组件
-// 不直接读 window。合同详情里的生成面板与批量生成对话框已迁到 Vue
-// （components/contracts/），批量生成由合同台账岛监听
-// tengshou:open-batch-generate 后打开。
+// 反向调用（Vue → app.js）：toast、整体刷新与 Excel 导入仍由 app.js 实现，
+// 统一经 window.__tengshouApp 调用；组件不直接读 window。扫码签名、合同
+// 详情里的签名摘要、生成面板与批量生成对话框都已迁到 Vue
+// （components/signatures/、components/contracts/），批量生成由合同台账岛
+// 监听 tengshou:open-batch-generate 后打开。
 //
 // 实时刷新：app.js 收到 SSE / 轮询事件或本地写入完成后派发两个 window 事件：
 //   - tengshou:change       一条变更（detail 是 appEvent 的紧凑子集）
@@ -23,7 +23,6 @@
 import type {
   ChangeEntity,
   Contract,
-  ContractDetail,
   DocumentKind,
 } from "../api/types";
 
@@ -52,15 +51,8 @@ export interface AppBridge {
   refreshAfterWrite(): Promise<void>;
   /** 切换主 tab（引导步骤深链：模板页 / 合同台账 / 字段页）。 */
   switchTab(tab: string): void;
-  /** 扫码签名对话框仍由 app.js 渲染。 */
-  openSignatureDialog(contract: Contract): void;
   /** 触发 app.js 的隐藏文件输入，导入 Excel 对话框仍归 app.js。 */
   openExcelImport(): void;
-  /**
-   * 合同详情里的签名摘要仍由 app.js 渲染（扫码签名域尚未迁移）：
-   * 传入 Vue 弹窗的根节点，app.js 在其中查找宿主元素并填充。
-   */
-  mountContractSignatures(root: Element, detail: ContractDetail): void;
 }
 
 /** app.js → Vue：台账岛注册的只读视图（模板页批量生成按钮使用）。 */
@@ -180,15 +172,6 @@ export function openContractFormForHistory(contract: Contract, renew: boolean): 
   openContractForm(contract, { renew });
 }
 
-/** 扫码签名对话框（app.js）。 */
-export function openSignatureDialog(contract: Contract): void {
-  const bridge = getAppBridge();
-  if (!bridge) {
-    return;
-  }
-  bridge.openSignatureDialog(contract);
-}
-
 /** 打开批量生成对话框：由合同台账岛监听事件后渲染。 */
 export function openBatchGenerateDialog(options: BatchGenerateOptions): void {
   window.dispatchEvent(
@@ -232,11 +215,6 @@ export function subscribeOpenBatchGenerate(
 /** 触发 app.js 的 Excel 导入文件选择（对话框仍归 app.js）。 */
 export function openExcelImport(): void {
   getAppBridge()?.openExcelImport();
-}
-
-/** 把合同详情里的签名摘要宿主交给 app.js 渲染。 */
-export function mountContractSignatures(root: Element, detail: ContractDetail): void {
-  getAppBridge()?.mountContractSignatures(root, detail);
 }
 
 function normalizeDataChanged(raw: unknown): DataChangedDetail {

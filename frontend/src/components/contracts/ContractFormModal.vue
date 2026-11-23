@@ -4,9 +4,9 @@
 // renewal-banner / audit-host 类名不变），含动态字段、相对方 datalist、
 // 续签草稿与来源横幅、删除确认、422 逐字段错误。
 //
-// 跨域：扫码签名与签名摘要仍由 app.js 渲染——本组件保留 #contractSignatures
-// 宿主，挂载后经 bridge/app.ts 的 mountContractSignatures 交给 app.js；扫码
-// 签名同样经桥调用。「生成 PDF」面板与批量生成对话框已迁到 Vue
+// 跨域：扫码签名与签名摘要已迁到 Vue——摘要由 components/signatures 的
+// SignatureSummary 在本组件内渲染，扫码签名对话框由合同台账岛打开。
+// 「生成 PDF」面板与批量生成对话框已迁到 Vue
 // （ContractGenerationPanel / BatchGenerateDialog），「已关联公章」摘要用
 // 公章域的 SealSummary 渲染。
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
@@ -27,7 +27,6 @@ import type {
 } from "../../api/types";
 import {
   errorMessage,
-  mountContractSignatures,
   refreshAfterWrite,
   subscribeChange,
   toast,
@@ -35,6 +34,7 @@ import {
   type PartyRef,
 } from "../../bridge/app";
 import SealSummary from "../seals/SealSummary.vue";
+import SignatureSummary from "../signatures/SignatureSummary.vue";
 import ContractAuditHistory from "./ContractAuditHistory.vue";
 import ContractFieldControl from "./ContractFieldControl.vue";
 import ContractGenerationPanel from "./ContractGenerationPanel.vue";
@@ -261,18 +261,6 @@ async function loadRenewalSource(): Promise<void> {
   }
 }
 
-// 签名摘要仍属 app.js：宿主渲染完成后把详情交过去。
-function mountSignatureSummary(): void {
-  if (props.mode !== "edit" || !props.detail) {
-    return;
-  }
-  const root = bodyEl.value;
-  if (!root) {
-    return;
-  }
-  mountContractSignatures(root, props.detail);
-}
-
 // 行内「生成 PDF」入口：生成面板完成首次渲染（模板加载后高度稳定）再滚动。
 function onGenerationReady(): void {
   if (!props.focusGenerate) {
@@ -292,7 +280,6 @@ onMounted(() => {
   if (props.contract?.source_contract_id) {
     void loadRenewalSource();
   }
-  mountSignatureSummary();
 });
 
 onBeforeUnmount(() => {
@@ -348,7 +335,9 @@ onBeforeUnmount(() => {
             合同编号创建后不可修改。修改会写入变更记录。
           </div>
 
-          <div v-if="detail && detail.signatures && detail.signatures.length" id="contractSignatures"></div>
+          <div v-if="detail && detail.signatures && detail.signatures.length" id="contractSignatures">
+            <SignatureSummary :detail="detail" />
+          </div>
           <div v-if="detail && detail.seals && detail.seals.length" id="contractSealSummary">
             <SealSummary :seals="detail.seals" />
           </div>

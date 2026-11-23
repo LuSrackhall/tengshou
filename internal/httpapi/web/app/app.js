@@ -87,12 +87,6 @@ function fmtDate(iso) {
 /* ---------- 弹出层 ---------- */
 
 function closeModal() {
-  stopSignPolling();
-  if (currentSignSessionId) {
-    const id = currentSignSessionId;
-    currentSignSessionId = null;
-    api(`/app/api/v1/signature-sessions/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
-  }
   const root = document.getElementById("modalRoot");
   root.innerHTML = "";
   document.removeEventListener("keydown", onModalKey);
@@ -195,176 +189,9 @@ function renderMeta() {
    （frontend/src/components/contracts/），PDF 预览 overlay 在
    frontend/src/components/pdf/；app.js 不再渲染 PDF 预览。 */
 
-/* ---------- 手写签名（局域网扫码） ---------- */
-
-let signPollTimer = null;
-let currentSignSessionId = null;
-
-function stopSignPolling() {
-  if (signPollTimer) {
-    clearInterval(signPollTimer);
-    signPollTimer = null;
-  }
-}
-
-function signaturesSummaryHTML(detail) {
-  const roleOf = (partyID) => {
-    if (detail.party_a && detail.party_a.id === partyID) return "甲方";
-    if (detail.party_b && detail.party_b.id === partyID) return "乙方";
-    return "签名";
-  };
-  const items = detail.signatures.map((sig) => {
-    const version = sig.content_sha256 ? ` · 内容版本 <code>${esc(sig.content_sha256.slice(0, 12))}</code>` : "";
-    return `<li><span class="badge active">${esc(roleOf(sig.party_id))}</span> ${esc(sig.signer_name)} · ${esc(fmtDate(sig.captured_at))}${version}
-      <button type="button" data-export-signature="${esc(sig.id)}">导出</button></li>`;
-  }).join("");
-  return `<div class="signature-summary"><strong>已采集签名 ${detail.signatures.length} 个</strong>
-    <ul>${items}</ul></div>`;
-}
-
-async function openSignatureDialog(contract) {
-  let detail = null;
-  try {
-    detail = await api(`/app/api/v1/contracts/${encodeURIComponent(contract.id)}`);
-  } catch (err) {
-    toast(err.message, true);
-    return;
-  }
-  const signers = [];
-  if (detail.party_b) signers.push({ id: detail.party_b.id, role: "乙方", name: detail.party_b.name });
-  if (detail.party_a) signers.push({ id: detail.party_a.id, role: "甲方", name: detail.party_a.name });
-  if (!signers.length) {
-    toast("合同还没有关联相对方，无法发起签名", true);
-    return;
-  }
-  currentSignSessionId = null;
-  const modal = openModal(`扫码签名 · ${contract.contract_no}`);
-  modal.body.innerHTML = `
-    <div class="signature-panel">
-      <div class="field">
-        <label for="signParty">签名人</label>
-        <select id="signParty">
-          ${signers.map((p) => `<option value="${esc(p.id)}">${esc(p.role)} · ${esc(p.name)}</option>`).join("")}
-        </select>
-        <span class="help">手机与电脑需连接同一局域网；二维码一次性有效，过期或提交后失效。手机打不开时，请确认连接的是同一 Wi-Fi（非访客网络），也可直接输入下方地址。</span>
-      </div>
-      ${detail.signatures.length ? signaturesSummaryHTML(detail) : ""}
-      <div id="signQrArea" class="sign-qr-empty">点击下方「生成签名二维码」，让签名人用手机扫码手写。</div>
-    </div>`;
-  footerButton(modal, "关闭", "", closeModal);
-  const startBtn = footerButton(modal, "生成签名二维码", "primary", () => {
-    startSignatureSession(modal, contract, $("#signParty", modal.body).value, startBtn);
-  });
-}
-
-async function startSignatureSession(modal, contract, partyID, startBtn) {
-  stopSignPolling();
-  if (currentSignSessionId) {
-    api(`/app/api/v1/signature-sessions/${encodeURIComponent(currentSignSessionId)}`, { method: "DELETE" })
-      .catch(() => {});
-    currentSignSessionId = null;
-  }
-  const area = $("#signQrArea", modal.body);
-  if (!area) return;
-  area.innerHTML = `<div class="sign-qr-empty">正在生成二维码…</div>`;
-  if (startBtn) startBtn.disabled = true;
-  try {
-    const res = await api("/app/api/v1/signature-sessions", {
-      method: "POST",
-      body: { contract_id: contract.id, party_id: partyID },
-    });
-    const item = res.item;
-    currentSignSessionId = item.id;
-    if (startBtn) startBtn.textContent = "重新生成二维码";
-    const urls = item.urls && item.urls.length ? item.urls : [item.url || ""];
-    const urlPicker = urls.length > 1
-      ? `<label class="inline sign-url-pick">电脑有多张网卡时请选择手机能访问的地址：
-          <select id="signUrlPick">${urls.map((u, i) => `<option value="${i}">${esc(u)}</option>`).join("")}</select>
-        </label>`
-      : "";
-    area.innerHTML = `
-      <div class="sign-qr">
-        <img id="signQrImg" src="${esc(item.qr_url)}" alt="签名二维码" width="300" height="300">
-        <div class="sign-qr-meta">
-          ${urlPicker}
-          <div class="sign-url mono" id="signUrlText">${esc(urls[0])}</div>
-          <div id="signState" class="sign-state">等待手机扫码并提交签名…</div>
-          <div id="signExpiry" class="sign-expiry"></div>
-        </div>
-      </div>`;
-    const pick = document.getElementById("signUrlPick");
-    if (pick) {
-      pick.addEventListener("change", () => {
-        const index = Number(pick.value) || 0;
-        const img = document.getElementById("signQrImg");
-        const text = document.getElementById("signUrlText");
-        if (img) img.src = item.qr_url + "?index=" + index;
-        if (text) text.textContent = urls[index] || urls[0];
-      });
-    }
-    renderSignExpiry(item.expires_at);
-    pollSignatureSession(item.id);
-  } catch (err) {
-    currentSignSessionId = null;
-    area.innerHTML = `<div class="sign-qr-empty error">${esc(err.message)}</div>`;
-    toast(err.message, true);
-  } finally {
-    if (startBtn) startBtn.disabled = false;
-  }
-}
-
-function renderSignExpiry(expiresAt) {
-  const el = document.getElementById("signExpiry");
-  if (!el || !expiresAt) return;
-  const when = new Date(expiresAt);
-  if (isNaN(when.getTime())) return;
-  el.textContent = `有效期至 ${when.toLocaleString("zh-CN", { hour12: false })}`;
-}
-
-function pollSignatureSession(id) {
-  stopSignPolling();
-  const tick = async () => {
-    if (currentSignSessionId !== id) {
-      stopSignPolling();
-      return;
-    }
-    let res;
-    try {
-      res = await api(`/app/api/v1/signature-sessions/${encodeURIComponent(id)}`);
-    } catch (err) {
-      if (err && err.code === "not_found") {
-        stopSignPolling();
-        const stateEl = document.getElementById("signState");
-        if (stateEl) {
-          stateEl.textContent = "签名会话已失效（可能服务已重启），请重新生成二维码。";
-          stateEl.className = "sign-state error";
-        }
-      }
-      return; // other errors are transient: keep polling
-    }
-    const item = res.item;
-    const stateEl = document.getElementById("signState");
-    if (!stateEl || currentSignSessionId !== id) return;
-    if (item.state === "completed") {
-      stopSignPolling();
-      const version = item.content_sha256 ? `（内容版本 ${item.content_sha256.slice(0, 12)}）` : "";
-      const changed = item.content_changed
-        ? "。注意：合同内容在生成二维码后已修改，这份签名对应旧内容版本" : "";
-      stateEl.textContent = `签名已保存：${item.signer_name} · ${fmtDate(item.completed_at)}${version}${changed}`;
-      stateEl.className = item.content_changed ? "sign-state warn" : "sign-state ok";
-      const expiry = document.getElementById("signExpiry");
-      if (expiry) expiry.textContent = "";
-      toast(item.content_changed ? "签名已保存，但合同内容已变更，请核对" : "签名已保存到本机", item.content_changed);
-      refreshAfterWrite().catch((err) => toast(err.message, true));
-    } else if (item.state === "expired") {
-      stopSignPolling();
-      stateEl.textContent = "二维码已过期，请重新生成。";
-      stateEl.className = "sign-state error";
-    }
-  };
-  tick();
-  signPollTimer = setInterval(tick, 2000);
-}
+/* 手写签名（局域网扫码）已迁到 Vue（frontend/src/components/signatures/）：
+   扫码签名对话框、签名摘要与签名图导出都由合同台账岛渲染；app.js 只保留
+   被 Vue 调用的 toast 与整体刷新。 */
 
 /* ---------- 模板管理（Word → PDF 套印，B3） ---------- */
 
@@ -930,30 +757,6 @@ async function checkIntegrity() {
   }
 }
 
-async function exportSignature(id) {
-  if (!window.confirm("签名图片是敏感资产：导出后可能被复制、传播，离开本机数据目录。\n\n确认导出这份签名？")) {
-    return;
-  }
-  try {
-    const res = await fetch(`/app/api/v1/signatures/${encodeURIComponent(id)}/export`, {
-      method: "POST",
-      headers: { "X-Tengshou-App": "1", "Content-Type": "application/json" },
-      body: JSON.stringify({ confirm: true }),
-    });
-    if (!res.ok) {
-      let data = null;
-      try { data = await res.json(); } catch (_) { /* ignore */ }
-      const message = (data && data.error && data.error.message) || `导出失败（${res.status}）`;
-      throw new Error(message);
-    }
-    const blob = await res.blob();
-    downloadBlob(blob, `${id}.png`);
-    toast("签名图片已导出；导出操作已写入变更记录");
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
 /* ---------- 设置：MCP 状态与读写开关 ---------- */
 
 async function loadMCPStatus() {
@@ -1251,8 +1054,9 @@ async function refreshAfterWrite() {
     state.bootstrap = bootstrap;
     renderMeta();
   }
-  // 已迁移的 Vue 域（新手引导、合同台账、相对方档案、字段管理、公章、模板）
-  // 不复用这里的 DOM，但需要知道数据已经变了：它们据此重取各自的列表。
+  // 已迁移的 Vue 域（新手引导、合同台账与扫码签名、相对方档案、字段管理、
+  // 公章、模板）不复用这里的 DOM，但需要知道数据已经变了：它们据此重取各自
+  // 的列表。
   notifyDataChanged(["field", "party", "contract", "seal", "template"]);
   if (state.tab === "changelog") {
     loadChangelog().catch((err) => toast(err.message, true));
@@ -1276,10 +1080,6 @@ function bindEvents() {
   $("#restoreBackupBtn").addEventListener("click", () => $("#backupFileInput").click());
   $("#backupFileInput").addEventListener("change", restoreBackupFromFile);
   $("#checkIntegrityBtn").addEventListener("click", checkIntegrity);
-  document.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-export-signature]");
-    if (button) exportSignature(button.dataset.exportSignature);
-  });
   $("#importFile").addEventListener("change", (e) => {
     const file = e.target.files && e.target.files[0];
     if (file) openImport(file);
@@ -1316,26 +1116,13 @@ async function boot() {
   startRealtime();
 }
 
-/* 合同详情里的签名摘要仍由 app.js 渲染（扫码签名域尚未迁移）：Vue 合同弹窗
-   保留宿主 #contractSignatures，挂载后把根节点与详情交过来。生成面板已迁到
-   Vue（frontend/src/components/contracts/ContractGenerationPanel.vue）。 */
-function mountContractSignatures(root, detail) {
-  if (!root || !detail) return;
-  const signatureHost = $("#contractSignatures", root);
-  if (signatureHost && detail.signatures && detail.signatures.length) {
-    signatureHost.innerHTML = signaturesSummaryHTML(detail);
-  }
-}
-
-// 迁移期跨域桥：Vue 域借用 app.js 的 toast/整体刷新/切 tab/签名/Excel 导入与
-// 合同详情签名摘要；随对应域迁完移除。
+// 迁移期跨域桥：Vue 域借用 app.js 的 toast/整体刷新/切 tab 与 Excel 导入；
+// 随对应域迁完移除。
 window.__tengshouApp = {
   toast,
   refreshAfterWrite,
   switchTab,
-  openSignatureDialog,
   openExcelImport,
-  mountContractSignatures,
 };
 
 document.addEventListener("DOMContentLoaded", boot);

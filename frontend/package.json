@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "腾手前端工程：阶段 0 只构建 Vue 岛，产物由 Go go:embed 打进单二进制。",
+  "description": "腾手前端工程：Vite + Vue 3 + TS，产物由 Go go:embed 打进单二进制。",
   "scripts": {
     "dev": "vite",
     "build": "node scripts/clean-dist.mjs && vite build",

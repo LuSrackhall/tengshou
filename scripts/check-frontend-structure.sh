@@ -23,9 +23,6 @@ fi
 
 # 2) 前端源文件不得超过单文件上限
 while IFS= read -r -d '' file; do
-  if [ "$file" = "./$APP_JS" ]; then
-    continue
-  fi
   lines="$(wc -l < "$file" | tr -d ' ')"
   if [ "$lines" -gt "$MAX_LINES" ]; then
     echo "FAIL: $file 有 $lines 行，超过单文件上限 $MAX_LINES 行。" >&2

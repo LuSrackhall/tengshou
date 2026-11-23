@@ -23,28 +23,6 @@ func TestOnboardingWordingBoundary(t *testing.T) {
 	}
 	// app.js 退役后界面文案全部在 frontend/src（Vue/SFC + TS）里。
 	files = append(files, frontendSourceFiles(t)...)
-	// 阶段 1：模板页与标定编辑器已迁到 Vue，界面文案落在这里，边界检查随迁移覆盖。
-	templates, err := filepath.Glob("../../frontend/src/components/templates/*.vue")
-	if err != nil {
-		t.Fatal(err)
-	}
-	files = append(files, templates...)
-	templateModules, err := filepath.Glob("../../frontend/src/components/templates/*.ts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	files = append(files, templateModules...)
-	// 阶段 1：新手引导已迁到 Vue，引导文案落在这里，边界检查随迁移覆盖。
-	onboardingViews, err := filepath.Glob("../../frontend/src/components/onboarding/*.vue")
-	if err != nil {
-		t.Fatal(err)
-	}
-	files = append(files, onboardingViews...)
-	onboardingModules, err := filepath.Glob("../../frontend/src/components/onboarding/*.ts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	files = append(files, onboardingModules...)
 	docs, err := filepath.Glob("../../docs/*.md")
 	if err != nil {
 		t.Fatal(err)

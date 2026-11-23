@@ -270,7 +270,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </template>
-              <template v-else-if="generating">正在生成二维码…</template>
+              <template v-else-if="generating"><div class="sign-qr-empty">正在生成二维码…</div></template>
               <template v-else-if="startError">
                 <div class="sign-qr-empty error">{{ startError }}</div>
               </template>

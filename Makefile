@@ -5,10 +5,10 @@ FRONTEND_DIR ?= frontend
 .PHONY: test vet demo serve build build-windows clean frontend
 
 test:
-	$(GO) test -count=1 ./internal/... ./cmd/tengshou-cli
+	$(GO) test -count=1 ./internal/... ./cmd/tengshou-cli ./cmd/tengshou
 
 vet:
-	$(GO) vet ./internal/... ./cmd/tengshou-cli
+	$(GO) vet ./internal/... ./cmd/tengshou-cli ./cmd/tengshou
 
 # 前端构建：Vite 产物写入 internal/httpapi/web/app/dist，由 go:embed 打包。
 # 依赖按 package-lock.json 安装；node_modules 已存在时跳过重复 npm ci。

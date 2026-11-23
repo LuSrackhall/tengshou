@@ -19,7 +19,7 @@
   config.json     # 端口、API 令牌、字体、页边距、签名有效期、MCP 开关
   tengshou.db     # SQLite 数据库（WAL）
   assets/         # 签名 assets/signatures/、公章 assets/seals/
-  templates/      # HTML 模板；PDF 模板 templates/pdf/<模板id>/（source.docx、template.pdf）
+  templates/      # 示例 HTML 模板（只读副本，仅 demo 生成）；PDF 模板 templates/pdf/<模板id>/（source.docx、template.pdf）
   outputs/        # 已生成的 PDF
   backups/        # 完整备份包与恢复前安全副本
   logs/           # 日志，不进入备份包

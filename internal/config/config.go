@@ -7,7 +7,7 @@
 //	  config.json      application settings (contains the local API token)
 //	  tengshou.db      SQLite database
 //	  assets/          binary assets referenced by templates (signatures, seals)
-//	  templates/       user HTML templates
+//	  templates/       sample HTML templates (demo seed, read-only)
 //	  outputs/         generated PDFs
 //	  backups/         database backups
 //	  logs/            application logs

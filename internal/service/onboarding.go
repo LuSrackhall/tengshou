@@ -25,13 +25,12 @@ const (
 )
 
 // OnboardingFacts summarizes the data the guide derives its step state from.
+// It is also computed once per self-check run and shared by the template and
+// sample probes, so it must only carry what those probes read.
 type OnboardingFacts struct {
 	Templates                int    `json:"templates"`
 	CalibratedTemplates      int    `json:"calibrated_templates"`
 	Contracts                int    `json:"contracts"`
-	Parties                  int    `json:"parties"`
-	Fields                   int    `json:"fields"`
-	ActiveTemplateID         string `json:"active_template_id,omitempty"`
 	ActiveTemplateName       string `json:"active_template_name,omitempty"`
 	ActiveTemplateVersion    int    `json:"active_template_version,omitempty"`
 	ActiveTemplatePlacements int    `json:"active_template_placements"`
@@ -62,7 +61,6 @@ func (s *Service) OnboardingFacts(ctx context.Context) (OnboardingFacts, error) 
 		}
 	}
 	if active.ID != "" {
-		facts.ActiveTemplateID = active.ID
 		facts.ActiveTemplateName = active.Name
 		facts.ActiveTemplateVersion = active.Version
 		facts.ActiveTemplatePlacements = len(active.Placements)
@@ -72,12 +70,6 @@ func (s *Service) OnboardingFacts(ctx context.Context) (OnboardingFacts, error) 
 		return facts, err
 	}
 	facts.Contracts = contracts.Total
-	stats, err := s.rd.Stats(ctx)
-	if err != nil {
-		return facts, err
-	}
-	facts.Parties = stats.Parties
-	facts.Fields = stats.Fields
 	return facts, nil
 }
 
@@ -109,16 +101,18 @@ type OnboardingCheckItem struct {
 }
 
 // OnboardingCheck runs the read-only self-check. Every probe reports its own
-// status; a broken probe never hides the other results.
+// status; a broken probe never hides the other results. Facts are read once and
+// shared by the template and sample probes instead of being recomputed per item.
 func (s *Service) OnboardingCheck(ctx context.Context, in OnboardingCheckInput) []OnboardingCheckItem {
+	facts, factsErr := s.OnboardingFacts(ctx)
 	items := []OnboardingCheckItem{
 		s.checkDataDir(),
 		s.checkDatabase(ctx),
 		s.checkConverters(),
 		s.checkSignatureLAN(in),
 		s.checkFields(ctx),
-		s.checkTemplate(ctx),
-		s.checkSample(ctx),
+		s.checkTemplate(facts, factsErr),
+		s.checkSample(facts, factsErr),
 		s.checkBackup(ctx),
 		s.checkDisk(),
 	}
@@ -247,12 +241,11 @@ func (s *Service) checkFields(ctx context.Context) OnboardingCheckItem {
 	return item
 }
 
-func (s *Service) checkTemplate(ctx context.Context) OnboardingCheckItem {
+func (s *Service) checkTemplate(facts OnboardingFacts, factsErr error) OnboardingCheckItem {
 	item := OnboardingCheckItem{ID: "template", Label: "模板与标定就绪", Target: "templates"}
-	facts, err := s.OnboardingFacts(ctx)
-	if err != nil {
+	if factsErr != nil {
 		item.Status = CheckStatusError
-		item.Detail = "读取模板状态失败：" + compactError(err)
+		item.Detail = "读取模板状态失败：" + compactError(factsErr)
 		item.Action = "重新打开腾手后再试"
 		return item
 	}
@@ -276,12 +269,11 @@ func (s *Service) checkTemplate(ctx context.Context) OnboardingCheckItem {
 	return item
 }
 
-func (s *Service) checkSample(ctx context.Context) OnboardingCheckItem {
+func (s *Service) checkSample(facts OnboardingFacts, factsErr error) OnboardingCheckItem {
 	item := OnboardingCheckItem{ID: "sample", Label: "样例预览与试生成", Target: "templates"}
-	facts, err := s.OnboardingFacts(ctx)
-	if err != nil {
+	if factsErr != nil {
 		item.Status = CheckStatusError
-		item.Detail = "读取模板状态失败：" + compactError(err)
+		item.Detail = "读取模板状态失败：" + compactError(factsErr)
 		item.Action = "重新打开腾手后再试"
 		return item
 	}

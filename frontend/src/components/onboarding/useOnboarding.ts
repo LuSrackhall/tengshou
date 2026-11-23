@@ -34,6 +34,7 @@ import {
   switchTab,
   toast,
 } from "../../bridge/app";
+import { currentTab } from "../../shell/tabs";
 
 export type CheckState = "idle" | "loading" | "error" | "ready";
 export type TemplateCheckState = "idle" | "loading" | "missing" | "error" | "ready";
@@ -220,8 +221,7 @@ export function useOnboarding() {
 
   onMounted(() => {
     void loadGuide();
-    const host = document.getElementById("view-onboarding");
-    if (host?.classList.contains("active")) {
+    if (currentTab.value === "onboarding") {
       refreshForTab();
     }
     unsubscribeData = subscribeDataChanged((detail) => {

@@ -93,7 +93,7 @@ func Open(dataDir string) (*App, error) {
 		if actor == "" {
 			actor = service.OSUser()
 		}
-		_ = st.AppendChangeLog(context.Background(), &model.ChangeLog{
+		if err := st.AppendChangeLog(context.Background(), &model.ChangeLog{
 			Entity:   model.ChangeEntityBackup,
 			EntityID: restore.Manifest.ID,
 			Action:   model.ChangeActionRestore,
@@ -101,7 +101,9 @@ func Open(dataDir string) (*App, error) {
 			Summary: fmt.Sprintf("启动时应用备份包（%d 个文件，schema v%d）；恢复前数据已留存到 %s",
 				len(restore.Manifest.Files), restore.Manifest.SchemaVersion, restore.SafetyDir),
 			CreatedAt: model.Now(),
-		})
+		}); err != nil {
+			logger.Warn("记录启动恢复审计失败", "backup", restore.Manifest.ID, "error", err)
+		}
 	}
 	// Report orphan or missing assets at startup. This never deletes files.
 	if report, err := svc.CheckIntegrity(context.Background()); err != nil {

@@ -23,7 +23,8 @@ declare global {
 
 const MODES: readonly LiveStatusMode[] = ["connecting", "sse", "poll", "offline"];
 
-function isLiveStatusMode(value: unknown): value is LiveStatusMode {
+/** 校验任意值是否为合法状态档位；开发预览按钮的 dataset 也用它收窄类型。 */
+export function isLiveStatusMode(value: unknown): value is LiveStatusMode {
   return typeof value === "string" && (MODES as readonly string[]).includes(value);
 }
 

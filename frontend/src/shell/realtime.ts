@@ -101,10 +101,18 @@ async function pollEventsOnce(): Promise<void> {
     return;
   }
   try {
-    const data = await listChangelog({
-      limit: 200,
-      after: lastEventId === "" ? undefined : lastEventId,
-    });
+    if (lastEventId === "") {
+      // 与 SSE onopen 同语义：无游标时从「当下」开始，只取最新一条作为
+      // 游标种子，不把历史记录当新事件逐条派发；随后做一次追赶刷新。
+      const tail = await listChangelog({ limit: 1 });
+      const newest = tail.items[0];
+      if (newest) {
+        lastEventId = newest.id;
+      }
+      requestCatchUpRefresh();
+      return;
+    }
+    const data = await listChangelog({ limit: 200, after: lastEventId });
     for (const item of data.items) {
       handleChangeEvent(item);
     }

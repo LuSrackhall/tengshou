@@ -32,18 +32,8 @@ func TestSignatureWordingBoundary(t *testing.T) {
 		}
 		files = append(files, doc)
 	}
-	// 阶段 1：扫码签名对话框、签名摘要与导出已迁到 Vue，界面文案落在这里，
-	// 边界检查随迁移覆盖。
-	for _, pattern := range []string{
-		"../../frontend/src/components/signatures/*.vue",
-		"../../frontend/src/components/signatures/*.ts",
-	} {
-		matched, err := filepath.Glob(pattern)
-		if err != nil {
-			t.Fatal(err)
-		}
-		files = append(files, matched...)
-	}
+	// 扫码签名 Vue 组件与其他界面源文件一样已被 frontendSourceFiles 全量覆盖，
+	// 不再单独 glob components/signatures。
 	for _, file := range files {
 		raw, err := os.ReadFile(file)
 		if err != nil {

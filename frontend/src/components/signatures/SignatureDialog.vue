@@ -57,7 +57,6 @@ const signerId = ref(signers[0]?.id ?? "");
 const session = ref<SignatureSession | null>(null);
 const starting = ref(false);
 const startLabel = ref("生成签名二维码");
-const generating = ref(false);
 const startError = ref("");
 const stateText = ref("等待手机扫码并提交签名…");
 const stateClass = ref("");
@@ -175,7 +174,6 @@ function pollSession(id: string): void {
 async function startSession(): Promise<void> {
   stopPolling();
   cancelActive();
-  generating.value = true;
   startError.value = "";
   session.value = null;
   qrIndex.value = null;
@@ -196,13 +194,11 @@ async function startSession(): Promise<void> {
     activeId = item.id;
     session.value = item;
     startLabel.value = "重新生成二维码";
-    generating.value = false;
     resetState();
     expiryText.value = expiryLabel(item.expires_at);
     pollSession(item.id);
   } catch (error) {
     activeId = null;
-    generating.value = false;
     startError.value = errorMessage(error);
     toast(errorMessage(error), true);
   } finally {
@@ -270,7 +266,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </template>
-              <template v-else-if="generating"><div class="sign-qr-empty">正在生成二维码…</div></template>
+              <template v-else-if="starting"><div class="sign-qr-empty">正在生成二维码…</div></template>
               <template v-else-if="startError">
                 <div class="sign-qr-empty error">{{ startError }}</div>
               </template>

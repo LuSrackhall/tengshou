@@ -28,7 +28,9 @@ jobs:
           # （TrueType，含拉丁与中文）跑测试。
           echo "TENGHSHOU_FONT=/usr/share/fonts/truetype/arphic/uming.ttc" >> "$GITHUB_ENV"
       - name: 静态检查
-        run: go vet ./internal/... ./cmd/tengshou-cli
+        run: |
+          test -z "$(gofmt -l ./cmd ./internal)"
+          go vet ./internal/... ./cmd/tengshou-cli
       - name: 单元与集成测试
         run: go test -count=1 ./internal/... ./cmd/tengshou-cli
 
@@ -137,6 +139,9 @@ jobs:
         with:
           name: frontend-dist
           path: internal/httpapi/web/app/dist
+      - name: vet 桌面壳（cgo）
+        if: matrix.goos == 'darwin'
+        run: go vet ./cmd/tengshou
       - name: 构建桌面应用
         shell: bash
         env:

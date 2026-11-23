@@ -8,7 +8,7 @@ import { exportSignature } from "../../api/endpoints";
 import type { ContractDetail } from "../../api/types";
 import { errorMessage, toast } from "../../bridge/app";
 import { fmtDate } from "../../ui/format";
-import { saveDownloadedFile } from "../contracts/download";
+import { saveDownloadedFile } from "../../ui/download";
 import { shortDigest } from "../contracts/format";
 
 const props = defineProps<{ detail: ContractDetail }>();

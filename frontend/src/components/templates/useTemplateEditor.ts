@@ -32,7 +32,6 @@ export interface TemplateEditorProps {
 
 export interface TemplateEditorCallbacks {
   onClose: () => void;
-  onSaved: (template: Template) => void;
 }
 
 export const ZOOM_OPTIONS = [0.75, 1, 1.25, 1.5, 2];
@@ -152,7 +151,6 @@ export function useTemplateEditor(
       editing.resetPlacements(item.placements);
       dirty.value = false;
       actions.invalidatePreview();
-      callbacks.onSaved(item);
       await refreshAfterWrite();
       void loadUsage();
       void loadCheck();

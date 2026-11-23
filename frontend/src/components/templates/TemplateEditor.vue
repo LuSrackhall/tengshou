@@ -16,7 +16,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: [];
-  saved: [template: Template];
 }>();
 
 const {
@@ -61,7 +60,6 @@ const {
   onPreviewDownload,
 } = useTemplateEditor(props, {
   onClose: () => emit("close"),
-  onSaved: (template) => emit("saved", template),
 });
 </script>
 

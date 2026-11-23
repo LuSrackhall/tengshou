@@ -103,16 +103,6 @@ export function checkTemplate(
   return get(`/templates/${enc(id)}/check`, options);
 }
 
-/** 模板 PDF 地址；供 PDF.js 同源加载。 */
-export function templatePdfUrl(id: string): string {
-  return apiUrl(`/templates/${enc(id)}/pdf`);
-}
-
-/** 原始导入文件（.docx/.pdf）地址。 */
-export function templateSourceUrl(id: string): string {
-  return apiUrl(`/templates/${enc(id)}/source`);
-}
-
 /** GET /templates/{id}/pdf 的原始字节（标定编辑器交给 PDF.js 渲染）。 */
 export async function fetchTemplatePdf(
   id: string,

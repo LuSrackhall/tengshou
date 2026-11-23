@@ -140,7 +140,7 @@ onBeforeUnmount(() => {
           <button type="button" class="close" aria-label="关闭" @click="emit('close')">×</button>
         </div>
         <div ref="bodyEl" class="modal-body">
-          <div id="fieldErrors">
+          <div>
             <div v-if="fieldErrors.length" class="form-errors">
               请修正以下问题：<ul>
                 <li v-for="problem in fieldErrors" :key="problem.field">
@@ -183,7 +183,7 @@ onBeforeUnmount(() => {
               <label for="fieldDefault">默认值</label>
               <input id="fieldDefault" v-model="defaultValue" type="text">
             </div>
-            <div v-show="type === 'select'" id="fieldOptionsWrap" class="field full">
+            <div v-show="type === 'select'" class="field full">
               <label for="fieldOptions">选项（单选字段，每行一个）</label>
               <textarea id="fieldOptions" v-model="optionsText" placeholder="每行一个选项"></textarea>
             </div>

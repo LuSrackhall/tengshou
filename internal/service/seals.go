@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -83,7 +84,9 @@ func (s *Service) ImportSeal(ctx context.Context, in SealInput) (model.Seal, err
 		UpdatedAt: now,
 	}
 	if err := s.st.PutSeal(ctx, &record); err != nil {
-		_ = os.Remove(full)
+		if rmErr := os.Remove(full); rmErr != nil && !os.IsNotExist(rmErr) {
+			slog.Warn("回滚公章图片文件失败", "path", full, "error", rmErr)
+		}
 		return model.Seal{}, err
 	}
 	s.logChange(ctx, model.ChangeEntitySeal, record.ID, model.ChangeActionCreate,
@@ -181,7 +184,9 @@ func (s *Service) ReplaceSealImage(ctx context.Context, id string, image []byte)
 	next.WidthPx = normalized.Width
 	next.HeightPx = normalized.Height
 	if err := s.st.PutSeal(ctx, &next); err != nil {
-		_ = os.Remove(full)
+		if rmErr := os.Remove(full); rmErr != nil && !os.IsNotExist(rmErr) {
+			slog.Warn("回滚公章图片文件失败", "path", full, "error", rmErr)
+		}
 		return model.Seal{}, err
 	}
 	s.removeAsset(current.AssetPath)
@@ -394,15 +399,19 @@ func (s *Service) assetFile(rel string) (string, error) {
 	return fullAbs, nil
 }
 
-// removeAsset deletes an asset file; failures are ignored because the database
-// change has already committed.
+// removeAsset deletes an asset file. Failures only log a warning because the
+// database change has already committed; a missing file is not an error, which
+// keeps repeated cleanup of the same path quiet.
 func (s *Service) removeAsset(rel string) {
 	if strings.TrimSpace(rel) == "" {
 		return
 	}
 	full, err := s.assetFile(rel)
 	if err != nil {
+		slog.Warn("解析公章图片路径失败，跳过文件清理", "asset", rel, "error", err)
 		return
 	}
-	_ = os.Remove(full)
+	if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
+		slog.Warn("删除公章图片文件失败", "path", full, "error", err)
+	}
 }

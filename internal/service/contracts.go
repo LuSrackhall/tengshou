@@ -294,49 +294,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 		validation.add(model.FieldPartyB, "相对方", "不能为空")
 	}
 
-	dynamicKeys := map[string]model.FieldDefinition{}
-	for _, field := range fields {
-		if !field.BuiltIn {
-			dynamicKeys[field.Key] = field
-		}
-	}
-	for key := range in.Data {
-		if _, ok := dynamicKeys[key]; !ok {
-			validation.add(key, key, "字段未定义，请先在「字段」页新增")
-		}
-	}
-	for _, field := range fields {
-		if field.BuiltIn {
-			continue
-		}
-		raw, provided := in.Data[field.Key]
-		if provided {
-			value, err := coerceFieldValue(field, raw)
-			if err != nil {
-				validation.addErr(field.Key, field.Label, err)
-				continue
-			}
-			if value == nil {
-				delete(contract.Data, field.Key)
-			} else {
-				contract.Data[field.Key] = value
-			}
-			continue
-		}
-		if existing == nil && field.DefaultValue != "" {
-			if value, err := coerceFieldValue(field, field.DefaultValue); err == nil && value != nil {
-				contract.Data[field.Key] = value
-			}
-		}
-	}
-	for _, field := range fields {
-		if field.BuiltIn || !field.Required {
-			continue
-		}
-		if isBlank(contract.Data[field.Key]) {
-			validation.add(field.Key, field.Label, "必填")
-		}
-	}
+	applyDynamicFieldInput(fields, contract.Data, in.Data, existing == nil, validation)
 	if contract.ContractNo == "" && !dryRun {
 		validation.add(model.FieldContractNo, "合同编号", "不能为空")
 	}
@@ -392,27 +350,10 @@ func (s *Service) createParty(ctx context.Context, name string) (model.Party, er
 // nextContractNo allocates HT-YYYY-NNNN, skipping numbers already in use.
 func (s *Service) nextContractNo(ctx context.Context, year int) (string, error) {
 	prefix := fmt.Sprintf("HT-%d-", year)
-	rows, err := s.rd.DB().QueryContext(ctx,
-		`SELECT contract_no FROM contracts WHERE contract_no LIKE ?`, prefix+"%")
+	maxSuffix, err := s.rd.MaxContractNumberSuffix(ctx, prefix)
 	if err != nil {
 		return "", err
 	}
-	maxSuffix := 0
-	for rows.Next() {
-		var no string
-		if err := rows.Scan(&no); err != nil {
-			rows.Close()
-			return "", err
-		}
-		if n, err := strconv.Atoi(strings.TrimPrefix(no, prefix)); err == nil && n > maxSuffix {
-			maxSuffix = n
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return "", err
-	}
-	rows.Close()
 	for i := maxSuffix + 1; i < maxSuffix+10000; i++ {
 		candidate := fmt.Sprintf("%s%04d", prefix, i)
 		_, err := s.rd.GetContractByNo(ctx, candidate)

@@ -139,8 +139,8 @@ false`）。只读工具标注 `readOnlyHint=true`；写工具标注
 | `tengshou_list_contracts` | `year`、`status`、`q`、`limit`、`offset` | 合同列表；`year` 省略即跨年查询 |
 | `tengshou_get_contract` | `id` | 合同详情：双方、模板版本、签名资产、公章关联、PDF 记录 |
 | `tengshou_list_signature_assets` | `contract_id`、`q`、`limit`、`offset` | 签名状态与 `content_sha256`（不含图片内容） |
-| `tengshou_list_templates` | `q`、`limit`、`offset` | 模板列表与版本号（不含 HTML） |
-| `tengshou_get_template` | `id` | 模板详情（含 HTML 与变量） |
+| `tengshou_list_templates` | `q`、`limit`、`offset` | 模板列表与版本号（HTML / PDF 两类；不含正文） |
+| `tengshou_get_template` | `id` | 模板详情（含 kind、变量；HTML 模板含正文，PDF 模板含 pdf_path / page_count / placements） |
 
 ### 写工具
 

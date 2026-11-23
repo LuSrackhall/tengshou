@@ -95,14 +95,14 @@ func toolDefinitions() []toolDefinition {
 				"offset":      intProp("偏移量，默认 0"),
 			}, nil)),
 		readTool(toolListTemplates, "查询模板版本",
-			"查询 HTML 合同模板列表及版本号（列表不含 HTML 正文）。",
+			"查询合同模板列表及版本号（HTML / PDF 两类；列表不含 HTML 正文）。",
 			objectSchema(map[string]any{
 				"q":      stringProp("模板名称关键词"),
 				"limit":  intProp("每页条数，1～500，默认 50"),
 				"offset": intProp("偏移量，默认 0"),
 			}, nil)),
 		readTool(toolGetTemplate, "读取模板详情",
-			"读取模板详情，包含 HTML 正文与变量列表。",
+			"读取模板详情：kind、变量列表；HTML 模板含 HTML 正文，PDF 模板含 pdf_path、page_count 与 placements。",
 			objectSchema(map[string]any{
 				"id": stringProp("模板 id"),
 			}, []string{"id"})),
@@ -521,7 +521,7 @@ func (s *Server) toolCreateContractDraft(ctx context.Context, args json.RawMessa
 
 func listQuery(query string, limit, offset int) (url.Values, error) {
 	if limit < 0 || limit > 500 {
-		return nil, fmt.Errorf("limit 应在 1～500 之间")
+		return nil, fmt.Errorf("limit 应为 0（默认）或 1～500")
 	}
 	if offset < 0 {
 		return nil, fmt.Errorf("offset 不能为负数")

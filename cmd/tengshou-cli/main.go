@@ -384,6 +384,8 @@ func runMCP(args []string) error {
 	// this process. The HTTP guard remains the authoritative gate.
 	if paths, err := config.ResolvePaths(*dataDir); err == nil {
 		opts.WriteEnabled = config.MCPWriteGate(paths)
+	} else {
+		logger.Warn("读取配置失败，MCP 写开关交由 HTTP 门禁判定", "error", err)
 	}
 	server := mcp.New(opts)
 	return server.Serve(context.Background(), os.Stdin, os.Stdout)

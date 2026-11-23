@@ -15,10 +15,14 @@ $Commit = if ($env:COMMIT) { $env:COMMIT } else {
 $BuildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $Out = if ($env:OUT) { $env:OUT } else { "dist" }
 
-$LdFlags = "-s -w -H windowsgui " +
-    "-X github.com/LuSrackhall/tengshou/internal/version.Version=$Version " +
+$VersionLdFlags = "-X github.com/LuSrackhall/tengshou/internal/version.Version=$Version " +
     "-X github.com/LuSrackhall/tengshou/internal/version.Commit=$Commit " +
     "-X github.com/LuSrackhall/tengshou/internal/version.BuildDate=$BuildDate"
+
+# 桌面壳用 Windows GUI 子系统；CLI 必须保留控制台子系统，否则
+# `tengshou-cli.exe version` 在 cmd/PowerShell 里看不到输出。
+$LdFlags = "-s -w -H windowsgui " + $VersionLdFlags
+$CliLdFlags = "-s -w " + $VersionLdFlags
 
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 
@@ -31,7 +35,7 @@ Write-Host "构建 tengshou.exe ..."
 go build -trimpath -ldflags $LdFlags -o "$Out/tengshou.exe" ./cmd/tengshou
 
 Write-Host "构建 tengshou-cli.exe ..."
-go build -trimpath -ldflags $LdFlags -o "$Out/tengshou-cli.exe" ./cmd/tengshou-cli
+go build -trimpath -ldflags $CliLdFlags -o "$Out/tengshou-cli.exe" ./cmd/tengshou-cli
 
 $Zip = "$Out/tengshou-windows-$GoArch.zip"
 if (Test-Path $Zip) { Remove-Item $Zip }

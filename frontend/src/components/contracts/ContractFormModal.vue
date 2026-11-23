@@ -38,7 +38,8 @@ import SignatureSummary from "../signatures/SignatureSummary.vue";
 import ContractAuditHistory from "./ContractAuditHistory.vue";
 import ContractFieldControl from "./ContractFieldControl.vue";
 import ContractGenerationPanel from "./ContractGenerationPanel.vue";
-import { isAgentActor, partyName } from "./format";
+import { isAgentActor } from "../../ui/format";
+import { partyName } from "./format";
 import {
   collectContractInput,
   renewalSeed,

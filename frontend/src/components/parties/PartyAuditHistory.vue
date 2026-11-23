@@ -5,7 +5,12 @@ import { onBeforeUnmount, onMounted, ref } from "vue";
 import { listChangelog } from "../../api/endpoints";
 import type { ChangeLog } from "../../api/types";
 import { errorMessage, subscribeChange } from "../../bridge/app";
-import { ACTION_LABELS, actorLabel, fmtDate, isAgentActor } from "./format";
+import {
+  ACTION_LABELS,
+  actorLabel,
+  fmtDate,
+  isAgentActor,
+} from "../../ui/format";
 
 const props = defineProps<{ partyId: string }>();
 

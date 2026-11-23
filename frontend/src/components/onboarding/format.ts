@@ -2,6 +2,7 @@
 // 迁移只换渲染框架，不改文案、步骤顺序、完成判定与日期格式。
 
 import type { Onboarding } from "../../api/types";
+import { fmtDate } from "../../ui/format";
 
 /** 自检「前往」按钮的 tab 名称（app.js TAB_LABELS，保留完整表）。 */
 export const TAB_LABELS: Record<string, string> = {
@@ -36,18 +37,6 @@ export function checkBadgeClass(status: string): string {
     return "draft";
   }
   return "error";
-}
-
-/** 与 app.js fmtDate 一致：无效日期原样返回。 */
-export function fmtDate(iso: string | undefined): string {
-  if (!iso) {
-    return "";
-  }
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return iso;
-  }
-  return date.toLocaleString("zh-CN", { hour12: false });
 }
 
 /** 迁移前 renderOnboarding 的进度文案。 */

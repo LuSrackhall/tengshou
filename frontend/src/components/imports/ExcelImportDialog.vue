@@ -202,7 +202,6 @@ async function commit(): Promise<void> {
   try {
     const request: ImportOptions = {
       ...requestOptions(true),
-      apply_deletes: options.value.apply_deletes,
       resolutions: { ...resolutions.value },
     };
     const response = await commitExcelImport({
@@ -474,7 +473,7 @@ function setMode(event: Event): void {
       <template v-else-if="preview">
         <button type="button" @click="emit('close')">取消</button>
         <button type="button" :disabled="loading" @click="rePreview">重新预览</button>
-        <button type="button" class="primary" :disabled="submitting" @click="commit">确认导入</button>
+        <button type="button" class="primary" :disabled="submitting || loading" @click="commit">确认导入</button>
       </template>
     </template>
   </ModalDialog>

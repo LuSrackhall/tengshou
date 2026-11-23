@@ -7,8 +7,9 @@ import { computed } from "vue";
 import { exportSignature } from "../../api/endpoints";
 import type { ContractDetail } from "../../api/types";
 import { errorMessage, toast } from "../../bridge/app";
+import { fmtDate } from "../../ui/format";
 import { saveDownloadedFile } from "../contracts/download";
-import { fmtDate, shortDigest } from "../contracts/format";
+import { shortDigest } from "../contracts/format";
 
 const props = defineProps<{ detail: ContractDetail }>();
 

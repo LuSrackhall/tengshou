@@ -3,39 +3,12 @@
 
 import type { FieldDefinition, Party, PartyKind } from "../../api/types";
 
-/** 变更动作标签（app.js ACTION_LABELS 的相对方子集，保留完整表）。 */
-export const ACTION_LABELS: Record<string, string> = {
-  create: "新建",
-  update: "修改",
-  delete: "删除",
-  archive: "归档",
-  import: "导入",
-  export: "导出",
-  restore: "恢复",
-  generate: "生成",
-};
-
-/** MCP 写入使用的操作者标识（service.MCPActor）。 */
-export const MCP_ACTOR = "tengshou-mcp";
-
 export function statusLabel(status: string): string {
   return status === "active" ? "生效" : status === "archived" ? "归档" : "草稿";
 }
 
 export function kindLabel(kind: PartyKind | string): string {
   return kind === "organization" ? "单位" : "个人";
-}
-
-/** 与 app.js fmtDate 一致：无效日期原样返回。 */
-export function fmtDate(iso: string | undefined): string {
-  if (!iso) {
-    return "";
-  }
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return iso;
-  }
-  return date.toLocaleString("zh-CN", { hour12: false });
 }
 
 export function money(value: unknown): string {
@@ -84,12 +57,4 @@ export function partyFieldValue(party: Party, field: FieldDefinition): string {
   }
   const value = party.data ? party.data[field.key] : null;
   return formatDynamic(field, value);
-}
-
-export function isAgentActor(actor: string): boolean {
-  return actor === MCP_ACTOR;
-}
-
-export function actorLabel(actor: string): string {
-  return isAgentActor(actor) ? "Agent（MCP）" : "人工";
 }

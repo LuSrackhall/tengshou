@@ -16,7 +16,7 @@ import {
 import PartyAuditHistory from "./PartyAuditHistory.vue";
 import PartyFieldControl from "./PartyFieldControl.vue";
 import PartyHistoryList from "./PartyHistoryList.vue";
-import { isAgentActor } from "./format";
+import { isAgentActor } from "../../ui/format";
 import { collectPartyInput, syncControlValues } from "./form";
 
 const props = defineProps<{

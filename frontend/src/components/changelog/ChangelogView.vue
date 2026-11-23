@@ -4,7 +4,7 @@
 //
 // 筛选、刷新、最近操作与差异展示的文案、class 结构与迁移前一致；数据走
 // typed listChangelog 端点。外部写入经 shell/realtime.ts 的 data-changed
-// 到达本页，停留在本 tab 时自动重取。
+// 到达本页：停留在本 tab 时把连续事件合并为一次重取，避免逐条请求。
 
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { listChangelog } from "../../api/endpoints";
@@ -50,6 +50,27 @@ const loaded = ref(false);
 
 let unsubTabs: (() => void) | null = null;
 let unsubData: (() => void) | null = null;
+
+/** 连续 data-changed（SSE 突发/轮询一批）合并为一次重取。 */
+const REFRESH_DEBOUNCE_MS = 200;
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelPendingRefresh(): void {
+  if (refreshTimer !== null) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+function scheduleRefresh(): void {
+  cancelPendingRefresh();
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    if (currentTab.value === "changelog") {
+      void load(true);
+    }
+  }, REFRESH_DEBOUNCE_MS);
+}
 
 const summary = computed(
   () => `共 ${total.value} 条记录（显示最近 ${items.value.length} 条）`,
@@ -109,17 +130,19 @@ onMounted(() => {
   }
   unsubTabs = subscribeTabChanged((tab) => {
     if (tab === "changelog") {
+      cancelPendingRefresh();
       void load();
     }
   });
   unsubData = subscribeDataChanged(() => {
     if (currentTab.value === "changelog") {
-      void load(true);
+      scheduleRefresh();
     }
   });
 });
 
 onBeforeUnmount(() => {
+  cancelPendingRefresh();
   unsubTabs?.();
   unsubTabs = null;
   unsubData?.();

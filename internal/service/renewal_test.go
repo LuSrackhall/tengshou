@@ -160,6 +160,60 @@ func TestRenewalSourceValidation(t *testing.T) {
 	}
 }
 
+// TestRenewalSourceDoesNotAffectContentDigest pins that B7 provenance is pure
+// metadata: the renewal link must not enter the content digest that signatures
+// bind to. Without this guard a future refactor folding SourceContractID into
+// ContentSHA256 would silently mark every existing renewal signature as
+// content_changed, and no other test would fail.
+func TestRenewalSourceDoesNotAffectContentDigest(t *testing.T) {
+	base := model.Contract{
+		ID: "ctr_base", ContractNo: "HT-2025-0007", Year: 2025,
+		Title: "2025 房屋租赁合同", Type: "租赁",
+		PartyAID: "pty_a", PartyBID: "pty_b",
+		Status: model.ContractActive, SignedOn: "2025-01-05",
+		ValidFrom: "2025-01-10", ValidTo: "2025-12-31",
+		Amount: 1200, Data: map[string]any{"area_sqm": 88.5},
+	}
+
+	withoutSource, err := service.ContentSHA256(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sourceID := range []string{"ctr_source_a", "ctr_source_b"} {
+		withSource := base
+		withSource.SourceContractID = sourceID
+		digest, err := service.ContentSHA256(withSource)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if digest != withoutSource {
+			t.Fatalf("source %q changed the digest: got %s, want %s",
+				sourceID, digest, withoutSource)
+		}
+	}
+
+	// Controls: real content changes must still move the digest, so the
+	// assertions above cannot pass by accident.
+	changedTitle := base
+	changedTitle.Title += "（续）"
+	titleDigest, err := service.ContentSHA256(changedTitle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if titleDigest == withoutSource {
+		t.Fatal("digest did not change when the title changed")
+	}
+	changedData := base
+	changedData.Data = map[string]any{"area_sqm": 90}
+	dataDigest, err := service.ContentSHA256(changedData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dataDigest == withoutSource {
+		t.Fatal("digest did not change when the data changed")
+	}
+}
+
 // TestRenewalRequiresFreshSignature is the B7 security regression: a renewal
 // must not inherit the source contract's retained signature, and generating a
 // PDF for the new content needs a new signature (B4 preflight).

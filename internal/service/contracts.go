@@ -58,10 +58,11 @@ func (s *Service) SaveContract(ctx context.Context, in ContractInput) (model.Con
 	}
 
 	var contract model.Contract
+	var sourceNo string
 	var warnings []string
 	var err error
 	for attempt := 0; attempt < 5; attempt++ {
-		contract, warnings, err = s.buildContract(ctx, in, existing, false)
+		contract, sourceNo, warnings, err = s.buildContract(ctx, in, existing, false)
 		if err != nil {
 			return model.Contract{}, nil, err
 		}
@@ -91,13 +92,13 @@ func (s *Service) SaveContract(ctx context.Context, in ContractInput) (model.Con
 		changes = s.diffContract(ctx, existing, &contract)
 	} else {
 		changes = s.contractChanges(ctx, &contract)
-		if contract.SourceContractID != "" {
+		if sourceNo != "" {
 			// B7: the audit entry names the source contract number so the
-			// reuse (who, when, from which contract) stays traceable.
-			if source, err := s.rd.GetContract(ctx, contract.SourceContractID); err == nil {
-				summary = fmt.Sprintf("续签（来源 %s）：新建合同 %s「%s」",
-					source.ContractNo, contract.ContractNo, contract.Title)
-			}
+			// reuse (who, when, from which contract) stays traceable. The
+			// number comes from buildContract's validation read, so this path
+			// cannot silently fall back to a plain create summary.
+			summary = fmt.Sprintf("续签（来源 %s）：新建合同 %s「%s」",
+				sourceNo, contract.ContractNo, contract.Title)
 		}
 	}
 	s.logChange(ctx, model.ChangeEntityContract, contract.ID, action, summary, changes)
@@ -106,10 +107,13 @@ func (s *Service) SaveContract(ctx context.Context, in ContractInput) (model.Con
 
 // buildContract validates and materializes a contract. dryRun skips contract
 // number allocation and party creation so Excel previews have no side effects.
-func (s *Service) buildContract(ctx context.Context, in ContractInput, existing *model.Contract, dryRun bool) (model.Contract, []string, error) {
+// sourceNo is the contract number of the verified renewal source (empty for
+// plain creates and updates) so callers can build the audit summary from the
+// same read instead of fetching the source row twice.
+func (s *Service) buildContract(ctx context.Context, in ContractInput, existing *model.Contract, dryRun bool) (model.Contract, string, []string, error) {
 	fields, err := s.rd.ListFieldDefinitions(ctx, model.FieldEntityContract, false)
 	if err != nil {
-		return model.Contract{}, nil, err
+		return model.Contract{}, "", nil, err
 	}
 	validation := &ValidationErrors{}
 	warnings := []string{}
@@ -124,15 +128,18 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 	// B7: a renewal source must exist when creating. The link is create-only
 	// and never copies signatures, seals or documents from the source; a new
 	// contract must collect its own signatures before generation.
+	sourceNo := ""
 	if existing == nil {
 		if sourceID := strings.TrimSpace(in.SourceContractID); sourceID != "" {
-			if _, err := s.rd.GetContract(ctx, sourceID); err != nil {
+			source, err := s.rd.GetContract(ctx, sourceID)
+			if err != nil {
 				if isNotFound(err) {
-					return model.Contract{}, nil, business("not_found", "续签来源合同不存在")
+					return model.Contract{}, "", nil, business("not_found", "续签来源合同不存在")
 				}
-				return model.Contract{}, nil, err
+				return model.Contract{}, "", nil, err
 			}
 			contract.SourceContractID = sourceID
+			sourceNo = source.ContractNo
 		}
 	}
 
@@ -160,7 +167,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 	switch {
 	case existing != nil:
 		if requestedNo != "" && requestedNo != existing.ContractNo {
-			return model.Contract{}, nil, business("immutable",
+			return model.Contract{}, "", nil, business("immutable",
 				"合同编号创建后不可修改（当前编号 %s）", existing.ContractNo)
 		}
 		contract.ContractNo = existing.ContractNo
@@ -168,10 +175,10 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 		if err := validateContractNo(requestedNo); err != nil {
 			validation.addErr(model.FieldContractNo, "合同编号", err)
 		} else if other, err := s.rd.GetContractByNo(ctx, requestedNo); err == nil {
-			return model.Contract{}, nil, business("conflict",
+			return model.Contract{}, "", nil, business("conflict",
 				"合同编号「%s」已存在（合同 %s）", requestedNo, other.Title)
 		} else if !isNotFound(err) {
-			return model.Contract{}, nil, err
+			return model.Contract{}, "", nil, err
 		}
 		contract.ContractNo = requestedNo
 	case dryRun:
@@ -179,7 +186,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 	default:
 		no, err := s.nextContractNo(ctx, year)
 		if err != nil {
-			return model.Contract{}, nil, err
+			return model.Contract{}, "", nil, err
 		}
 		contract.ContractNo = no
 	}
@@ -230,7 +237,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 			if isNotFound(err) {
 				validation.add("party_a_id", "甲方", "档案不存在")
 			} else {
-				return model.Contract{}, nil, err
+				return model.Contract{}, "", nil, err
 			}
 		} else {
 			contract.PartyAID = id
@@ -241,7 +248,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 			if isNotFound(err) {
 				validation.add("template_id", "模板", "不存在")
 			} else {
-				return model.Contract{}, nil, err
+				return model.Contract{}, "", nil, err
 			}
 		} else {
 			contract.TemplateID = id
@@ -255,7 +262,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 			if isNotFound(err) {
 				validation.add(model.FieldPartyB, "相对方", "档案不存在")
 			} else {
-				return model.Contract{}, nil, err
+				return model.Contract{}, "", nil, err
 			}
 		} else {
 			contract.PartyBID = party.ID
@@ -264,7 +271,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 		name := strings.TrimSpace(in.PartyB)
 		matches, err := s.rd.FindPartiesByName(ctx, name)
 		if err != nil {
-			return model.Contract{}, nil, err
+			return model.Contract{}, "", nil, err
 		}
 		switch len(matches) {
 		case 1:
@@ -276,7 +283,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 				} else {
 					party, err := s.createParty(ctx, name)
 					if err != nil {
-						return model.Contract{}, nil, err
+						return model.Contract{}, "", nil, err
 					}
 					contract.PartyBID = party.ID
 					warnings = append(warnings, fmt.Sprintf("已新建相对方档案「%s」，可在档案页补充信息", name))
@@ -285,7 +292,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 				validation.add(model.FieldPartyB, "相对方", fmt.Sprintf("档案中不存在「%s」", name))
 			}
 		default:
-			return model.Contract{}, nil, business("ambiguous_party",
+			return model.Contract{}, "", nil, business("ambiguous_party",
 				"存在 %d 个同名相对方「%s」，请从档案中选择具体记录", len(matches), name)
 		}
 	case existing != nil && existing.PartyBID != "":
@@ -299,7 +306,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 		validation.add(model.FieldContractNo, "合同编号", "不能为空")
 	}
 	if err := validation.errOrNil(); err != nil {
-		return contract, warnings, err
+		return contract, sourceNo, warnings, err
 	}
 
 	if contract.PartyBID != "" && contract.Year > 0 && contract.Title != "" {
@@ -309,14 +316,14 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 		}
 		similar, err := s.rd.FindSimilarContracts(ctx, contract.PartyBID, contract.Year, contract.Title, exclude)
 		if err != nil {
-			return model.Contract{}, nil, err
+			return model.Contract{}, "", nil, err
 		}
 		for _, other := range similar {
 			warnings = append(warnings, fmt.Sprintf(
 				"已存在相同年度、相对方和名称的合同（编号 %s），请确认不是重复录入", other.ContractNo))
 		}
 	}
-	return contract, warnings, nil
+	return contract, sourceNo, warnings, nil
 }
 
 // createParty creates a stub archive record for a counterparty typed during

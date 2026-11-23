@@ -1,5 +1,5 @@
-// 合同域的展示格式化：与存量 app.js 的同名逻辑保持逐字一致。
-// 迁移只换渲染框架，不改文案、金额/日期格式与状态标签。
+// 合同域的展示格式化：共享函数已集中到 ui/format，这里重导出原有名字并
+// 保留本域专用的单元格/占位逻辑；文案与格式不变。
 
 import type {
   Contract,
@@ -8,38 +8,9 @@ import type {
   FieldDefinition,
   Party,
 } from "../../api/types";
+import { formatDynamic, money, statusLabel } from "../../ui/format";
 
-export function statusLabel(status: string): string {
-  return status === "active" ? "生效" : status === "archived" ? "归档" : "草稿";
-}
-
-export function money(value: unknown): string {
-  const amount = Number(value || 0);
-  return (
-    "¥" +
-    amount.toLocaleString("zh-CN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  );
-}
-
-/** 动态字段值展示（app.js formatDynamic）。 */
-export function formatDynamic(field: FieldDefinition, value: unknown): string {
-  if (value === null || value === undefined || value === "") {
-    return "—";
-  }
-  switch (field.type) {
-    case "money":
-      return money(value);
-    case "number":
-      return Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 6 });
-    case "bool":
-      return value === true ? "是" : value === false ? "否" : String(value);
-    default:
-      return String(value);
-  }
-}
+export { formatDynamic, money, statusLabel };
 
 /** 相对方名称回显；找不到时按迁移前的行为返回空串。 */
 export function partyName(parties: Party[], id: string | undefined): string {

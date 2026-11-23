@@ -29,7 +29,6 @@ const formOpen = ref(false);
 const editingParty = ref<Party | null>(null);
 
 let loadSeq = 0;
-let searchTimer: ReturnType<typeof setTimeout> | undefined;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 let unsubscribe: (() => void) | null = null;
 
@@ -75,14 +74,9 @@ function scheduleFetch(delay: number): void {
   }, delay);
 }
 
+// 搜索输入与外部变更事件共用同一个防抖计时器：150ms 内相继触发时只取一次数。
 watch(search, () => {
-  if (searchTimer !== undefined) {
-    clearTimeout(searchTimer);
-  }
-  searchTimer = setTimeout(() => {
-    searchTimer = undefined;
-    void fetchData();
-  }, 250);
+  scheduleFetch(250);
 });
 
 function openCreate(): void {
@@ -139,10 +133,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   unsubscribe?.();
   unsubscribe = null;
-  if (searchTimer !== undefined) {
-    clearTimeout(searchTimer);
-    searchTimer = undefined;
-  }
   if (reloadTimer !== undefined) {
     clearTimeout(reloadTimer);
     reloadTimer = undefined;

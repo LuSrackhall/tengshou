@@ -1,5 +1,8 @@
 // 公章域的展示与文件工具：逐条对应存量 app.js 的同名逻辑。
-import type { Party, PartyKind, Seal } from "../../api/types";
+import type { Party, Seal } from "../../api/types";
+
+/** 单位/个人标签已集中到 ui/format；重导出以保持调用点不变。 */
+export { kindLabel } from "../../ui/format";
 
 /** 卡片/预览里的归属文案；单位已删除时与迁移前一样回落「单位档案」。 */
 export function sealOwner(seal: Seal, parties: Party[]): string {
@@ -7,10 +10,6 @@ export function sealOwner(seal: Seal, parties: Party[]): string {
     return "未关联单位";
   }
   return parties.find((party) => party.id === seal.party_id)?.name || "单位档案";
-}
-
-export function kindLabel(kind: PartyKind): string {
-  return kind === "organization" ? "单位" : "个人";
 }
 
 /** 模板占位片段；输出与 app.js sealPlacementSnippet 逐字一致。 */

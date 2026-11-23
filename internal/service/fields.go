@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/LuSrackhall/tengshou/internal/model"
+	"github.com/LuSrackhall/tengshou/internal/xlsx"
 )
 
 // FieldInput is the editable payload for creating or updating a field
@@ -106,8 +107,8 @@ func (s *Service) CreateField(ctx context.Context, in FieldInput) (model.FieldDe
 		return model.FieldDefinition{}, err
 	}
 	s.logChange(ctx, model.ChangeEntityField, field.ID, model.ChangeActionCreate,
-		fmt.Sprintf("新建字段「%s」（%s，%s）", field.Label, field.Key, fieldTypeLabel(field.Type)),
-		[]model.FieldChange{{Field: field.Key, Label: field.Label, Old: "", New: fieldTypeLabel(field.Type)}})
+		fmt.Sprintf("新建字段「%s」（%s，%s）", field.Label, field.Key, xlsx.TypeLabel(field.Type)),
+		[]model.FieldChange{{Field: field.Key, Label: field.Label, Old: "", New: xlsx.TypeLabel(field.Type)}})
 	return field, nil
 }
 
@@ -247,30 +248,54 @@ func (s *Service) defaultSortOrder(ctx context.Context, entity string, requested
 	return max + 10
 }
 
-func fieldTypeLabel(t string) string {
-	switch t {
-	case model.FieldTypeText:
-		return "文本"
-	case model.FieldTypeLongText:
-		return "长文本"
-	case model.FieldTypeNumber:
-		return "数字"
-	case model.FieldTypeMoney:
-		return "金额"
-	case model.FieldTypeDate:
-		return "日期"
-	case model.FieldTypeSelect:
-		return "单选"
-	case model.FieldTypeBool:
-		return "是/否"
-	case model.FieldTypeImage:
-		return "图片路径"
-	case model.FieldTypeParty:
-		return "相对方"
-	case model.FieldTypeStatus:
-		return "状态"
-	default:
-		return t
+// applyDynamicFieldInput validates and merges dynamic field values for one
+// entity: keys that are not user-defined fields (including built-in core
+// keys) are rejected, provided values are coerced by field type, defaults are
+// applied on creation, and required fields are enforced. Contracts and
+// parties share these rules.
+func applyDynamicFieldInput(fields []model.FieldDefinition, data, input map[string]any, isNew bool, v *ValidationErrors) {
+	dynamic := make(map[string]model.FieldDefinition, len(fields))
+	for _, field := range fields {
+		if !field.BuiltIn {
+			dynamic[field.Key] = field
+		}
+	}
+	for key := range input {
+		if _, ok := dynamic[key]; !ok {
+			v.add(key, key, "字段未定义，请先在「字段」页新增")
+		}
+	}
+	for _, field := range fields {
+		if field.BuiltIn {
+			continue
+		}
+		raw, provided := input[field.Key]
+		if provided {
+			value, err := coerceFieldValue(field, raw)
+			if err != nil {
+				v.addErr(field.Key, field.Label, err)
+				continue
+			}
+			if value == nil {
+				delete(data, field.Key)
+			} else {
+				data[field.Key] = value
+			}
+			continue
+		}
+		if isNew && field.DefaultValue != "" {
+			if value, err := coerceFieldValue(field, field.DefaultValue); err == nil && value != nil {
+				data[field.Key] = value
+			}
+		}
+	}
+	for _, field := range fields {
+		if field.BuiltIn || !field.Required {
+			continue
+		}
+		if isBlank(data[field.Key]) {
+			v.add(field.Key, field.Label, "必填")
+		}
 	}
 }
 

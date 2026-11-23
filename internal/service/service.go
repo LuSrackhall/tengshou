@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"os/user"
 	"path"
@@ -178,7 +179,7 @@ func (v *ValidationErrors) errOrNil() error {
 
 // logChange appends an audit entry. Audit writes are best effort: the data
 // change has already committed and failing the request would invite duplicate
-// retries.
+// retries. A failed append is logged instead of being silently dropped.
 func (s *Service) logChange(ctx context.Context, entity, entityID, action, summary string, changes []model.FieldChange) {
 	entry := &model.ChangeLog{
 		Entity:    entity,
@@ -189,7 +190,10 @@ func (s *Service) logChange(ctx context.Context, entity, entityID, action, summa
 		Changes:   changes,
 		CreatedAt: s.now(),
 	}
-	_ = s.st.AppendChangeLog(ctx, entry)
+	if err := s.st.AppendChangeLog(ctx, entry); err != nil {
+		slog.Warn("追加变更记录失败",
+			"entity", entity, "entity_id", entityID, "action", action, "error", err)
+	}
 }
 
 // RecordMCPWriteEnabled appends an audit entry for a change of the MCP write

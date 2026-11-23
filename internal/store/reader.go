@@ -21,9 +21,6 @@ type Reader struct {
 // Close closes the read-only connection.
 func (r *Reader) Close() error { return r.db.Close() }
 
-// DB exposes the underlying read-only handle for diagnostics and tests.
-func (r *Reader) DB() *sql.DB { return r.db }
-
 type scanner interface {
 	Scan(dest ...any) error
 }

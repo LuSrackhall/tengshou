@@ -87,49 +87,7 @@ func (s *Service) buildParty(ctx context.Context, in PartyInput, existing *model
 	party.Address = truncateRunes(strings.TrimSpace(in.Address), 300)
 	party.Note = strings.TrimSpace(in.Note)
 
-	known := map[string]bool{
-		model.FieldPartyName: true, model.FieldPartyKind: true, model.FieldPartyIDNo: true,
-		model.FieldPartyPhone: true, model.FieldPartyAddr: true, model.FieldPartyNote: true,
-	}
-	for key := range in.Data {
-		if !known[key] && !fieldIn(fields, key) {
-			validation.add(key, key, "字段未定义，请先在「字段」页新增")
-		}
-	}
-	for _, field := range fields {
-		if field.BuiltIn {
-			continue
-		}
-		raw, provided := in.Data[field.Key]
-		if provided {
-			value, err := coerceFieldValue(field, raw)
-			if err != nil {
-				validation.addErr(field.Key, field.Label, err)
-				continue
-			}
-			if value == nil {
-				delete(party.Data, field.Key)
-			} else {
-				party.Data[field.Key] = value
-			}
-			continue
-		}
-		if existing == nil {
-			if field.DefaultValue != "" {
-				if value, err := coerceFieldValue(field, field.DefaultValue); err == nil && value != nil {
-					party.Data[field.Key] = value
-				}
-			}
-		}
-	}
-	for _, field := range fields {
-		if field.BuiltIn || !field.Required {
-			continue
-		}
-		if isBlank(party.Data[field.Key]) {
-			validation.add(field.Key, field.Label, "必填")
-		}
-	}
+	applyDynamicFieldInput(fields, party.Data, in.Data, existing == nil, validation)
 	if err := validation.errOrNil(); err != nil {
 		return model.Party{}, nil, err
 	}
@@ -228,15 +186,6 @@ func copyData(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
-}
-
-func fieldIn(fields []model.FieldDefinition, key string) bool {
-	for _, f := range fields {
-		if f.Key == key {
-			return true
-		}
-	}
-	return false
 }
 
 // diffValueMaps returns changed fields in display order.

@@ -1,7 +1,7 @@
 // 各域（变更记录、数据安全、设置、合同/相对方审计历史等）共用的展示格式化。
 // 与迁移前 app.js 的同名逻辑逐字一致：只换渲染框架，不改文案与格式。
 
-import type { ChangeLog } from "../api/types";
+import type { ChangeLog, FieldDefinition, PartyKind } from "../api/types";
 
 export const ENTITY_LABELS: Record<string, string> = {
   contract: "合同",
@@ -51,4 +51,43 @@ export function fmtDate(iso: string | undefined): string {
     return iso;
   }
   return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+// 以下展示格式化原在各域 format.ts 逐字重复，集中于此作为唯一事实源；
+// 与迁移前 app.js 的同名逻辑逐字一致（不改文案与格式）。
+
+export function statusLabel(status: string): string {
+  return status === "active" ? "生效" : status === "archived" ? "归档" : "草稿";
+}
+
+export function kindLabel(kind: PartyKind | string): string {
+  return kind === "organization" ? "单位" : "个人";
+}
+
+export function money(value: unknown): string {
+  const amount = Number(value || 0);
+  return (
+    "¥" +
+    amount.toLocaleString("zh-CN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  );
+}
+
+/** 动态字段值展示（app.js formatDynamic）。 */
+export function formatDynamic(field: FieldDefinition, value: unknown): string {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+  switch (field.type) {
+    case "money":
+      return money(value);
+    case "number":
+      return Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 6 });
+    case "bool":
+      return value === true ? "是" : value === false ? "否" : String(value);
+    default:
+      return String(value);
+  }
 }

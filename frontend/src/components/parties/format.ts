@@ -1,43 +1,10 @@
-// 相对方域的展示格式化：与存量 app.js 的同名逻辑保持逐字一致。
-// 迁移只换渲染框架，不改文案、金额/日期格式与状态标签。
+// 相对方域的展示格式化：共享函数已集中到 ui/format，这里只保留本域专用的
+// 台账单元格取值，并重导出原有名字以保持调用点不变。
 
-import type { FieldDefinition, Party, PartyKind } from "../../api/types";
+import type { FieldDefinition, Party } from "../../api/types";
+import { formatDynamic, kindLabel, money, statusLabel } from "../../ui/format";
 
-export function statusLabel(status: string): string {
-  return status === "active" ? "生效" : status === "archived" ? "归档" : "草稿";
-}
-
-export function kindLabel(kind: PartyKind | string): string {
-  return kind === "organization" ? "单位" : "个人";
-}
-
-export function money(value: unknown): string {
-  const amount = Number(value || 0);
-  return (
-    "¥" +
-    amount.toLocaleString("zh-CN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  );
-}
-
-/** 动态字段值展示（app.js formatDynamic）。 */
-export function formatDynamic(field: FieldDefinition, value: unknown): string {
-  if (value === null || value === undefined || value === "") {
-    return "—";
-  }
-  switch (field.type) {
-    case "money":
-      return money(value);
-    case "number":
-      return Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 6 });
-    case "bool":
-      return value === true ? "是" : value === false ? "否" : String(value);
-    default:
-      return String(value);
-  }
-}
+export { formatDynamic, kindLabel, money, statusLabel };
 
 /** 台账单元格值：内置列走一级字段，其余读 data（app.js partyFieldValue）。 */
 export function partyFieldValue(party: Party, field: FieldDefinition): string {

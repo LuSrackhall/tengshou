@@ -4,7 +4,8 @@
 // 预览层只负责展示与触发下载，下载/引导步骤记录由 TemplateEditor 处理。
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import type { OverlayWarning } from "../../api/types";
-import { renderPdfPagesInto, type PdfDocument } from "./pdfjs";
+import { renderPdfPagesInto } from "../pdf/pdf";
+import type { PdfDocument } from "./pdfjs";
 import type { PreviewDownload } from "./types";
 
 const props = defineProps<{

@@ -60,32 +60,3 @@ export function renderPageOnCanvas(
     transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
   });
 }
-
-/**
- * 把整份 PDF 逐页渲染进容器（预览层用，与迁移前 renderPDFPagesInto 等价）。
- * 容器被移除（预览关闭）后停止继续渲染。
- */
-export async function renderPdfPagesInto(
-  container: HTMLElement,
-  bytes: Uint8Array,
-  scale: number,
-): Promise<PdfDocument> {
-  container.innerHTML = "";
-  const doc = await loadPdfDocument(bytes);
-  for (let index = 1; index <= doc.numPages; index += 1) {
-    if (!container.isConnected) {
-      break;
-    }
-    const page = await doc.getPage(index);
-    const viewport = page.getViewport({ scale });
-    const wrap = document.createElement("div");
-    wrap.className = "pdf-page";
-    wrap.style.width = `${viewport.width}px`;
-    wrap.style.height = `${viewport.height}px`;
-    const canvas = document.createElement("canvas");
-    wrap.appendChild(canvas);
-    container.appendChild(wrap);
-    await renderPageOnCanvas(page, canvas, scale).promise;
-  }
-  return doc;
-}

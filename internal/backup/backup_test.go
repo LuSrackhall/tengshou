@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -273,6 +275,11 @@ func validDB(t *testing.T) []byte {
 
 func stagePackage(t *testing.T, zipPath string) error {
 	t.Helper()
+	return stagePackageLimit(t, zipPath, 1<<20)
+}
+
+func stagePackageLimit(t *testing.T, zipPath string, maxBytes int64) error {
+	t.Helper()
 	paths, err := config.ResolvePaths(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -283,7 +290,7 @@ func stagePackage(t *testing.T, zipPath string) error {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	_, err = mgr.Stage(context.Background(), f, 1<<20)
+	_, err = mgr.Stage(context.Background(), f, maxBytes)
 	return err
 }
 
@@ -429,5 +436,243 @@ func TestApplyPendingFailureKeepsOriginal(t *testing.T) {
 	}
 	if manifest.ID == "" {
 		t.Fatal("empty manifest id")
+	}
+}
+
+// F-TE-1: restoring over a non-empty data directory must first write a
+// pre-restore safety copy holding exactly the data the restore replaces.
+func TestApplyPendingWritesPreRestoreSafetyCopy(t *testing.T) {
+	ctx := context.Background()
+	srcPaths, st, party := newSource(t)
+	zipPath, manifest, err := newManager(srcPaths, st).CreateTo(ctx, srcPaths.Backups)
+	if err != nil {
+		t.Fatalf("create backup: %v", err)
+	}
+
+	dstPaths, err := config.ResolvePaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The destination already holds live data that the restore will replace.
+	oldStore, err := store.Open(dstPaths.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldParty := model.Party{Kind: model.PartyPerson, Name: "旧数据"}
+	if err := oldStore.PutParty(ctx, &oldParty); err != nil {
+		t.Fatal(err)
+	}
+	if err := oldStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+	oldAsset := filepath.Join(dstPaths.Assets, "signatures", "old.png")
+	writeAsset(t, oldAsset, []byte("old-signature"))
+	oldDB, err := os.ReadFile(dstPaths.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.Open(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstMgr := backup.New(dstPaths, "test-1.0", nil, nil)
+	_, stageErr := dstMgr.Stage(ctx, f, 1<<20)
+	f.Close()
+	if stageErr != nil {
+		t.Fatalf("stage: %v", stageErr)
+	}
+	res, err := backup.ApplyPending(dstPaths)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if !res.Applied || res.Manifest.ID != manifest.ID {
+		t.Fatalf("result = %+v", res)
+	}
+	if res.SafetyDir == "" {
+		t.Fatal("restore result has no safety dir")
+	}
+	if info, err := os.Stat(res.SafetyDir); err != nil || !info.IsDir() {
+		t.Fatalf("safety dir = %q err=%v", res.SafetyDir, err)
+	}
+	safetyDB, err := os.ReadFile(filepath.Join(res.SafetyDir, "tengshou.db"))
+	if err != nil || !bytes.Equal(safetyDB, oldDB) {
+		t.Fatalf("safety database copy mismatch: err=%v", err)
+	}
+	safetyAsset, err := os.ReadFile(filepath.Join(res.SafetyDir, "assets", "signatures", "old.png"))
+	if err != nil || string(safetyAsset) != "old-signature" {
+		t.Fatalf("safety asset copy = %q err=%v", safetyAsset, err)
+	}
+
+	// The restore itself replaced the live data with the package contents.
+	restoredStore, err := store.Open(dstPaths.DB)
+	if err != nil {
+		t.Fatalf("open restored database: %v", err)
+	}
+	defer restoredStore.Close()
+	rd, err := restoredStore.Reader()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rd.Close()
+	restored, err := rd.GetParty(ctx, party.ID)
+	if err != nil || restored.Name != "张三" {
+		t.Fatalf("restored party = %+v err=%v", restored, err)
+	}
+	if _, err := rd.GetParty(ctx, oldParty.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("pre-restore party should be gone: %v", err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(dstPaths.Assets, "signatures", "sig_a.png")); err != nil ||
+		string(raw) != "signature-png" {
+		t.Fatalf("restored signature = %q err=%v", raw, err)
+	}
+	if _, err := os.Stat(oldAsset); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("old signature should be replaced by the restore: %v", err)
+	}
+}
+
+// F-TE-2: a package with more entries than MaxEntries is refused before any
+// entry is extracted.
+func TestStageRejectsTooManyEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "many.zip")
+	out, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(out)
+	for i := 0; i <= backup.MaxEntries; i++ {
+		if _, err := zw.Create(fmt.Sprintf("assets/e%d", i)); err != nil {
+			t.Fatalf("write entry %d: %v", i, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// The upload cap is raised on purpose: the guard under test is the entry
+	// count, not the transport size.
+	err = stagePackageLimit(t, path, 64<<20)
+	if err == nil || !errors.Is(err, backup.ErrInvalidPackage) ||
+		!strings.Contains(err.Error(), "条目数量超过上限") {
+		t.Fatalf("entry-count error = %v", err)
+	}
+}
+
+// F-TE-2: a package that only *declares* more uncompressed bytes than
+// MaxTotalUncompressed is refused without extracting the payload.
+func TestStageRejectsDeclaredSizeBomb(t *testing.T) {
+	db := validDB(t)
+	manifest := backup.Manifest{
+		Format: backup.FormatName, FormatVersion: backup.FormatVersion,
+		ID: "bkp_bomb", AppVersion: "test", SchemaVersion: store.LatestSchemaVersion(),
+		Platform: "test/test", Database: backup.DatabaseEntry,
+		Files: []backup.FileEntry{{Path: "db/tengshou.db", Size: int64(len(db)),
+			SHA256: sha256Hex(db)}},
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "bomb.zip")
+	out, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(out)
+	write := func(name string, data []byte) {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("manifest.json", raw)
+	write("db/tengshou.db", db)
+	// One raw entry carries a one-byte payload but declares an uncompressed
+	// size past the guard, so the package must be refused up front.
+	bomb := &zip.FileHeader{
+		Name: "assets/bomb.bin", Method: zip.Store,
+		CompressedSize64: 1, UncompressedSize64: uint64(backup.MaxTotalUncompressed) + 1,
+	}
+	w, err := zw.CreateRaw(bomb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte{0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = stagePackage(t, path)
+	if err == nil || !errors.Is(err, backup.ErrInvalidPackage) ||
+		!strings.Contains(err.Error(), "解压后大小超过上限") {
+		t.Fatalf("declared-size error = %v", err)
+	}
+}
+
+// F-TE-3: packages whose schema is newer than this application are refused.
+func TestStageRejectsNewerSchema(t *testing.T) {
+	payload := map[string][]byte{"db/tengshou.db": validDB(t)}
+	path := buildPackage(t, payload, func(m *backup.Manifest) {
+		m.SchemaVersion = store.LatestSchemaVersion() + 1
+	})
+	err := stagePackage(t, path)
+	if err == nil || !errors.Is(err, backup.ErrInvalidPackage) ||
+		!strings.Contains(err.Error(), "高于当前应用支持的") {
+		t.Fatalf("newer schema error = %v", err)
+	}
+}
+
+// F-TE-3: symlink entries are refused; a restore must never create links.
+func TestStageRejectsSymlinkEntry(t *testing.T) {
+	manifest := backup.Manifest{
+		Format: backup.FormatName, FormatVersion: backup.FormatVersion,
+		ID: "bkp_link", AppVersion: "test", SchemaVersion: store.LatestSchemaVersion(),
+		Platform: "test/test", Database: backup.DatabaseEntry,
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "symlink.zip")
+	out, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(out)
+	w, err := zw.Create("manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	header := &zip.FileHeader{Name: "assets/link", Method: zip.Deflate}
+	header.SetMode(os.ModeSymlink | 0o777)
+	w, err = zw.CreateHeader(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("target.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = stagePackage(t, path)
+	if err == nil || !errors.Is(err, backup.ErrInvalidPackage) ||
+		!strings.Contains(err.Error(), "不允许符号链接") {
+		t.Fatalf("symlink error = %v", err)
 	}
 }

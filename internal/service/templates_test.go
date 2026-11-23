@@ -337,3 +337,31 @@ func hasWarning(warnings []overlay.Warning, code string) bool {
 	}
 	return false
 }
+
+// F-TE-7：保存模板标定写入模板 update 变更记录（B9 审计要求）。
+func TestTemplateMappingSaveWritesChangeLog(t *testing.T) {
+	f := newTemplateFixture(t)
+	ctx := context.Background()
+	imported := f.importTemplate(t, "审计模板")
+	saved, err := f.svc.SaveTemplateMapping(ctx, imported.Template.ID, service.TemplateSaveInput{
+		Placements: []model.Placement{
+			{ID: "no", Page: 1, X: 120, Y: 150, W: 200, H: 22,
+				Type: model.PlacementField, Field: "contract.contract_no"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("save mapping: %v", err)
+	}
+	logs, err := f.rd.ListChangeLogs(ctx, store.ChangeFilter{
+		Entity: model.ChangeEntityTemplate, EntityID: saved.Template.ID, Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range logs.Items {
+		if entry.Action == model.ChangeActionUpdate && strings.Contains(entry.Summary, "标定") {
+			return
+		}
+	}
+	t.Fatalf("template mapping audit missing: %+v", logs.Items)
+}

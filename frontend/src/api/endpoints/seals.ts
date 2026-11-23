@@ -21,6 +21,7 @@ import type {
   List,
   Seal,
   SealAttachResponse,
+  SealContractsInput,
   SealContractsResponse,
   SealDetachResponse,
   SealImportInput,
@@ -95,11 +96,8 @@ export function attachSeal(
   contractIds: string[],
   options: RequestOptions = {},
 ): Promise<SealAttachResponse> {
-  return post(
-    `/seals/${enc(id)}/attach`,
-    { contract_ids: contractIds },
-    options,
-  );
+  const body: SealContractsInput = { contract_ids: contractIds };
+  return post(`/seals/${enc(id)}/attach`, body, options);
 }
 
 /** POST /seals/{id}/detach：解除一批合同关联。 */
@@ -108,11 +106,8 @@ export function detachSeal(
   contractIds: string[],
   options: RequestOptions = {},
 ): Promise<SealDetachResponse> {
-  return post(
-    `/seals/${enc(id)}/detach`,
-    { contract_ids: contractIds },
-    options,
-  );
+  const body: SealContractsInput = { contract_ids: contractIds };
+  return post(`/seals/${enc(id)}/detach`, body, options);
 }
 
 /** 公章图片地址；图片按 sha256 不可变，可直接作为 img.src。 */

@@ -14,9 +14,6 @@ import type { ApiErrorBody, ApiFieldError } from "./types";
 /** app API 的固定 base；与 internal/httpapi/server.go 的 routes() 一致。 */
 export const API_BASE = "/app/api/v1";
 
-/** query 值只接受字符串与数字；undefined / null / 空串会被省略。 */
-export type QueryValue = string | number | undefined | null;
-
 /** 请求级选项：query 由 buildQuery 统一编码，headers 可覆盖默认值。 */
 export interface RequestOptions {
   query?: object;
@@ -64,10 +61,6 @@ export class ApiError extends Error {
   }
 }
 
-export function isApiError(error: unknown): error is ApiError {
-  return error instanceof ApiError;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -89,6 +82,7 @@ function isAbortError(error: unknown): boolean {
 
 /**
  * 拼 query 串；与存量 app.js 的 URLSearchParams 行为一致。
+ * 只编码字符串与数字；undefined / null / 空串会被省略。
  * 布尔值不自动转换（archived 等参数请显式传 "1"）。
  */
 export function buildQuery(query?: object): string {

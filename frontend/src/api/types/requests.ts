@@ -103,10 +103,7 @@ export interface FieldInput {
 }
 
 /** 更新字段是部分更新；key 创建后不可修改。 */
-export type FieldUpdateInput = Partial<Omit<FieldInput, "entity" | "key">> & {
-  entity?: FieldEntity;
-  key?: string;
-};
+export type FieldUpdateInput = Partial<Omit<FieldInput, "key">>;
 
 // ---------- 公章 ----------
 

@@ -32,6 +32,7 @@ import {
   type DataChangedDetail,
 } from "../shell/events";
 import { switchTab as switchTabImpl } from "../shell/tabs";
+import { CHANGE_ENTITIES } from "../api/types";
 import type {
   ChangeEntity,
   Contract,
@@ -89,18 +90,6 @@ export interface AppChangeNotice {
   entity_id: string;
   actor: string;
 }
-
-const CHANGE_ENTITIES: readonly ChangeEntity[] = [
-  "contract",
-  "party",
-  "field",
-  "seal",
-  "template",
-  "signature",
-  "backup",
-  "settings",
-  "import",
-];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

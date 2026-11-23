@@ -26,3 +26,6 @@ export type * from "./types/requests";
 export type * from "./types/settings";
 export type * from "./types/signing";
 export type * from "./types/templates";
+
+// 运行时清单是值，barrel 的 `export type *` 不会导出它。
+export { CHANGE_ENTITIES } from "./types/common";

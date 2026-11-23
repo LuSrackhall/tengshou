@@ -10,11 +10,7 @@
 
 import { eventsUrl, listChangelog } from "../api/endpoints";
 import { publishLiveStatus, type LiveStatusMode } from "../bridge/live-status";
-import {
-  CHANGE_EVENT,
-  DATA_CHANGED_EVENT,
-  type DataChangedDetail,
-} from "./events";
+import { CHANGE_EVENT, notifyDataChanged } from "./events";
 import { currentTab } from "./tabs";
 
 let eventSource: EventSource | null = null;
@@ -29,20 +25,12 @@ function setLiveStatus(mode: LiveStatusMode): void {
   publishLiveStatus(mode);
 }
 
-function dispatchDataChanged(entities: string[]): void {
-  window.dispatchEvent(
-    new CustomEvent<DataChangedDetail>(DATA_CHANGED_EVENT, {
-      detail: { entities },
-    }),
-  );
-}
-
 function requestCatchUpRefresh(): void {
   const entities = ["field", "contract", "party", "seal", "template"];
   if (currentTab.value === "settings") {
     entities.push("settings");
   }
-  dispatchDataChanged(entities);
+  notifyDataChanged(entities);
 }
 
 function connectEventStream(): void {
@@ -164,7 +152,7 @@ function handleChangeEvent(item: unknown, fallbackId = ""): void {
   lastEventId = id;
   window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: item }));
   const entity = typeof item.entity === "string" ? item.entity : "";
-  dispatchDataChanged([entity]);
+  notifyDataChanged([entity]);
 }
 
 let started = false;

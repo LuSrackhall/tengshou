@@ -5,9 +5,9 @@
 // app.js renderContractGeneration / renderGenerationHistory；预检、生成、
 // 落库与审计语义不变。
 //
-// 跨域：扫码签名与批量生成仍归 app.js。生成成功后经 bridge/app.ts 的
-// refreshAfterWrite 刷新 app.js 的模板/统计缓存并广播
-// tengshou:data-changed；外部写入经同一事件到达本域后重取模板与生成历史。
+// 跨域：扫码签名与批量生成已由各自 Vue 域承接。生成成功后经
+// bridge/app.ts 的 refreshAfterWrite 广播 tengshou:data-changed；外部写入
+// 经同一事件到达本域后重取模板与生成历史。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ApiError } from "../../api/client";
 import {

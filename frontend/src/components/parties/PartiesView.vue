@@ -3,7 +3,7 @@
 // 结构与 app.js renderParties 的输出一致（toolbar / summary / data-table /
 // actions 类名不变），数据走 frontend/src/api 的 typed 端点。
 //
-// 实时刷新：app.js 仍是 SSE/轮询的持有者，收到变更后派发
+// 实时刷新：shell/realtime.ts 持有 SSE/轮询调度，收到变更后派发
 // tengshou:data-changed；本组件据此重取字段与档案（外部写入数秒内可见）。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { deleteParty as deletePartyRequest, listFields, listParties } from "../../api/endpoints";
@@ -116,7 +116,7 @@ async function remove(party: Party): Promise<void> {
   }
 }
 
-// 历史合同的查看/续签仍由 app.js 的合同表单承接：先关弹窗再跨域调用。
+// 历史合同的查看/续签由合同域的 Vue 表单承接：先关弹窗再跨域调用。
 function onOpenContract(contract: Contract, renew: boolean): void {
   closeForm();
   openContractFormForHistory(contract, renew);

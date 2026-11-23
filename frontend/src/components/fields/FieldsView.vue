@@ -3,10 +3,11 @@
 // 结构与 app.js renderFields 的输出一致（toolbar / segmented / summary /
 // data-table / actions 类名不变），数据走 frontend/src/api 的 typed 端点。
 //
-// 跨域联动：app.js 仍持有 loadFields 与 state.fields，供未迁移的合同表单、
-// 模板标定读取；本域写操作后调用 refreshAfterWrite() 让 app.js 重新取字段并
-// 派发 tengshou:data-changed，相对方档案等已迁移域据此立即刷新。
-// 外部写入（MCP/curl）经 SSE/轮询到达 app.js 后同样派发该事件，本组件重取。
+// 跨域联动：字段由本组件自取，合同表单与模板标定等域各自通过 typed 端点
+// 读取当前字段；本域写操作后调用 refreshAfterWrite()，经 bridge/app.ts 派发
+// tengshou:data-changed，相对方档案等已迁移域据此立即刷新。
+// 外部写入（MCP/curl）经 shell/realtime.ts 的 SSE/轮询后同样派发该事件，
+// 本组件重取。
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   archiveField as archiveFieldRequest,

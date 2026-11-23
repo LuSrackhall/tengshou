@@ -3,7 +3,7 @@
 //
 // 数据全部走 frontend/src/api 的 typed 端点；跨域动作走
 // frontend/src/bridge/app.ts：
-//   - 切 tab：app.js 的 switchTab；
+//   - 切 tab：bridge/app.ts 的 switchTab；
 //   - 打开模板导入 / 标定编辑器 / 合同表单：tengshou:open-* 事件；
 //   - 外部写入与本地写入后的刷新：tengshou:data-changed。
 // 完成判定（数据库 vs config.json）、步骤顺序、首装判定与跳过语义均由

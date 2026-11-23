@@ -22,7 +22,7 @@ CodeGraph 是可选的本地开发工具，未安装不影响构建、测试与�
 ## Go 工程约定
 
 - **格式**：`gofmt -l ./cmd ./internal` 必须为空，CI 强制检查。
-- **文件组织**：Go 文件按职责组织（如 `templates.go` / `templates_import.go`），
+- **文件组织**：Go 文件按职责组织（如 `internal/store/reader_contracts.go` / `reader_fields.go`），
   不按类型堆砌。Go 没有官方行数上限，本仓库也不设硬门禁；单文件接近
   1000 行时，新增逻辑优先落到新文件，单函数超过约 80 行时考虑拆分，
   不为凑行数而拆。

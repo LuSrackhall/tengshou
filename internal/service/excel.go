@@ -971,7 +971,7 @@ func (s *Service) planImportRow(ctx context.Context, row xlsx.Row, existing *mod
 			plan.errs = append(plan.errs, FieldError{Field: field.Key, Label: field.Label, Message: err.Error()})
 		}
 	}
-	contract, warnings, err := s.buildContract(ctx, plan.in, plan.existing, true)
+	contract, _, warnings, err := s.buildContract(ctx, plan.in, plan.existing, true)
 	if err != nil {
 		var verrs *ValidationErrors
 		if errors.As(err, &verrs) {

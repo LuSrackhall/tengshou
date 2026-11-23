@@ -57,6 +57,9 @@ export async function renderPdfPagesInto(
   try {
     const dpr = window.devicePixelRatio || 1;
     for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
+      if (!container.isConnected) {
+        break;
+      }
       const page = await doc.getPage(pageNumber);
       const viewport = page.getViewport({ scale });
       const wrap = document.createElement("div");

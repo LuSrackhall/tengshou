@@ -150,6 +150,17 @@ func TestSealImportValidation(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("bad image status = %d body=%s", resp.StatusCode, raw)
 	}
+	// 超过 maxSealBytes（12MB）的图片应在解码图片之前被拒绝。
+	oversized := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0}, 12<<20+1))
+	resp, raw = f.appRequest(t, http.MethodPost, "/app/api/v1/seals", map[string]any{
+		"name": "公章", "file_base64": oversized,
+	}, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("oversized image status = %d body=%s", resp.StatusCode, raw)
+	}
+	if !strings.Contains(string(raw), "公章图片文件过大，请压缩到 12MB 以内") {
+		t.Fatalf("oversized image body = %s", raw)
+	}
 	resp, raw = f.appRequest(t, http.MethodPost, "/app/api/v1/seals", map[string]any{
 		"name": "公章", "file_base64": sealTestPNG(t, 260, 100),
 	}, nil)

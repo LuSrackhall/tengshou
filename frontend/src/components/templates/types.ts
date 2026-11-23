@@ -49,6 +49,8 @@ export interface GeneratedResult {
 /** 「添加位置」表单提交的值；校验在编辑器里完成。 */
 export interface AddPlacementPayload {
   kind: Placement["type"];
+  /** 新框所在页码（1 起），由「新增位置」表单的页码选择给出。 */
+  page: number;
   field: string;
   party: string;
   sealMode: string;

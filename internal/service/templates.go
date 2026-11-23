@@ -10,6 +10,7 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"log/slog"
 	"math"
 	"os"
 	"path"
@@ -37,13 +38,6 @@ const (
 	// conversionTimeout bounds a Word/LibreOffice conversion.
 	conversionTimeout = 3 * time.Minute
 )
-
-// SetConverterChain overrides the docx→PDF converters (tests, headless CLI).
-func (s *Service) SetConverterChain(chain *doctopdf.Chain) {
-	if chain != nil {
-		s.converters = chain
-	}
-}
 
 // SetFontLoader injects the CJK font resolver used for overlay text. The app
 // layer shares its generator font so loading happens once per process.
@@ -300,9 +294,7 @@ func (s *Service) ImportTemplate(ctx context.Context, in TemplateImportInput) (T
 	if converter == "libreoffice" {
 		warnings = append(warnings, "本次使用 LibreOffice 转换。个别字体或行距可能与 Word 有细微差异，请在预览中确认。")
 	}
-	if record.Kind == model.TemplateKindPDF {
-		warnings = append(warnings, "下一步：在预览页拖框标定字段、签名和公章的位置，保存后生成 PDF。")
-	}
+	warnings = append(warnings, "下一步：在预览页拖框标定字段、签名和公章的位置，保存后生成 PDF。")
 	usage, err := s.rd.TemplateUsage(ctx, record.ID)
 	if err != nil {
 		return TemplateImportResult{}, err
@@ -402,7 +394,11 @@ func (s *Service) DeleteTemplateVersion(ctx context.Context, id string) error {
 		return err
 	}
 	siblings, err := s.rd.ListTemplateVersions(ctx, tpl.Name)
-	if err == nil {
+	if err != nil {
+		// 查询失败时保守处理：保留资产不删，仅记录，不影响删除本身的成功。
+		slog.Warn("删除模板版本后查询同族版本失败，跳过资产清理",
+			"template", tpl.ID, "name", tpl.Name, "error", err)
+	} else {
 		sourceUsed, pdfUsed := false, false
 		for _, sibling := range siblings {
 			if sibling.SourcePath == tpl.SourcePath {

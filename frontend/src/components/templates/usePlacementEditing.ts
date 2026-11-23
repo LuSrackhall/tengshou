@@ -12,8 +12,8 @@ import type { AddPlacementPayload } from "./types";
 export interface PlacementEditingOptions {
   /** 初始标定位置（props.template.placements）。 */
   initialPlacements?: Placement[];
-  /** 新建标定框的页面尺寸；模板 PDF 未加载完成时为 undefined。 */
-  pageSize: () => { width: number; height: number } | undefined;
+  /** 新建标定框所在页的尺寸；该页尚未加载时为 undefined。 */
+  pageSize: (page: number) => { width: number; height: number } | undefined;
   /** 任何修改（含新建）后置脏并让当前预览失效。 */
   onChanged: () => void;
 }
@@ -68,9 +68,9 @@ export function usePlacementEditing(options: PlacementEditingOptions) {
   }
 
   function addPlacement(payload: AddPlacementPayload): void {
-    const pageSize = options.pageSize();
+    const pageSize = options.pageSize(payload.page);
     if (!pageSize) {
-      toast("模板 PDF 尚未加载完成", true);
+      toast(`模板 PDF 第 ${payload.page} 页尚未加载完成，无法在该页新增位置`, true);
       return;
     }
     const created = createPlacement(payload, pageSize, placements.value);

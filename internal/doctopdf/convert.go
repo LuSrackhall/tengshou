@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 )
 
@@ -148,8 +147,5 @@ func compactError(err error) string {
 	}
 	return msg
 }
-
-// IsWindows reports whether Word COM automation can be used.
-func IsWindows() bool { return runtime.GOOS == "windows" }
 
 var errEmptyPDF = errors.New("转换程序没有生成 PDF 文件")

@@ -102,7 +102,21 @@ func (r testResolver) Image(p model.Placement) (image.Image, bool, error) {
 	return img, ok, nil
 }
 
-func TestBuildAndStampOverlay(t *testing.T) {
+// writeComposed applies the overlay with Compose and writes the result to
+// outPath. Production code writes the composed bytes through the service's
+// atomic file helper, so tests exercise the same Compose step directly.
+func writeComposed(t *testing.T, templatePath string, overlayPDF []byte, outPath string) {
+	t.Helper()
+	composed, err := Compose(templatePath, overlayPDF)
+	if err != nil {
+		t.Fatalf("compose: %v", err)
+	}
+	if err := os.WriteFile(outPath, composed, 0o600); err != nil {
+		t.Fatalf("write composed PDF: %v", err)
+	}
+}
+
+func TestBuildAndComposeOverlay(t *testing.T) {
 	family := testFont(t)
 	dir := t.TempDir()
 	templatePath := filepath.Join(dir, "template.pdf")
@@ -156,9 +170,7 @@ func TestBuildAndStampOverlay(t *testing.T) {
 		t.Fatalf("warnings = %#v, want none", res.Warnings)
 	}
 	outPath := filepath.Join(dir, "out.pdf")
-	if err := Stamp(templatePath, res.PDF, outPath); err != nil {
-		t.Fatalf("stamp: %v", err)
-	}
+	writeComposed(t, templatePath, res.PDF, outPath)
 
 	outPages, err := PageSizes(outPath)
 	if err != nil {
@@ -366,9 +378,7 @@ func TestPageSizesAndStampHandleRotation(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 	out := filepath.Join(dir, "rotated-out.pdf")
-	if err := Stamp(rotated, res.PDF, out); err != nil {
-		t.Fatalf("stamp rotated: %v", err)
-	}
+	writeComposed(t, rotated, res.PDF, out)
 	outPages, err := PageSizes(out)
 	if err != nil {
 		t.Fatalf("output page sizes: %v", err)

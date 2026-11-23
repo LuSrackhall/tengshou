@@ -880,16 +880,6 @@ func (r *Reader) ListTemplateVersions(ctx context.Context, name string) ([]model
 	return out, rows.Err()
 }
 
-// LatestTemplateVersionOfKind returns the newest version of a template family.
-func (r *Reader) LatestTemplateVersionOfKind(ctx context.Context, name, kind string) (model.Template, error) {
-	t, err := scanTemplate(r.db.QueryRowContext(ctx, `SELECT `+templateColumns+
-		` FROM templates WHERE name = ? AND kind = ? ORDER BY version DESC LIMIT 1`, name, kind))
-	if errors.Is(err, sql.ErrNoRows) {
-		return model.Template{}, ErrNotFound
-	}
-	return t, err
-}
-
 // MaxTemplateVersion returns the highest version number used by a template
 // family (both HTML and PDF kinds share the (name, version) uniqueness rule).
 func (r *Reader) MaxTemplateVersion(ctx context.Context, name string) (int, error) {

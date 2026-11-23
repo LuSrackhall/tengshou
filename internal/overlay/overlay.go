@@ -3,7 +3,7 @@
 // The template PDF (converted from the user's Word document) is never edited
 // directly. Instead Build renders a transparent overlay PDF with the same page
 // sizes, containing text at calibrated boxes plus signature and seal images;
-// Stamp then applies that overlay to every template page with pdfcpu. The
+// Compose then applies that overlay to every template page with pdfcpu. The
 // result keeps the Word layout untouched (same fonts, page breaks and images)
 // while adding only the extracted contract values.
 package overlay
@@ -16,7 +16,6 @@ import (
 	"image/color"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -496,19 +495,6 @@ func isClosingPunct(r rune) bool {
 	return false
 }
 
-// Stamp applies the overlay PDF to every page of templatePath and writes the
-// composed PDF atomically to outPath.
-func Stamp(templatePath string, overlayPDF []byte, outPath string) error {
-	composed, err := Compose(templatePath, overlayPDF)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(outPath), 0o700); err != nil {
-		return err
-	}
-	return writeFileAtomic(outPath, composed)
-}
-
 // Compose stamps the overlay onto the template and returns the composed PDF.
 func Compose(templatePath string, overlayPDF []byte) ([]byte, error) {
 	if len(overlayPDF) == 0 {
@@ -547,42 +533,6 @@ func Compose(templatePath string, overlayPDF []byte) ([]byte, error) {
 		return nil, fmt.Errorf("套印生成 PDF 失败：%w", err)
 	}
 	return buf.Bytes(), nil
-}
-
-// writeFileAtomic writes data through a temporary file in the destination
-// directory and renames it into place.
-func writeFileAtomic(outPath string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(outPath), "."+filepath.Base(outPath)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, outPath)
-}
-
-// Render builds the overlay and stamps it onto the template in one call.
-// It returns the output path, the overlay build result and the page count.
-func Render(templatePath, outPath string, opts Options) (int, Result, error) {
-	res, err := Build(opts)
-	if err != nil {
-		return 0, Result{}, err
-	}
-	if err := Stamp(templatePath, res.PDF, outPath); err != nil {
-		return 0, Result{}, err
-	}
-	return len(opts.Pages), res, nil
 }
 
 // RoundToPt rounds a coordinate to 0.1 pt, keeping stored mappings small.

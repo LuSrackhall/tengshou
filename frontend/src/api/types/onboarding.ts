@@ -32,9 +32,6 @@ export interface OnboardingFacts {
   templates: number;
   calibrated_templates: number;
   contracts: number;
-  parties: number;
-  fields: number;
-  active_template_id?: string;
   active_template_name?: string;
   active_template_version?: number;
   active_template_placements: number;

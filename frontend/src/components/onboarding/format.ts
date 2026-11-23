@@ -2,20 +2,13 @@
 // 迁移只换渲染框架，不改文案、步骤顺序、完成判定与日期格式。
 
 import type { Onboarding } from "../../api/types";
+import { TABS } from "../../shell/tabs";
 import { fmtDate } from "../../ui/format";
 
-/** 自检「前往」按钮的 tab 名称（app.js TAB_LABELS，保留完整表）。 */
-export const TAB_LABELS: Record<string, string> = {
-  onboarding: "新手引导",
-  contracts: "合同台账",
-  templates: "模板",
-  seals: "公章",
-  parties: "相对方档案",
-  fields: "字段",
-  changelog: "变更记录",
-  data: "数据安全",
-  settings: "设置",
-};
+/** 自检「前往」按钮的 tab 名称；文案唯一事实源是 shell/tabs.ts 的 TABS。 */
+export const TAB_LABELS: Record<string, string> = Object.fromEntries(
+  TABS.map((tab) => [tab.id, tab.label]),
+);
 
 export function tabLabel(tab: string): string {
   return TAB_LABELS[tab] ?? tab;

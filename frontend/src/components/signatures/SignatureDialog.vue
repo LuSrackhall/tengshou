@@ -20,7 +20,7 @@ import type {
   SignatureSession,
 } from "../../api/types";
 import { errorMessage, refreshAfterWrite, toast } from "../../bridge/app";
-import { fmtDate } from "../contracts/format";
+import { fmtDate } from "../../ui/format";
 import SignatureSummary from "./SignatureSummary.vue";
 
 const props = defineProps<{

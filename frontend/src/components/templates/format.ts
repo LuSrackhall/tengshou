@@ -1,17 +1,8 @@
 // 模板域的展示与文件工具：逐条对应存量 app.js 的同名逻辑。
 import type { Placement, Template } from "../../api/types";
 
-/** 与 app.js fmtDate 一致：zh-CN、24 小时制，无效时间原样返回。 */
-export function formatDateTime(iso?: string): string {
-  if (!iso) {
-    return "";
-  }
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return iso;
-  }
-  return date.toLocaleString("zh-CN", { hour12: false });
-}
+/** 与 app.js fmtDate 一致的日期格式（模板页沿用 formatDateTime 名称）。 */
+export { fmtDate as formatDateTime } from "../../ui/format";
 
 /** 模板转换方式文案；与 app.js templateConverterLabel 逐字一致。 */
 export function converterLabel(converter?: string): string {

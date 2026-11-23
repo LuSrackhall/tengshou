@@ -30,13 +30,13 @@ import {
   refreshAfterWrite,
   subscribeDataChanged,
   toast,
-  type DataChangedDetail,
 } from "../../bridge/app";
+import type { DataChangedDetail } from "../../shell/events";
+import { fmtDate } from "../../ui/format";
 import PdfOverlay from "../pdf/PdfOverlay.vue";
 import { base64ToBytes } from "../pdf/pdf";
 import { saveDownloadedFile } from "./download";
 import {
-  fmtDate,
   generationKindLabel,
   generationStatusLabel,
   shortDigest,

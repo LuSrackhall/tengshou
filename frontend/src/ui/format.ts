@@ -1,4 +1,4 @@
-// 外壳域（变更记录、数据安全、设置）共用的展示格式化。
+// 各域（变更记录、数据安全、设置、合同/相对方审计历史等）共用的展示格式化。
 // 与迁移前 app.js 的同名逻辑逐字一致：只换渲染框架，不改文案与格式。
 
 import type { ChangeLog } from "../api/types";
@@ -29,12 +29,16 @@ export const ACTION_LABELS: Record<string, string> = {
 /** MCP 写入使用的操作者标识（service.MCPActor）。 */
 export const MCP_ACTOR = "tengshou-mcp";
 
+export function isAgentActor(actor: string): boolean {
+  return actor === MCP_ACTOR;
+}
+
 export function isAgentEntry(entry: ChangeLog): boolean {
-  return entry.actor === MCP_ACTOR;
+  return isAgentActor(entry.actor);
 }
 
 export function actorLabel(actor: string): string {
-  return actor === MCP_ACTOR ? "Agent（MCP）" : "人工";
+  return isAgentActor(actor) ? "Agent（MCP）" : "人工";
 }
 
 /** 与 app.js fmtDate 一致：无效日期原样返回。 */

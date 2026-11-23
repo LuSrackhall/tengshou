@@ -1,27 +1,17 @@
 <script setup lang="ts">
 // 公共 modal/backdrop 基础设施：DOM 结构与迁移前 app.js openModal 一致
-// （modal-backdrop / modal、可选 wide/full、modal-head/body/foot），
-// Escape 关闭。各域已有自己的弹窗保持原样，新增外壳弹窗统一用本组件。
+// （modal-backdrop / modal、可选 wide、modal-head/body/foot），Escape 关闭。
+// 各域已有自己的弹窗保持原样，新增外壳弹窗统一用本组件。
 import { onBeforeUnmount, onMounted } from "vue";
 
-const props = withDefaults(
-  defineProps<{
-    title: string;
-    wide?: boolean;
-    full?: boolean;
-    /** 为 true 时拦截 Escape 关闭（迁移前 openModal 默认允许关闭）。 */
-    dismissible?: boolean;
-  }>(),
-  { wide: false, full: false, dismissible: true },
-);
+withDefaults(defineProps<{ title: string; wide?: boolean }>(), { wide: false });
 
 const emit = defineEmits<{ close: [] }>();
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key !== "Escape" || !props.dismissible) {
-    return;
+  if (event.key === "Escape") {
+    emit("close");
   }
-  emit("close");
 }
 
 onMounted(() => {
@@ -38,7 +28,7 @@ onBeforeUnmount(() => {
     <div class="modal-backdrop">
       <div
         class="modal"
-        :class="{ wide, full }"
+        :class="{ wide }"
         role="dialog"
         aria-modal="true"
       >

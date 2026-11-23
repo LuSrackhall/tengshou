@@ -38,18 +38,6 @@ import type {
   DocumentKind,
 } from "../api/types";
 
-export {
-  CHANGE_EVENT,
-  DATA_CHANGED_EVENT,
-  OPEN_BATCH_GENERATE_EVENT,
-  OPEN_CONTRACT_FORM_EVENT,
-  OPEN_EXCEL_IMPORT_EVENT,
-  OPEN_TEMPLATE_EDITOR_EVENT,
-  OPEN_TEMPLATE_IMPORT_EVENT,
-  TAB_CHANGE_EVENT,
-  type DataChangedDetail,
-};
-
 export interface PartyRef {
   id: string;
   name: string;

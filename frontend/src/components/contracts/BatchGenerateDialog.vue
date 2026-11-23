@@ -103,9 +103,11 @@ const modalTitle = computed(
   () => props.title || `批量生成 PDF · ${props.contracts.length} 份合同`,
 );
 const selectedSet = computed(() => new Set(selectedIds.value));
-const needsResign = computed(() =>
-  (preview.value?.items ?? []).some((item) => item.status === "needs_resign"),
-);
+/* 最近一次预检是否存在「需重新签名」项：决定保留旧签名开关的可见性。
+   生成成功会清空 preview，但开关不能随之隐藏——失败项重试仍会按
+   allowStale 实际发送 allow_stale_signature，可见性与生效状态必须一致
+   （迁移前 app.js 也保留该开关可见）；仅在切换模板 / 勾选变化时复位。 */
+const staleAvailable = ref(false);
 const sampleDisabled = computed(() => sampleBytes.value === null);
 const resultRows = computed(() => results.value?.items ?? []);
 
@@ -196,6 +198,7 @@ function onTemplateChange(): void {
   preview.value = null;
   sampleBytes.value = null;
   allowStale.value = false;
+  staleAvailable.value = false;
   generateLocked.value = true;
   summaryText.value = "模板版本已更换，请重新预检。";
   issues.value = [];
@@ -206,6 +209,7 @@ function onSelectionChange(): void {
   // 勾选变化后旧预检作废；状态标签保留上一次预检结果（与迁移前一致）。
   preview.value = null;
   allowStale.value = false;
+  staleAvailable.value = false;
   generateLocked.value = true;
   summaryText.value = `已选 ${selectedIds.value.length} 份合同。勾选变化后请重新预检。`;
 }
@@ -257,6 +261,9 @@ async function runPreflight(): Promise<void> {
     });
     preview.value = res;
     sampleBytes.value = res.pdf_base64 ? base64ToBytes(res.pdf_base64) : null;
+    staleAvailable.value = (res.items ?? []).some(
+      (item) => item.status === "needs_resign",
+    );
     const nextChips: Record<string, ChipState> = {};
     for (const item of res.items ?? []) {
       nextChips[item.contract_id] = {
@@ -496,7 +503,7 @@ onBeforeUnmount(() => {
             </label>
           </div>
           <div id="batchSummary" class="tpl-status">{{ summaryText }}</div>
-          <label v-show="needsResign" id="batchStaleWrap" class="check-row">
+          <label v-show="staleAvailable" id="batchStaleWrap" class="check-row">
             <input
               id="batchAllowStale"
               type="checkbox"

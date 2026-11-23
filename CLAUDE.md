@@ -11,6 +11,14 @@
 - **无运行时前端依赖**：生产构建不引入需要联网获取的运行时依赖；第三方库
   一律随仓库锁定版本（vendor 或构建期打包）。
 
+## CodeGraph（可选本地工具）
+
+CodeGraph 是可选的本地开发工具，未安装不影响构建、测试与运行。
+`.codegraph/` 索引自忽略、不入库；本地用 `codegraph init --local-only -y`
+建立、`codegraph sync` 更新。仓库根 `codegraph.json` 的 `worktrees/`、
+`.gc/` 排除与 `.gitignore` 是有意的双保险（防 `.gitignore` 变动后重新
+索引这两个目录）；日常新增排除目录改 `.gitignore` 即可。
+
 ## Go 工程约定
 
 - **格式**：`gofmt -l ./cmd ./internal` 必须为空，CI 强制检查。

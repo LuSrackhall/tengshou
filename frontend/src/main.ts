@@ -20,8 +20,8 @@ if (liveStatusHost) {
 
 // 合同台账（阶段 1 迁出 app.js）：<section id="view-contracts"> 保留为宿主，
 // 其 class="view active" 的切换仍由 app.js 的 switchTab 负责。合同详情里的
-// 生成面板与批量生成对话框已是 Vue 组件；扫码签名与 Excel 导入仍由 app.js
-// 实现，经 bridge/app.ts 双向调用。
+// 生成面板、批量生成对话框与扫码签名（components/signatures/）已是 Vue
+// 组件；Excel 导入仍由 app.js 实现，经 bridge/app.ts 调用。
 const contractsHost = document.getElementById("view-contracts");
 if (contractsHost) {
   createApp(ContractsView).mount(contractsHost);

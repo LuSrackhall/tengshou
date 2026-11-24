@@ -39,6 +39,10 @@ const (
 
 	// DefaultPort is the local HTTP service port.
 	DefaultPort = 8765
+	// PortFallbackSpan is how many consecutive ports (configured port .. +9)
+	// the desktop service tries to bind and the MCP connector probes. Both
+	// sides must use this one constant, or a running service is never found.
+	PortFallbackSpan = 10
 	// ConfigVersion is the current config file schema version.
 	ConfigVersion = 1
 )

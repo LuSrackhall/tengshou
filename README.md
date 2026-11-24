@@ -57,7 +57,9 @@
 - **HTML → PDF**：模板 + 合同数据生成带页码的 A4 PDF（中文、分页、图片、签名）。
 - **只读数据接口**：`/api/v1/*`，供 B6 MCP 连接器与用户侧 agent 取数；
   新增 `/api/v1/fields` 暴露字段定义，签名资产可按合同查询。
-- **MCP 数据连接器（B6）**：`tengshou-cli mcp` 以 stdio 启动，经本机回环
+- **MCP 数据连接器（B6）**：桌面客户端内置 `mcp` 子命令
+  （`tengshou-windows-amd64.exe mcp`，客户单文件交付），`tengshou-cli mcp`
+  与它共用 `internal/mcpconn` 同一实现；以 stdio 启动，经本机回环
   HTTP 读取合同 / 相对方 / 动态字段 / 签名状态 / 模板版本 / 生成预检 /
   已生成 PDF；写工具仅限新建字段、相对方档案、合同草稿与生成合同 PDF
   （生成前自动预检，未通过不产文件），复用同一 `internal/service` 校验，
@@ -86,10 +88,11 @@ go run ./cmd/tengshou-cli serve --data-dir ./data
 ```
 
 启动 MCP 连接器（桌面应用或 `serve` 运行后，在 Claude Code / Claude Desktop
-中注册；详见 [docs/mcp.md](docs/mcp.md)）：
+中注册；桌面客户端与 CLI 共用同一实现，详见 [docs/mcp.md](docs/mcp.md)）：
 
 ```bash
-go run ./cmd/tengshou-cli mcp --data-dir ./data
+go run ./cmd/tengshou mcp --data-dir ./data
+# 等价：go run ./cmd/tengshou-cli mcp --data-dir ./data
 ```
 
 启动桌面应用：
@@ -173,16 +176,30 @@ PDF 流水线需要一份覆盖中文的字体。解析顺序：
 
 ```bash
 ./scripts/build.sh                  # 当前平台：dist/tengshou + dist/tengshou-cli
-powershell -File scripts/build-windows.ps1   # Windows zip 产物
-bash scripts/package-windows-zip.sh dist     # 用已构建的 Windows 双 exe 打发布 zip
+./scripts/build.sh cli              # 只构建 CLI
+powershell -File scripts/build-windows.ps1   # Windows：桌面 exe + CLI（GUI/控制台子系统在此收口）
+bash scripts/package-windows-zip.sh dist     # 用已构建的 Windows 桌面 exe 打发布 zip
 ```
 
-Windows 发布 zip 内含桌面应用、MCP 连接器与 `MCP-接入.txt`，说明见
+Windows 发布 zip 内含桌面客户端（GUI + 内置 `mcp`）与 `MCP-接入.txt`，
+不再附带单独 CLI；完整 CLI 仍是独立发布资产。说明见
 [docs/mcp.md](docs/mcp.md#windows-分发包说明)。
+
+各平台 MCP 连接器形态：
+
+| 平台 | 交付形态 | 连接器 |
+| --- | --- | --- |
+| Windows | 桌面 exe（分发包） | 同一 exe 带 `mcp` 参数 |
+| macOS | 桌面二进制 | 同一二进制带 `mcp` 参数 |
+| Linux | 仅 CLI（无桌面壳构建） | `tengshou-cli mcp` |
 
 GitHub Actions：
 - push / PR：静态检查 + 单元与集成测试（含真实中文 PDF 生成）；
-- 构建 Linux / Windows / macOS CLI 与 macOS / Windows 桌面壳；
+- 脚本静态检查：`bash -n`、CRLF 检查、`.ps1` 非 ASCII 必须带 UTF-8 BOM，
+  Windows 作业另用 Windows PowerShell 5.1 解析器校验全部 `.ps1`；
+- 构建 Linux / macOS CLI 与 macOS / Windows 桌面壳（统一调用上述构建脚本），
+  并在 linux（CLI 自连）、windows-latest（GUI 子系统）、macos-15 三端用发布
+  形态二进制做 MCP stdio 管道冒烟；
 - `v*` 标签：发布固定 8 个资产；Windows zip 由发布任务用上述同一脚本组装。
 
 ## 开发
@@ -208,6 +225,7 @@ internal/service/       可写业务层：字段、档案、合同、签名、�
 internal/doctopdf/      Word → PDF 转换（Word COM / LibreOffice headless）
 internal/overlay/       PDF 套印引擎：定位文字、签名与公章并输出最终 PDF
 internal/mcp/           B6 MCP stdio 连接器与回环 HTTP 客户端
+internal/mcpconn/       桌面 / CLI 共用的 mcp 子命令实现
 internal/xlsx/          Excel 模板生成、台账导出与解析
 internal/pdfdoc/        HTML 解析 → 排版 → PDF
 internal/demo/          示例数据与签名 PNG 生成

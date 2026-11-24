@@ -1,6 +1,11 @@
-# Build the Windows desktop executable and CLI, then package a zip.
+﻿# Build the Windows desktop executable and CLI from one place.
+# Dev and CI both call this script; the release zip is assembled afterwards by
+# scripts/package-windows-zip.sh (which only packs the desktop exe + notes).
+#
 # Wails v3 on Windows is built with the pure-Go WebView2 bridge, so no mingw
 # toolchain is required (CGO_ENABLED=0).
+#
+# Env: VERSION / COMMIT / BUILD_DATE / OUT / GOARCH
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -12,7 +17,9 @@ $Version = if ($env:VERSION) { $env:VERSION } else {
 $Commit = if ($env:COMMIT) { $env:COMMIT } else {
     try { (git rev-parse --short HEAD) } catch { "unknown" }
 }
-$BuildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$BuildDate = if ($env:BUILD_DATE) { $env:BUILD_DATE } else {
+    (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+}
 $Out = if ($env:OUT) { $env:OUT } else { "dist" }
 
 $VersionLdFlags = "-X github.com/LuSrackhall/tengshou/internal/version.Version=$Version " +
@@ -33,24 +40,20 @@ $env:GOARCH = $GoArch
 
 Write-Host "构建 tengshou-windows-$GoArch.exe ..."
 go build -trimpath -ldflags $LdFlags -o "$Out/tengshou-windows-$GoArch.exe" ./cmd/tengshou
+# $ErrorActionPreference does not cover native exit codes, so check both the
+# exit code and the artifact. Keep this file UTF-8 with BOM: Windows PowerShell
+# 5.1 reads BOM-less files as ANSI, and the Chinese comments below then corrupt
+# the parse so the script silently builds nothing and still exits 0.
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$Out/tengshou-windows-$GoArch.exe")) {
+    throw "构建桌面 exe 失败（exit $LASTEXITCODE）：$Out/tengshou-windows-$GoArch.exe 不存在"
+}
 
 Write-Host "构建 tengshou-cli-windows-$GoArch.exe ..."
 go build -trimpath -ldflags $CliLdFlags -o "$Out/tengshou-cli-windows-$GoArch.exe" ./cmd/tengshou-cli
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$Out/tengshou-cli-windows-$GoArch.exe")) {
+    throw "构建 CLI exe 失败（exit $LASTEXITCODE）：$Out/tengshou-cli-windows-$GoArch.exe 不存在"
+}
 
-$Zip = "$Out/tengshou-windows-$GoArch.zip"
-if (Test-Path $Zip) { Remove-Item $Zip }
-# 与 CI 发布包保持一致：桌面应用 + MCP 连接器 + 接入说明，
-# 三个文件都放在 zip 根目录（先汇总到暂存目录再压缩）。
-$Stage = Join-Path $Out "package-windows-$GoArch"
-Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-Copy-Item "$Out/tengshou-windows-$GoArch.exe" $Stage
-Copy-Item "$Out/tengshou-cli-windows-$GoArch.exe" $Stage
-# 用通配符而不是中文文件名：Windows PowerShell 5.1 会把无 BOM 脚本按 ANSI 读取，
-# 中文路径字面量会失效。该目录只有接入说明一个 .txt。
-Copy-Item "packaging/windows/*.txt" $Stage
-Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $Zip
-Remove-Item -Recurse -Force $Stage
-
-Write-Host "完成：$Zip"
+Write-Host "完成：$Out/tengshou-windows-$GoArch.exe、$Out/tengshou-cli-windows-$GoArch.exe"
+Write-Host "打发布 zip：bash scripts/package-windows-zip.sh $Out（需 python3）"
 Write-Host "说明：v0.1 预发布版未签名；正式上架 Microsoft Store 前需补充打包与签名（B10）。"

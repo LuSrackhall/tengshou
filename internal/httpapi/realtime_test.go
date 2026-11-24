@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/LuSrackhall/tengshou/internal/config"
+	"github.com/LuSrackhall/tengshou/internal/mcpspec"
 	"github.com/LuSrackhall/tengshou/internal/model"
 	"github.com/LuSrackhall/tengshou/internal/service"
 )
@@ -212,7 +213,8 @@ func TestMCPSettingsSwitchAppliesImmediately(t *testing.T) {
 	if status["write_enabled"] != true || status["read_enabled"] != true {
 		t.Fatalf("initial status = %v", status)
 	}
-	if status["read_tools"] != float64(10) || status["write_tools"] != float64(3) {
+	if status["read_tools"] != float64(mcpspec.ReadToolCount) ||
+		status["write_tools"] != float64(mcpspec.WriteToolCount) {
 		t.Fatalf("tool counts = %v", status)
 	}
 	if status["agent_actor"] != "tengshou-mcp" {

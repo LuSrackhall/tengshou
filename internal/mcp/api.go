@@ -169,33 +169,41 @@ func (a *API) Forget() {
 
 // Get performs a read against /api/v1.
 func (a *API) Get(ctx context.Context, path string, q url.Values) (json.RawMessage, error) {
-	return a.do(ctx, http.MethodGet, path, q, nil)
+	return a.do(ctx, http.MethodGet, path, q, nil, false)
 }
 
 // Post performs a write against /app/api/v1. The marker headers make the
 // server enforce the MCP write switch and audit the agent actor.
 func (a *API) Post(ctx context.Context, path string, body any) (json.RawMessage, error) {
-	return a.do(ctx, http.MethodPost, path, nil, body)
+	return a.do(ctx, http.MethodPost, path, nil, body, true)
 }
 
-func (a *API) do(ctx context.Context, method, path string, q url.Values, body any) (json.RawMessage, error) {
+// PostRead performs a read-only action that the local app surface exposes as a
+// POST (generation preflight). It keeps the X-Tengshou-App header but omits the
+// MCP marker, so the read tool keeps working when the MCP write switch is off
+// and no agent actor is recorded for an operation that changes nothing.
+func (a *API) PostRead(ctx context.Context, path string, body any) (json.RawMessage, error) {
+	return a.do(ctx, http.MethodPost, path, nil, body, false)
+}
+
+func (a *API) do(ctx context.Context, method, path string, q url.Values, body any, mcpMarker bool) (json.RawMessage, error) {
 	base, err := a.BaseURL(ctx)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := a.send(ctx, base, method, path, q, body)
+	raw, err := a.send(ctx, base, method, path, q, body, mcpMarker)
 	if err != nil && method == http.MethodGet && isConnectError(err) {
 		// Read retries are safe; never retry a write, since the server may
 		// have committed it before the connection timed out.
 		a.Forget()
 		if base, derr := a.BaseURL(ctx); derr == nil {
-			return a.send(ctx, base, method, path, q, body)
+			return a.send(ctx, base, method, path, q, body, mcpMarker)
 		}
 	}
 	return raw, err
 }
 
-func (a *API) send(ctx context.Context, base, method, path string, q url.Values, body any) (json.RawMessage, error) {
+func (a *API) send(ctx context.Context, base, method, path string, q url.Values, body any, mcpMarker bool) (json.RawMessage, error) {
 	target := base + path
 	if len(q) > 0 {
 		target += "?" + q.Encode()
@@ -219,7 +227,9 @@ func (a *API) send(ctx context.Context, base, method, path string, q url.Values,
 	if method != http.MethodGet && method != http.MethodHead {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Tengshou-App", "1")
-		req.Header.Set(MCPMarkerHeader, "1")
+		if mcpMarker {
+			req.Header.Set(MCPMarkerHeader, "1")
+		}
 	}
 	resp, err := a.client.Do(req)
 	if err != nil {

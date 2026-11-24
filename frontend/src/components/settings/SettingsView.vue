@@ -119,7 +119,7 @@ onBeforeUnmount(() => {
           <dt>连接器版本</dt><dd><code>{{ status.version || "未知" }}</code></dd>
           <dt>传输</dt><dd>stdio · 仅本机回环 · 不打开数据库</dd>
           <dt>读工具</dt><dd>{{ status.read_tools || 0 }} 个 <span class="muted">始终可用</span></dd>
-          <dt>写工具</dt><dd>{{ status.write_tools || 0 }} 个 <span class="muted">新建字段 / 档案 / 合同草稿，全部记入变更记录</span></dd>
+          <dt>写工具</dt><dd>{{ status.write_tools || 0 }} 个 <span class="muted">新建字段 / 档案 / 合同草稿 / 生成合同 PDF，全部记入变更记录</span></dd>
           <dt>Agent 操作</dt><dd>累计 {{ status.agent_actions_total || 0 }} 次，近 24 小时 {{ status.agent_actions_recent || 0 }} 次</dd>
           <dt>最近一次</dt>
           <dd>

@@ -33,6 +33,28 @@ jobs:
           go vet ./internal/... ./cmd/tengshou-cli
       - name: 单元与集成测试
         run: go test -count=1 ./internal/... ./cmd/tengshou-cli
+      - name: Windows 分发包脚本冒烟测试
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          printf 'desktop' > "$tmp/tengshou-windows-amd64.exe"
+          printf 'cli' > "$tmp/tengshou-cli-windows-amd64.exe"
+          bash scripts/package-windows-zip.sh "$tmp"
+          python3 -I - "$tmp/tengshou-windows-amd64.zip" <<'PY'
+          import sys
+          import zipfile
+
+          expected = sorted([
+              "tengshou-windows-amd64.exe",
+              "tengshou-cli-windows-amd64.exe",
+              "MCP-接入.txt",
+          ])
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              got = sorted(z.namelist())
+          if got != expected:
+              sys.exit(f"错误：Windows zip 内容不符：{got} != {expected}")
+          PY
+          rm -rf "$tmp"
 
   frontend:
     name: 前端工程约束与构建
@@ -155,10 +177,6 @@ jobs:
           LDFLAGS="-s -w -X github.com/LuSrackhall/tengshou/internal/version.Version=${VERSION} -X github.com/LuSrackhall/tengshou/internal/version.Commit=${GITHUB_SHA::7}"
           if [ "$GOOS" = "windows" ]; then LDFLAGS="$LDFLAGS -H windowsgui"; fi
           go build -trimpath -ldflags "$LDFLAGS" -o "dist/tengshou-${GOOS}-${GOARCH}${EXT}" ./cmd/tengshou
-      - name: 打包（Windows）
-        if: matrix.goos == 'windows'
-        shell: pwsh
-        run: Compress-Archive -Path dist/tengshou-windows-amd64.exe -DestinationPath dist/tengshou-windows-amd64.zip
       - name: 打包（macOS）
         if: matrix.goos == 'darwin'
         run: |
@@ -176,6 +194,7 @@ jobs:
     needs: [test, cli, desktop]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       # 只取构建产物：frontend-dist 是 cli/desktop 的构建输入，不属于发布资产
       #（发布固定 8 个文件，与 alpha.6 及以前一致）。
       - uses: actions/download-artifact@v4
@@ -185,6 +204,28 @@ jobs:
           merge-multiple: true
       - name: 列出产物
         run: ls -lh dist
+      - name: 打包 Windows 分发包（桌面应用 + MCP 连接器 + 接入说明）
+        run: bash scripts/package-windows-zip.sh dist
+      - name: 校验发布资产（8 个）与 Windows zip 内容（3 个文件）
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 8
+          unzip -l dist/tengshou-windows-amd64.zip
+          python3 -I - <<'PY'
+          import sys
+          import zipfile
+
+          expected = sorted([
+              "tengshou-windows-amd64.exe",
+              "tengshou-cli-windows-amd64.exe",
+              "MCP-接入.txt",
+          ])
+          with zipfile.ZipFile("dist/tengshou-windows-amd64.zip") as z:
+              got = sorted(z.namelist())
+          if got != expected:
+              sys.exit(f"错误：Windows zip 内容不符：{got} != {expected}")
+          print("Windows zip 内容校验通过：" + "、".join(got))
+          PY
       - uses: softprops/action-gh-release@v2
         with:
           prerelease: true

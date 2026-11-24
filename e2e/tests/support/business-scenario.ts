@@ -32,7 +32,7 @@ export const CONTRACT_FIELDS: FieldDraft[] = [
   { entity: "相对方字段", label: "联系人", key: "contact", type: "text" },
 ];
 
-export interface PlacementSpec {
+export interface PlacementDraft {
   label: string;
   kind: PlacementKind;
   binding?: string;
@@ -40,7 +40,7 @@ export interface PlacementSpec {
 }
 
 /** 与 docx 中「字段名：＿＿」逐行对应；标签必须全文档唯一。 */
-export const PLACEMENTS: PlacementSpec[] = [
+export const PLACEMENTS: PlacementDraft[] = [
   { label: "合同编号：", kind: "field", binding: "contract.contract_no" },
   { label: "合同名称：", kind: "field", binding: "contract.title" },
   { label: "签订日期：", kind: "field", binding: "contract.signed_on" },

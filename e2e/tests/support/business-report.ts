@@ -7,7 +7,7 @@ import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test as baseTest, type Page, type TestInfo } from "@playwright/test";
 
-export type Verdict = "符合预期" | "不符合预期" | "跳过";
+export type Verdict = "符合预期" | "不符合预期";
 
 export interface ReportMeta {
   title: string;
@@ -106,17 +106,6 @@ export class AcceptanceReport {
     }
   }
 
-  /** 不驱动界面的说明性步骤（例如已完成的 API 核对）。 */
-  addNote(spec: StepSpec, actual: string, verdict: Verdict = "符合预期"): void {
-    this.steps.push({
-      action: spec.action,
-      expected: spec.expected,
-      actual,
-      verdict,
-      screenshots: [],
-    });
-  }
-
   get failedCount(): number {
     return this.steps.filter((step) => step.verdict === "不符合预期").length;
   }
@@ -166,12 +155,7 @@ export class AcceptanceReport {
               `src="data:image/png;base64,${shot.toString("base64")}"></figure>`,
           )
           .join("");
-        const badge =
-          step.verdict === "符合预期"
-            ? "pass"
-            : step.verdict === "跳过"
-              ? "skip"
-              : "fail";
+        const badge = step.verdict === "符合预期" ? "pass" : "fail";
         return (
           `<section class="step ${badge}">` +
           `<header><span class="seq">${index + 1}</span>` +
@@ -220,7 +204,6 @@ export class AcceptanceReport {
   .badge { font-size: 13px; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
   .badge.pass { background: #e3f1e9; color: #1f6f4a; }
   .badge.fail { background: #fbe7e5; color: #b4342c; }
-  .badge.skip { background: #eef1ef; color: #5f6670; }
   dl { display: grid; grid-template-columns: 90px 1fr; gap: 4px 12px; margin: 12px 0; }
   dt { color: #5f6670; font-size: 14px; }
   dd { margin: 0; }
@@ -243,7 +226,7 @@ export class AcceptanceReport {
   </section>
   <section class="panel">
     <table class="meta">
-      <tr><th>生成时间</th><td>${escapeHtml(formatTime(this.meta.startedAt))}</td></tr>
+      <tr><th>开始时间</th><td>${escapeHtml(formatTime(this.meta.startedAt))}</td></tr>
       <tr><th>运行环境</th><td>${escapeHtml(this.meta.environment)}</td></tr>
       <tr><th>腾手版本</th><td>${escapeHtml(this.meta.appVersion)}</td></tr>
       <tr><th>测试形态</th><td>发布形态 tengshou-cli serve + go:embed 界面，离线运行</td></tr>

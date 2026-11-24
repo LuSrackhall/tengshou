@@ -8,6 +8,7 @@ import {
   locateAnchors,
 } from "./business-calibrate";
 import { analyzePdf } from "./business-pdf";
+import { trackConsoleErrors } from "./ui";
 import {
   AMOUNT_DISPLAY,
   CONTRACT_DATA,
@@ -20,7 +21,7 @@ import {
   TEMPLATE_NAME,
   requiredPdfValues,
   type FieldDraft,
-  type PlacementSpec,
+  type PlacementDraft,
 } from "./business-scenario";
 
 export interface ImportedTemplate {
@@ -141,7 +142,7 @@ export async function createParty(
 export async function calibrateTemplate(
   page: Page,
   templateId: string,
-  placements: PlacementSpec[] = PLACEMENTS,
+  placements: PlacementDraft[] = PLACEMENTS,
 ): Promise<string> {
   await page.locator('#tabs button[data-tab="templates"]').click();
   await page.locator(`#templateTable tr[data-id="${templateId}"]`).click();
@@ -168,10 +169,22 @@ export async function calibrateTemplate(
   await expect(
     page.locator("#tplPlacementList .tpl-list-item[data-id]"),
   ).toHaveCount(placements.length);
-  const fields = placements.filter((item) => item.kind === "field").length;
+  const pageSummary = (kind: PlacementDraft["kind"]): string => {
+    const counts = new Map<number, number>();
+    for (const spec of placements) {
+      if (spec.kind !== kind) continue;
+      const anchor = anchors.get(spec.label);
+      if (!anchor) continue;
+      counts.set(anchor.page, (counts.get(anchor.page) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([pageNumber, count]) => `第 ${pageNumber} 页 ${count} 个`)
+      .join("、");
+  };
   return (
-    `已在第 1 页标定 ${fields} 个字段位置，并在第 2 页放置乙方手写签名与甲方公章位置；` +
-    "每个框都按 Word 锚点拖动到位。"
+    `已按 Word 锚点把字段（${pageSummary("field")}）、乙方手写签名（${pageSummary("signature")}）` +
+    `与甲方公章（${pageSummary("seal")}）逐个拖动到位。`
   );
 }
 
@@ -262,6 +275,7 @@ export async function signByPhone(
   const token = urlText.trim().split("/sign/")[1]?.replace(/\/+$/, "") ?? "";
   expect(token, `签名页 URL 中没有 token：${urlText}`).not.toBe("");
   const signPage = await page.context().newPage();
+  const signErrors = trackConsoleErrors(signPage);
   let phoneShot: Buffer;
   try {
     await signPage.goto(`${baseURL}/sign/${token}`, {
@@ -307,6 +321,10 @@ export async function signByPhone(
     await expect(signPage.locator(".result.done h1")).toHaveText("签名已提交", {
       timeout: 20_000,
     });
+    expect(
+      signErrors,
+      `手机签名页出现浏览器错误：\n${signErrors.join("\n")}`,
+    ).toEqual([]);
   } finally {
     await signPage.close();
   }
@@ -321,7 +339,9 @@ export async function signByPhone(
     .click();
   await expect(dialog).toBeHidden();
   return {
-    actual: `手机签名页已完成三笔手写并提交；桌面端轮询到「${state}」。`,
+    actual:
+      `手机签名页已完成三笔手写并提交，手机页无 console error；` +
+      `桌面端轮询到「${state}」。`,
     phoneShot,
     desktopShot,
   };
@@ -390,7 +410,7 @@ export async function previewContract(
 export async function generateContract(
   page: Page,
   outputPath: string,
-): Promise<{ actual: string; bytes: Buffer }> {
+): Promise<{ actual: string }> {
   const panel = page.locator("#contractGeneration");
   await expect(panel.locator("#genGenerate")).toBeEnabled();
   await panel.locator("#genGenerate").click();
@@ -412,7 +432,6 @@ export async function generateContract(
   expect(bytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
   return {
     actual: `已生成并下载合同 PDF（${(bytes.byteLength / 1024).toFixed(1)} KB，文件头 %PDF- 正确）。`,
-    bytes,
   };
 }
 

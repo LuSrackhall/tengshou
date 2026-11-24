@@ -3,7 +3,7 @@
 // 业务主线：一份农产品购销合同从 Word 模板 → 界面标定字段/签名/公章 →
 // 建合同 → 手机扫码手写签名 → 导入公章并关联 → 预览 → 生成 → 下载。
 // 每一步记录「业务动作 / 预期结果 / 实际结果 / 判定 + 截图」，测试结束
-// （含失败）生成自包含中文报告 `业务验收报告.html` 与最终合同 PDF。
+// （含失败与跳过）生成自包含中文报告 `业务验收报告.html` 与最终合同 PDF。
 //
 // 本场景默认只在 Linux CI 运行（e2e job 安装 LibreOffice + 中文字体）；
 // 本地调试可设 E2E_BUSINESS_NON_LINUX=1，并自行安装 LibreOffice。CI 设
@@ -68,51 +68,69 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
     let pdfPath = "";
     const pdfDetails: string[] = [];
 
-    const health = await page.request.get(`${app.baseURL}/api/v1/health`);
-    const appVersion =
-      ((await health.json()) as { version?: string }).version ?? "未知";
-    report.setAppVersion(appVersion);
-
-    const converters = await page.request.get(
-      `${app.baseURL}/app/api/v1/converters`,
-    );
-    const converterData = (await converters.json()) as {
-      items?: Array<{ label: string; available: boolean }>;
-    };
-    const usableConverter = (converterData.items ?? []).find(
-      (item) => item.available,
-    );
-    if (!usableConverter) {
-      const reason =
-        "本机未安装 Microsoft Word / LibreOffice，无法把 Word 合同模板转成 PDF；" +
-        "真实业务场景验收需要转换器。安装 LibreOffice 后重试。";
-      if (REQUIRE_DOCX) {
-        throw new Error(`${reason}（E2E_REQUIRE_DOCX=1：CI 必须真实运行本场景）`);
-      }
-      test.skip(true, reason);
-    }
-
-    const docxPath = join(
-      repoRoot(),
-      "e2e",
-      "fixtures",
-      "contracts",
-      "农产品购销合同.docx",
-    );
-    const sealPath = join(
-      repoRoot(),
-      "e2e",
-      "fixtures",
-      "contracts",
-      "采购方公章.png",
-    );
-    let templateId = "";
-    let templatePageCount = 0;
-    let contractId = "";
-    let contractNo = "";
-    let partyAId = "";
-
+    // try 包住整个场景（含转换器预检与 test.skip）：无论成功、失败还是跳过，
+    // finally 都会写出报告并 attach，失败原因出现在「实际结果」里。
     try {
+      const health = await page.request.get(`${app.baseURL}/api/v1/health`);
+      const appVersion =
+        ((await health.json()) as { version?: string }).version ?? "未知";
+      report.setAppVersion(appVersion);
+
+      let converterLabel = "";
+      await report.runStep(
+        page,
+        testInfo,
+        {
+          action: "确认 Word → PDF 转换器可用",
+          expected:
+            "本机已安装 Microsoft Word 或 LibreOffice，能把 .docx 合同模板转成 PDF。",
+        },
+        async () => {
+          const converters = await page.request.get(
+            `${app.baseURL}/app/api/v1/converters`,
+          );
+          const converterData = (await converters.json()) as {
+            items?: Array<{ label: string; available: boolean }>;
+          };
+          const usable = (converterData.items ?? []).find(
+            (item) => item.available,
+          );
+          if (!usable) {
+            const reason =
+              "本机未安装 Microsoft Word / LibreOffice，无法把 Word 合同模板转成 PDF；" +
+              "真实业务场景验收需要转换器。安装 LibreOffice 后重试。";
+            if (REQUIRE_DOCX) {
+              throw new Error(
+                `${reason}（E2E_REQUIRE_DOCX=1：CI 必须真实运行本场景）`,
+              );
+            }
+            test.skip(true, reason);
+          }
+          converterLabel = usable?.label ?? "";
+          return `已检测到可用转换程序：${converterLabel}。`;
+        },
+      );
+
+      const docxPath = join(
+        repoRoot(),
+        "e2e",
+        "fixtures",
+        "contracts",
+        "农产品购销合同.docx",
+      );
+      const sealPath = join(
+        repoRoot(),
+        "e2e",
+        "fixtures",
+        "contracts",
+        "采购方公章.png",
+      );
+      let templateId = "";
+      let templatePageCount = 0;
+      let contractId = "";
+      let contractNo = "";
+      let partyAId = "";
+
       await report.runStep(
         page,
         testInfo,
@@ -127,7 +145,7 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           expect(response?.status()).toBe(200);
           await expect(page.locator("#tabs")).toBeVisible();
           await expect(page.locator(".live-status")).toBeVisible();
-          return `界面已打开（${app.baseURL}/app/），顶栏标签与实时状态正常；可用转换程序：${usableConverter?.label}。`;
+          return `界面已打开（${app.baseURL}/app/），顶栏标签与实时状态正常；可用转换程序：${converterLabel}。`;
         },
       );
 
@@ -224,6 +242,8 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         },
       );
 
+      // extras 作为 runStep 的额外截图参数传入（报告会统一 attach 一次），
+      // 因此声明在调用之前，回调内只负责收集签名页与桌面端截图。
       const extras: Buffer[] = [];
       await report.runStep(
         page,
@@ -235,14 +255,6 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         },
         async () => {
           const signed = await signByPhone(page, app.baseURL, contractId);
-          await testInfo.attach("手机手写签名页", {
-            body: signed.phoneShot,
-            contentType: "image/png",
-          });
-          await testInfo.attach("桌面端收到签名", {
-            body: signed.desktopShot,
-            contentType: "image/png",
-          });
           extras.push(signed.phoneShot, signed.desktopShot);
           return signed.actual;
         },

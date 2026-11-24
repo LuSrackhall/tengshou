@@ -456,7 +456,8 @@ bash scripts/smoke-mcp-desktop.sh dist/tengshou-darwin-arm64 dist/tengshou-cli-d
 两步都用桌面二进制：先在本地服务未启动时断言 `initialize` / `tools/list`，
 再启动同版 `tengshou-cli serve` 后调用一次写工具成功。
 
-手工冒烟（桌面二进制）：
+手工冒烟（桌面二进制；发布资产名为 `dist/tengshou-darwin-arm64`，
+本地默认 `./scripts/build.sh` 的产物为 `dist/tengshou`）：
 
 ```bash
 tengshou-cli demo --data-dir /tmp/ts-mcp
@@ -467,7 +468,7 @@ printf '%s\n' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
   '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tengshou_list_contracts","arguments":{"year":2026}}}' \
-  | ./dist/tengshou-darwin-arm64 mcp --data-dir /tmp/ts-mcp --api-url http://127.0.0.1:18765
+  | ./dist/tengshou mcp --data-dir /tmp/ts-mcp --api-url http://127.0.0.1:18765
 ```
 
 常见问题：

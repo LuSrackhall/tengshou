@@ -66,8 +66,8 @@ func TestTargetsFromConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("targets: %v", err)
 	}
-	if len(bases) != 10 {
-		t.Fatalf("len(bases) = %d, want 10: %v", len(bases), bases)
+	if len(bases) != config.PortFallbackSpan {
+		t.Fatalf("len(bases) = %d, want %d: %v", len(bases), config.PortFallbackSpan, bases)
 	}
 	for i, base := range bases {
 		want := fmt.Sprintf("http://127.0.0.1:%d", cfg.HTTP.Port+i)

@@ -86,8 +86,8 @@ func targets(dataDir, apiURL, token string) ([]string, string, error) {
 		if apiURL != "" {
 			return []string{apiURL}, token, nil
 		}
-		bases := make([]string, 0, 10)
-		for port := cfg.HTTP.Port; port < cfg.HTTP.Port+10 && port <= 65535; port++ {
+		bases := make([]string, 0, config.PortFallbackSpan)
+		for port := cfg.HTTP.Port; port < cfg.HTTP.Port+config.PortFallbackSpan && port <= 65535; port++ {
 			bases = append(bases, fmt.Sprintf("http://127.0.0.1:%d", port))
 		}
 		return bases, token, nil

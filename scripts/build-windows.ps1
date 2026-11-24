@@ -1,4 +1,4 @@
-# Build the Windows desktop executable and CLI from one place.
+﻿# Build the Windows desktop executable and CLI from one place.
 # Dev and CI both call this script; the release zip is assembled afterwards by
 # scripts/package-windows-zip.sh (which only packs the desktop exe + notes).
 #
@@ -40,9 +40,19 @@ $env:GOARCH = $GoArch
 
 Write-Host "构建 tengshou-windows-$GoArch.exe ..."
 go build -trimpath -ldflags $LdFlags -o "$Out/tengshou-windows-$GoArch.exe" ./cmd/tengshou
+# $ErrorActionPreference does not cover native exit codes, so check both the
+# exit code and the artifact. Keep this file UTF-8 with BOM: Windows PowerShell
+# 5.1 reads BOM-less files as ANSI, and the Chinese comments below then corrupt
+# the parse so the script silently builds nothing and still exits 0.
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$Out/tengshou-windows-$GoArch.exe")) {
+    throw "构建桌面 exe 失败（exit $LASTEXITCODE）：$Out/tengshou-windows-$GoArch.exe 不存在"
+}
 
 Write-Host "构建 tengshou-cli-windows-$GoArch.exe ..."
 go build -trimpath -ldflags $CliLdFlags -o "$Out/tengshou-cli-windows-$GoArch.exe" ./cmd/tengshou-cli
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$Out/tengshou-cli-windows-$GoArch.exe")) {
+    throw "构建 CLI exe 失败（exit $LASTEXITCODE）：$Out/tengshou-cli-windows-$GoArch.exe 不存在"
+}
 
 Write-Host "完成：$Out/tengshou-windows-$GoArch.exe、$Out/tengshou-cli-windows-$GoArch.exe"
 Write-Host "打发布 zip：bash scripts/package-windows-zip.sh $Out（需 python3）"

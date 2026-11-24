@@ -102,7 +102,7 @@ func run() error {
 func listenWithFallback(a *app.App) (*httpapi.Server, net.Listener, error) {
 	cfg := a.Config
 	var lastErr error
-	for port := cfg.HTTP.Port; port < cfg.HTTP.Port+10 && port <= 65535; port++ {
+	for port := cfg.HTTP.Port; port < cfg.HTTP.Port+config.PortFallbackSpan && port <= 65535; port++ {
 		cfg.HTTP.Port = port
 		server := httpapi.New(httpapi.Options{
 			Reader:   a.Reader,

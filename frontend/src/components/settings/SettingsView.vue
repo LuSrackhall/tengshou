@@ -16,6 +16,10 @@ import {
   toast,
 } from "../../bridge/app";
 import { currentTab } from "../../shell/tabs";
+import {
+  agentActivityAnimationsEnabled,
+  setAgentActivityAnimationsEnabled,
+} from "../../shell/agent-activity";
 import { MCP_ACTOR, fmtDate } from "../../ui/format";
 
 const status = ref<MCPStatus | null>(null);
@@ -62,6 +66,11 @@ async function onToggle(event: Event): Promise<void> {
   } finally {
     toggling.value = false;
   }
+}
+
+/** 本地展示开关：只影响本机界面回放，不调用后端、不改 agent 读写权限。 */
+function onAgentActivityToggle(event: Event): void {
+  setAgentActivityAnimationsEnabled((event.target as HTMLInputElement).checked);
 }
 
 onMounted(() => {
@@ -162,5 +171,22 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <p v-else class="hint">正在读取 MCP 状态…</p>
+    <div class="mcp-grid agent-activity-grid">
+      <div class="mcp-card">
+        <h3>界面提示</h3>
+        <div class="switch-row">
+          <label class="switch">
+            <input
+              id="agentActivityToggle"
+              type="checkbox"
+              :checked="agentActivityAnimationsEnabled"
+              @change="onAgentActivityToggle"
+            >
+            <span>显示 agent 操作动画（{{ agentActivityAnimationsEnabled ? "已开启" : "已关闭" }}）</span>
+          </label>
+        </div>
+        <p class="hint">开启后，MCP agent 写入时界面会切到对应页面，并用模拟光标、点击波纹与目标行高亮回放这次操作；关闭后只保留顶部「agent 操作」徽标。本开关只影响本机界面的展示，不改变 agent 的读写权限。</p>
+      </div>
+    </div>
   </div>
 </template>

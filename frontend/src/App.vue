@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 应用外壳（阶段 1 收口）：顶栏（品牌 / tab / 统计 / 同步徽标）、九个视图
-// 宿主、toast、Excel 导入宿主与启动流程。
+// 宿主、toast、Excel 导入宿主、agent 操作可见层与启动流程。
 //
 // 迁移前这些由 index.html + app.js 提供；现在 index.html 只保留 Vue 入口，
 // tab 激活态、统计刷新与 boot 都在这里。各视图仍是原来的 Vue 域组件，DOM
@@ -19,6 +19,7 @@ import OnboardingView from "./components/onboarding/OnboardingView.vue";
 import PartiesView from "./components/parties/PartiesView.vue";
 import SealsView from "./components/seals/SealsView.vue";
 import SettingsView from "./components/settings/SettingsView.vue";
+import AgentActivityOverlay from "./components/shell/AgentActivityOverlay.vue";
 import TemplatesView from "./components/templates/TemplatesView.vue";
 import { startRealtime } from "./shell/realtime";
 import { TABS, currentTab, switchTab } from "./shell/tabs";
@@ -155,4 +156,5 @@ onBeforeUnmount(() => {
 
   <ExcelImportHost />
   <ToastHost />
+  <AgentActivityOverlay />
 </template>

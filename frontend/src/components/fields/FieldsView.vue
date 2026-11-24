@@ -188,6 +188,7 @@ onBeforeUnmount(() => {
           <tr
             v-for="field in visibleFields"
             :key="field.id"
+            :data-id="field.id"
             :class="{ 'archived-row': field.archived }"
             @click="openEdit(field)"
           >

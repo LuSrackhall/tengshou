@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# 发布形态冒烟：以真实 agent 方式（stdin/stdout 管道）拉起桌面二进制的
+# 发布形态冒烟：以真实 agent 方式（stdin/stdout 管道）拉起发布形态二进制的
 # `mcp` 子命令，验证桌面壳（macOS 桌面二进制；Windows 对应脚本见
 # scripts/smoke-mcp-desktop.ps1）也能提供 stdio MCP，而不是只有 CLI 能跑。
+# Linux 没有桌面壳构建，由 CI 把 `tengshou-cli` 同时作为连接器与 serve 实例
+# 传入本脚本（两个参数相同）。
 #
-# 用法：scripts/smoke-mcp-desktop.sh <桌面二进制> <tengshou-cli>
+# 用法：scripts/smoke-mcp-desktop.sh <被测二进制> <tengshou-cli>
 #
 # 步骤：
 #   1. 本地服务尚未启动时拉起 `<桌面二进制> mcp`，断言 initialize / tools/list；
@@ -12,7 +14,7 @@
 # 依赖：bash、curl、python3（均随 CI runner / macOS 开发者工具提供）。
 set -euo pipefail
 
-DESKTOP="${1:?用法：scripts/smoke-mcp-desktop.sh <桌面二进制> <tengshou-cli>}"
+DESKTOP="${1:?用法：scripts/smoke-mcp-desktop.sh <被测二进制> <tengshou-cli>}"
 CLI="${2:?用法：scripts/smoke-mcp-desktop.sh <桌面二进制> <tengshou-cli>}"
 for exe in "$DESKTOP" "$CLI"; do
   if [ ! -x "$exe" ]; then
@@ -49,7 +51,7 @@ cat >"$TMP/init.jsonl" <<'JSON'
 {"jsonrpc":"2.0","id":2,"method":"tools/list"}
 JSON
 
-echo "1/2 桌面二进制 mcp：initialize / tools/list（本地服务未启动）"
+echo "1/2 被测二进制 mcp：initialize / tools/list（本地服务未启动）"
 "$DESKTOP" mcp --data-dir "$DATA" <"$TMP/init.jsonl" >"$TMP/init.out" 2>"$TMP/init.err"
 python3 -I - "$TMP/init.out" <<'PY'
 import json
@@ -68,7 +70,7 @@ for want in ("tengshou_status", "tengshou_create_field"):
 print(f"   initialize / tools/list 通过（{len(tools)} 个工具）")
 PY
 
-echo "2/2 启动 tengshou-cli serve 后经桌面二进制调用写工具"
+echo "2/2 启动 tengshou-cli serve 后经被测二进制调用写工具"
 "$CLI" serve --data-dir "$DATA" --port "$PORT" --loopback >"$TMP/serve.log" 2>&1 &
 SERVE_PID=$!
 ready=0
@@ -113,4 +115,4 @@ if "smoke_field" not in text:
 print("   写工具 tengshou_create_field 通过")
 PY
 
-echo "冒烟通过：桌面二进制 mcp（stdio 管道）+ tengshou-cli serve 写工具"
+echo "冒烟通过：被测二进制 mcp（stdio 管道）+ tengshou-cli serve 写工具"

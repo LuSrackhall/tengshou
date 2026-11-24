@@ -185,10 +185,21 @@ Windows 发布 zip 内含桌面客户端（GUI + 内置 `mcp`）与 `MCP-接入.
 不再附带单独 CLI；完整 CLI 仍是独立发布资产。说明见
 [docs/mcp.md](docs/mcp.md#windows-分发包说明)。
 
+各平台 MCP 连接器形态：
+
+| 平台 | 交付形态 | 连接器 |
+| --- | --- | --- |
+| Windows | 桌面 exe（分发包） | 同一 exe 带 `mcp` 参数 |
+| macOS | 桌面二进制 | 同一二进制带 `mcp` 参数 |
+| Linux | 仅 CLI（无桌面壳构建） | `tengshou-cli mcp` |
+
 GitHub Actions：
 - push / PR：静态检查 + 单元与集成测试（含真实中文 PDF 生成）；
+- 脚本静态检查：`bash -n`、CRLF 检查、`.ps1` 非 ASCII 必须带 UTF-8 BOM，
+  Windows 作业另用 Windows PowerShell 5.1 解析器校验全部 `.ps1`；
 - 构建 Linux / macOS CLI 与 macOS / Windows 桌面壳（统一调用上述构建脚本），
-  并在 windows-latest / macos-15 用发布形态二进制做 MCP stdio 管道冒烟；
+  并在 linux（CLI 自连）、windows-latest（GUI 子系统）、macos-15 三端用发布
+  形态二进制做 MCP stdio 管道冒烟；
 - `v*` 标签：发布固定 8 个资产；Windows zip 由发布任务用上述同一脚本组装。
 
 ## 开发

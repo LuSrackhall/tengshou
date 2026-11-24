@@ -54,16 +54,27 @@ LDFLAGS=(
 
 mkdir -p "$OUT"
 
+# go build 非零退出已被 set -e 捕获；这里再断言产物存在，防止脚本被误改后
+# “成功”空跑（Windows PowerShell 5.1 曾出现同类静默失败）。
+assert_artifact() {
+  if [ ! -f "$1" ]; then
+    echo "错误：构建产物缺失：$1" >&2
+    exit 1
+  fi
+}
+
 if [ "$TARGET" = "desktop" ] || [ "$TARGET" = "all" ]; then
   echo "构建桌面应用 ${GOOS}/${GOARCH} ..."
   go build -trimpath -ldflags "${LDFLAGS[*]}" \
     -o "$OUT/tengshou${NAME_SUFFIX}" ./cmd/tengshou
+  assert_artifact "$OUT/tengshou${NAME_SUFFIX}"
 fi
 
 if [ "$TARGET" = "cli" ] || [ "$TARGET" = "all" ]; then
   echo "构建 tengshou-cli ${GOOS}/${GOARCH} ..."
   go build -trimpath -ldflags "${LDFLAGS[*]}" \
     -o "$OUT/tengshou-cli${NAME_SUFFIX}" ./cmd/tengshou-cli
+  assert_artifact "$OUT/tengshou-cli${NAME_SUFFIX}"
 fi
 
 echo "完成："

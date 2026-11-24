@@ -31,6 +31,42 @@ jobs:
         run: |
           test -z "$(gofmt -l ./cmd ./internal)"
           go vet ./internal/... ./cmd/tengshou-cli
+      - name: 构建/冒烟脚本静态检查（三端共用）
+        run: |
+          set -euo pipefail
+          # 1) 所有 shell 脚本必须能通过 bash 语法解析。
+          for f in scripts/*.sh; do
+            bash -n "$f"
+          done
+          # 2) 脚本必须是 LF；CRLF 在 Linux/macOS 上会让 shebang 解析失败。
+          bad=0
+          for f in scripts/*.sh scripts/*.ps1; do
+            if grep -q $'\r' "$f"; then
+              echo "错误：$f 含 CR（请保持 LF 换行）"
+              bad=1
+            fi
+          done
+          # 3) .ps1 含非 ASCII 时必须带 UTF-8 BOM：Windows PowerShell 5.1
+          #    会把无 BOM 文件按系统 ANSI 解码，中文注释会破坏脚本解析。
+          python3 -I - <<'PY'
+          import pathlib
+          import sys
+
+          problems = []
+          for path in sorted(pathlib.Path("scripts").glob("*.ps1")):
+              data = path.read_bytes()
+              non_ascii = any(byte > 0x7F for byte in data)
+              has_bom = data.startswith(b"\xef\xbb\xbf")
+              if non_ascii and not has_bom:
+                  problems.append(
+                      f"{path}：含非 ASCII 字符但没有 UTF-8 BOM"
+                      "（Windows PowerShell 5.1 会按 ANSI 解码）"
+                  )
+          if problems:
+              sys.exit("错误：\n" + "\n".join(problems))
+          print("PowerShell 脚本编码检查通过（非 ASCII 必须带 UTF-8 BOM）")
+          PY
+          exit "$bad"
       - name: 单元与集成测试
         run: go test -count=1 ./internal/... ./cmd/tengshou-cli
       - name: Windows 分发包脚本冒烟测试
@@ -119,6 +155,12 @@ jobs:
           VERSION: ${{ github.ref_name }}
           NAME_SUFFIX: -${{ matrix.goos }}-${{ matrix.goarch }}
         run: scripts/build.sh cli
+      - name: 发布形态 MCP stdio 冒烟（Linux CLI：connector 与 serve 同一二进制）
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: |
+          bash scripts/smoke-mcp-desktop.sh \
+            dist/tengshou-cli-linux-amd64 \
+            dist/tengshou-cli-linux-amd64
       - uses: actions/upload-artifact@v4
         with:
           name: tengshou-cli-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -176,6 +218,31 @@ jobs:
         run: |
           cd dist
           tar -czf tengshou-darwin-arm64.tar.gz tengshou-darwin-arm64
+      - name: 校验 PowerShell 脚本（Windows PowerShell 5.1 语法解析）
+        if: matrix.goos == 'windows'
+        shell: powershell
+        run: |
+          # Keep this block ASCII-only: it is executed by Windows PowerShell 5.1
+          # itself, the same interpreter whose parsing we are guarding.
+          $ok = $true
+          Get-ChildItem -Path scripts -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object {
+                Write-Host ("Parse error: {0}:{1} {2}" -f `
+                  $_.Extent.File, $_.Extent.StartLineNumber, $_.Message)
+              }
+              $ok = $false
+            } else {
+              Write-Host ("OK: {0}" -f $_.Name)
+            }
+          }
+          if (-not $ok) {
+            throw "PowerShell script syntax check failed (Windows PowerShell 5.1 parser)"
+          }
       - name: 构建（Windows · scripts/build-windows.ps1，与本地同一脚本）
         if: matrix.goos == 'windows'
         shell: powershell

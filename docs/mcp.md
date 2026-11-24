@@ -45,8 +45,13 @@ tengshou-cli mcp                 （同一实现，独立 CLI 资产）
 ## 快速开始
 
 1. 启动腾手桌面应用（或在终端运行 `tengshou-cli serve`），确认数据目录。
-2. 在 MCP 客户端注册下面的 stdio 命令（Windows 用桌面 exe，macOS/Linux 用
-   对应的桌面二进制或 `tengshou-cli`）：
+2. 在 MCP 客户端注册下面的 stdio 命令。各平台交付形态不同，请按下表选择：
+
+| 平台 | 连接器命令 | 说明 |
+| --- | --- | --- |
+| Windows | `tengshou-windows-amd64.exe mcp` | 分发包内桌面 exe（GUI + `mcp` 两种用法），客户唯一需要下载的文件 |
+| macOS | `tengshou-darwin-arm64 mcp` | 桌面二进制，内置 `mcp` |
+| Linux | `tengshou-cli mcp` | Linux 不构建桌面壳，连接器使用独立 CLI 资产 |
 
 ```bash
 tengshou-windows-amd64.exe mcp --data-dir "C:\Users\<用户名>\AppData\Local\Tengshou"

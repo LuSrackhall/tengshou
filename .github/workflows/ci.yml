@@ -141,11 +141,13 @@ jobs:
         with:
           name: frontend-dist
           path: internal/httpapi/web/app/dist
-      - name: 安装中文字体（Linux）
+      - name: 安装中文字体与 LibreOffice（Linux）
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y fonts-arphic-uming
+          # fonts-noto-cjk 供 LibreOffice 渲染 Word 合同；fonts-arphic-uming
+          # （TrueType）继续供 Go PDF 子集化使用。
+          sudo apt-get install -y fonts-arphic-uming fonts-noto-cjk libreoffice-writer
           echo "TENGHSHOU_FONT=/usr/share/fonts/truetype/arphic/uming.ttc" >> "$GITHUB_ENV"
       - name: 构建本端 tengshou-cli（与发布同一命令）
         env:
@@ -170,6 +172,9 @@ jobs:
         working-directory: e2e
         env:
           TENGHSHOU_CLI: ${{ github.workspace }}/${{ matrix.cli }}
+          # Linux 已安装 LibreOffice：真实业务场景验收必须真实运行，
+          # 转换器缺失时失败而不是静默跳过。Win/macOS 不设该变量。
+          E2E_REQUIRE_DOCX: ${{ runner.os == 'Linux' && '1' || '' }}
         run: npx playwright test
       - name: 上传可视报告与工件（每 OS 一份，保留 90 天）
         if: always()
@@ -179,6 +184,15 @@ jobs:
           path: |
             e2e/playwright-report
             e2e/test-results
+          retention-days: 90
+          include-hidden-files: true
+          if-no-files-found: warn
+      - name: 上传业务验收报告与最终合同（Linux，用户可读）
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: business-acceptance-linux-chromium
+          path: e2e/test-results/business-acceptance
           retention-days: 90
           include-hidden-files: true
           if-no-files-found: warn

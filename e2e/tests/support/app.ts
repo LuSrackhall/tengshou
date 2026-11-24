@@ -152,7 +152,15 @@ async function stopChild(child: ChildProcess): Promise<void> {
   await Promise.race([exited, timeout]);
 }
 
-export async function startApp(): Promise<AppHandle> {
+export interface StartAppOptions {
+  /**
+   * 以局域网模式启动（不带 --loopback），供扫码签名场景创建一次性会话来
+   * 对接 /sign/<token> 手机签名页。CI 与本地仍以 127.0.0.1 访问。
+   */
+  allowLan?: boolean;
+}
+
+export async function startApp(options: StartAppOptions = {}): Promise<AppHandle> {
   const external = process.env.PLAYWRIGHT_BASE_URL?.trim();
   if (external) {
     const baseURL = external.replace(/\/+$/, "");
@@ -174,11 +182,15 @@ export async function startApp(): Promise<AppHandle> {
   const dataDir = await mkdtemp(join(tmpdir(), "tengshou-e2e-"));
   const port = await freePort();
   const baseURL = `http://127.0.0.1:${port}`;
-  const child = spawn(
-    cli,
-    ["serve", "--data-dir", dataDir, "--port", String(port), "--loopback"],
-    { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
-  );
+  const args = ["serve", "--data-dir", dataDir, "--port", String(port)];
+  if (!options.allowLan) {
+    // 默认只绑回环；扫码签名场景需要 allow_lan=true 才能创建会话。
+    args.push("--loopback");
+  }
+  const child = spawn(cli, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
   let output = "";
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");

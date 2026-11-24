@@ -38,7 +38,7 @@ import SignatureSummary from "../signatures/SignatureSummary.vue";
 import ContractAuditHistory from "./ContractAuditHistory.vue";
 import ContractFieldControl from "./ContractFieldControl.vue";
 import ContractGenerationPanel from "./ContractGenerationPanel.vue";
-import { isAgentActor } from "../../ui/format";
+import { isAgentActor, kindLabel } from "../../ui/format";
 import { partyName } from "./format";
 import {
   collectContractInput,
@@ -86,6 +86,28 @@ const seed = computed<ContractSeed | null>(() => {
   }
   return null;
 });
+
+const partyAID = ref(
+  props.mode === "edit"
+    ? props.contract?.party_a_id ?? ""
+    : props.renewal?.input.party_a_id ?? "",
+);
+
+/** 编辑时甲方档案不在列表（已删除 / 列表截断）也显示可读名称。 */
+const partyALabel = computed(() => {
+  if (!partyAID.value) {
+    return "";
+  }
+  const party = props.parties.find((item) => item.id === partyAID.value);
+  if (party) {
+    return `${party.name}（${kindLabel(party.kind)}）`;
+  }
+  return props.detail?.party_a?.name ?? partyAID.value;
+});
+
+const partyAInList = computed(() =>
+  props.parties.some((item) => item.id === partyAID.value),
+);
 
 const partyBID = computed(() => {
   if (props.mode === "edit") {
@@ -173,6 +195,7 @@ async function submit(): Promise<void> {
     props.fields,
     values,
     seed.value,
+    partyAID.value,
     partyBID.value,
     partyBName.value,
   );
@@ -348,6 +371,17 @@ onBeforeUnmount(() => {
           </datalist>
 
           <div class="form-grid">
+            <div class="field">
+              <label for="f_contract_party_a">甲方（本方）</label>
+              <select id="f_contract_party_a" v-model="partyAID">
+                <option value="">（未设置）</option>
+                <option v-if="partyAID && !partyAInList" :value="partyAID">{{ partyALabel }}</option>
+                <option v-for="party in parties" :key="party.id" :value="party.id">
+                  {{ party.name }}（{{ kindLabel(party.kind) }}）
+                </option>
+              </select>
+              <span class="help">本方（采购方）档案；模板里的甲方名称、证件号与甲方公章按此档案取用。</span>
+            </div>
             <ContractFieldControl
               v-for="field in fields"
               :key="field.key"

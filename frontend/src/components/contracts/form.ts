@@ -127,18 +127,20 @@ export function syncContractValues(
 
 /**
  * 表单值转 ContractInput（app.js collectContractInput）。
- * party_a_id / template_id 沿用 seed；party_b 名称与档案一致时才回填 party_b_id。
+ * party_a_id 取合同表单的「甲方（本方）」下拉，为空时回退 seed；
+ * template_id 沿用 seed；party_b 名称与档案一致时才回填 party_b_id。
  */
 export function collectContractInput(
   fields: FieldDefinition[],
   values: Record<string, string>,
   seed: ContractSeed | null,
+  partyAID: string,
   partyBID: string,
   partyBName: string,
 ): ContractInput {
   const input: ContractInput = {
     data: {},
-    party_a_id: seed?.party_a_id ?? "",
+    party_a_id: partyAID || seed?.party_a_id || "",
     template_id: seed?.template_id ?? "",
     year: 0,
     title: "",

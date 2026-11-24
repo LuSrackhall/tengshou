@@ -188,18 +188,26 @@ export async function startApp(): Promise<AppHandle> {
   child.stderr?.on("data", (chunk: string) => {
     output += chunk;
   });
-  await waitUntilReady(baseURL, child, () => output);
-  const token = await readToken(dataDir);
-  return {
-    baseURL,
-    token,
-    dataDir,
-    cli,
-    stop: async () => {
-      await stopChild(child);
-      if (process.env.E2E_KEEP_DATA !== "1") {
-        await rm(dataDir, { recursive: true, force: true });
-      }
-    },
-  };
+  try {
+    await waitUntilReady(baseURL, child, () => output);
+    const token = await readToken(dataDir);
+    return {
+      baseURL,
+      token,
+      dataDir,
+      cli,
+      stop: async () => {
+        await stopChild(child);
+        if (process.env.E2E_KEEP_DATA !== "1") {
+          await rm(dataDir, { recursive: true, force: true });
+        }
+      },
+    };
+  } catch (error) {
+    // 自启失败（服务提前退出 / 就绪超时 / 读令牌失败）时先回收子进程与
+    // 临时目录，避免给排查 E2E 的人留下孤儿 serve 进程和 /tmp 数据。
+    await stopChild(child);
+    await rm(dataDir, { recursive: true, force: true });
+    throw error;
+  }
 }

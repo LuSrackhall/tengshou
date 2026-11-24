@@ -29,8 +29,9 @@ build-windows: frontend
 	$(GO) run ./tools/tengshoubuild build -goos windows -goarch amd64
 
 # 界面端到端测试：先构建发布形态 CLI（go:embed 同一份界面资源），
-# 再由 Playwright 在临时数据目录拉起 serve。首次运行前需要：
-#   cd e2e && npm ci && npx playwright install chromium
+# 再由 Playwright 在临时数据目录拉起 serve。首次运行前：
+#   cd e2e && npm ci && npx playwright install
+# （Linux/Windows 用 chromium，macOS 用 webkit，见 docs/e2e.md）
 e2e: frontend
 	$(GO) run ./tools/tengshoubuild build cli
 	cd e2e && if [ ! -d node_modules ]; then $(NPM) ci; fi && $(NPM) test

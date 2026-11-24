@@ -43,6 +43,15 @@ function Invoke-McpPipe([string]$RequestsPath, [string]$OutputPath, [string]$Err
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
 
+    # PowerShell 5.1's default redirected-stdin writer can emit a UTF-8 BOM,
+    # which the connector's JSON reader rejects before the first JSON value.
+    # Pin all three pipes to UTF-8 without a preamble; these must be set on
+    # $psi before Start because Process copies the start info at start time.
+    $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $psi.StandardInputEncoding = $Utf8NoBom
+    $psi.StandardOutputEncoding = $Utf8NoBom
+    $psi.StandardErrorEncoding = $Utf8NoBom
+
     $proc = [System.Diagnostics.Process]::Start($psi)
     $proc.StandardInput.Write([System.IO.File]::ReadAllText($RequestsPath))
     $proc.StandardInput.Close()

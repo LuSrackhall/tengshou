@@ -21,6 +21,7 @@ import {
   setAgentActivityAnimationsEnabled,
 } from "../../shell/agent-activity";
 import { MCP_ACTOR, fmtDate } from "../../ui/format";
+import MCPAccessPanel from "./MCPAccessPanel.vue";
 
 const status = ref<MCPStatus | null>(null);
 const errorText = ref("");
@@ -166,9 +167,10 @@ onBeforeUnmount(() => {
         <h3>连接说明</h3>
         <p>{{ status.connection_help || "" }}</p>
         <p class="hint">注册命令（填到 Claude Code / Claude Desktop 的 MCP 配置中）：</p>
-        <pre class="mono mcp-command">{{ status.command || "tengshou-cli mcp" }}</pre>
+        <pre class="mono mcp-command">{{ status.command || "tengshou mcp" }}</pre>
         <p class="hint">本面板只展示状态与开关，不启动或停止 MCP 进程。</p>
       </div>
+      <MCPAccessPanel :status="status" />
     </div>
     <p v-else class="hint">正在读取 MCP 状态…</p>
     <div class="mcp-grid agent-activity-grid">

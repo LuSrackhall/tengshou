@@ -189,9 +189,9 @@ Windows 桌面自动使用 GUI 子系统、CLI 保持控制台子系统，macOS 
 `CGO_ENABLED=1`。`go run` 自身会按 `GOOS`/`GOARCH` 交叉编译工具，因此
 跨平台目标用 `-goos` / `-goarch` 参数而不是这两个环境变量。
 
-Windows 发布 zip 内含桌面客户端（GUI + 内置 `mcp`）与 `MCP-接入.txt`，
-不再附带单独 CLI；完整 CLI 仍是独立发布资产。说明见
-[docs/mcp.md](docs/mcp.md#windows-分发包说明)。
+Windows 发布 zip 只含桌面客户端一个 exe（GUI + 内置 `mcp`），MCP 接入说明
+在应用「设置 → MCP 接入」页内，不再附带说明文件或单独 CLI；完整 CLI 仍是
+独立发布资产。说明见 [docs/mcp.md](docs/mcp.md#windows-分发包说明)。
 
 各平台 MCP 连接器形态：
 

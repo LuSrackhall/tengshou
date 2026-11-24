@@ -36,6 +36,12 @@ export interface MCPStatus {
   data_dir: string;
   config_file: string;
   transport: string;
+  /**
+   * 启动本机服务的可执行文件完整路径（桌面壳即桌面 exe）。设置页据此生成
+   * 可直接复制的接入片段；极少数取不到时为空串。
+   */
+  exec_path: string;
+  /** 统一注册命令 `<exe> mcp --data-dir "<数据目录>"`。 */
   command: string;
   settings_key: string;
   write_switch_applies: string;

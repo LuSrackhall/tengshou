@@ -546,6 +546,13 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   padding: 10px 12px; border-radius: 8px; overflow-x: auto;
   white-space: pre-wrap; word-break: break-all;
 }
+.mcp-access-item { margin-top: 14px; }
+.mcp-access-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 6px;
+}
+.mcp-access-head h4 { font-size: 13.5px; margin: 0; }
+.mcp-access-item .hint { margin-bottom: 8px; }
 
 /* ---------- 合同 PDF 生成、整改重出与批量生成（B4） ---------- */
 

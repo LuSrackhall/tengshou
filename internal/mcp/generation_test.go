@@ -3,10 +3,14 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"image/color"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -329,5 +333,217 @@ func TestGenerationToolArgumentValidation(t *testing.T) {
 	}); !isError || !strings.Contains(text, "invalid_kind") {
 		// The fixture template is HTML; the server rejects non-PDF templates.
 		t.Fatalf("generate with html template: isError=%v text=%s", isError, text)
+	}
+}
+
+// preflightStub stands in for the desktop service so the connector's own
+// allow_stale_signature branch can be exercised without forcing the real
+// service into a content_changed state. It answers the health probe, serves a
+// fixed preflight answer, and records the generate request body.
+type preflightStub struct {
+	issues []map[string]string
+
+	mu            sync.Mutex
+	generateCalls int
+	generateBody  map[string]any
+}
+
+func (st *preflightStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case r.URL.Path == "/api/v1/health":
+		_, _ = io.WriteString(w, `{"status":"ok"}`)
+	case strings.HasSuffix(r.URL.Path, "/preflight"):
+		payload, err := json.Marshal(map[string]any{
+			"ready":          len(st.issues) == 0,
+			"preview_sha256": strings.Repeat("a", 64),
+			"issues":         st.issues,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write(payload)
+	case strings.HasSuffix(r.URL.Path, "/generate"):
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		st.mu.Lock()
+		st.generateCalls++
+		st.generateBody = body
+		st.mu.Unlock()
+		_, _ = io.WriteString(w, `{"item":{"id":"doc-1","status":"success"},"warnings":[]}`)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (st *preflightStub) generateSnapshot() (int, map[string]any) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.generateCalls, st.generateBody
+}
+
+func preflightStubServer(t *testing.T, stub *preflightStub) *Server {
+	t.Helper()
+	ts := httptest.NewServer(stub)
+	t.Cleanup(ts.Close)
+	api, err := NewAPI(APIOptions{
+		BaseURLs:     []string{ts.URL},
+		Client:       &http.Client{Timeout: 5 * time.Second},
+		ProbeTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(Options{
+		API:     api,
+		Version: "test",
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+}
+
+// TestGenerateContractAllowStaleSignature pins the safety boundary of the
+// explicit stale-signature confirmation: it clears content_changed only, it is
+// forwarded to the server, and every other blocking issue still stops the run
+// before the generate endpoint is called.
+func TestGenerateContractAllowStaleSignature(t *testing.T) {
+	contentChanged := map[string]string{"code": "content_changed", "message": "合同内容在签名后已修改"}
+	missingSeal := map[string]string{"code": "missing_seal", "message": "合同缺少盖章信息"}
+	generateArgs := func(allowStale bool) map[string]any {
+		args := map[string]any{"template_id": "tpl-1", "contract_id": "contract-1"}
+		if allowStale {
+			args["allow_stale_signature"] = true
+		}
+		return args
+	}
+
+	t.Run("explicit confirmation clears only content_changed", func(t *testing.T) {
+		stub := &preflightStub{issues: []map[string]string{contentChanged}}
+		srv := preflightStubServer(t, stub)
+		generated := callToolJSON(t, srv, toolGenerateContract, generateArgs(true))
+		item, _ := generated["item"].(map[string]any)
+		if item["id"] != "doc-1" {
+			t.Fatalf("generated item = %v", generated)
+		}
+		calls, body := stub.generateSnapshot()
+		if calls != 1 {
+			t.Fatalf("generate calls = %d, want 1", calls)
+		}
+		if body["allow_stale_signature"] != true {
+			t.Fatalf("allow_stale_signature not forwarded: %v", body)
+		}
+		if body["preview_sha256"] != strings.Repeat("a", 64) {
+			t.Fatalf("preview_sha256 = %v", body["preview_sha256"])
+		}
+		if body["contract_id"] != "contract-1" {
+			t.Fatalf("contract_id = %v", body["contract_id"])
+		}
+	})
+
+	t.Run("other blocking issues still stop the run", func(t *testing.T) {
+		stub := &preflightStub{issues: []map[string]string{contentChanged, missingSeal}}
+		srv := preflightStubServer(t, stub)
+		text, isError := callTool(t, srv, toolGenerateContract, generateArgs(true))
+		if !isError || !strings.Contains(text, "missing_seal") {
+			t.Fatalf("blocked generate: isError=%v text=%s", isError, text)
+		}
+		if strings.Contains(text, "content_changed") {
+			t.Fatalf("confirmed content_changed must not be reported as blocking: %s", text)
+		}
+		if calls, _ := stub.generateSnapshot(); calls != 0 {
+			t.Fatalf("generate must not be called when blocked; calls = %d", calls)
+		}
+	})
+
+	t.Run("default still blocks content_changed", func(t *testing.T) {
+		stub := &preflightStub{issues: []map[string]string{contentChanged}}
+		srv := preflightStubServer(t, stub)
+		text, isError := callTool(t, srv, toolGenerateContract, generateArgs(false))
+		if !isError || !strings.Contains(text, "content_changed") {
+			t.Fatalf("default generate: isError=%v text=%s", isError, text)
+		}
+		if calls, _ := stub.generateSnapshot(); calls != 0 {
+			t.Fatalf("generate must not be called when blocked; calls = %d", calls)
+		}
+	})
+}
+
+// TestListDocumentsToleratesDeletedContractAndTemplate pins the degraded
+// projection: after the contract or template behind a PDF record is deleted,
+// the record stays queryable with empty semantic fields instead of failing the
+// whole list. The schema nulls the reference (ON DELETE SET NULL), which is the
+// realistic shape of this state.
+func TestListDocumentsToleratesDeletedContractAndTemplate(t *testing.T) {
+	env := newTestEnv(t, true)
+	srv := serverFor(t, env)
+	ctx := context.Background()
+
+	goneTemplate := &model.Template{Name: "将删除模板", Version: 1, HTML: "<p>x</p>", IsActive: true}
+	if err := env.store.PutTemplate(ctx, goneTemplate); err != nil {
+		t.Fatal(err)
+	}
+	goneContract := &model.Contract{
+		Year: 2026, Title: "将删除合同", ContractNo: "HT-2026-0404",
+		PartyBID: env.partyBID, Status: model.ContractDraft, Data: map[string]any{},
+	}
+	if err := env.store.PutContract(ctx, goneContract); err != nil {
+		t.Fatal(err)
+	}
+
+	base := time.Now().Add(-time.Minute)
+	orphan := &model.OutputDocument{
+		ContractID: goneContract.ID, TemplateID: goneTemplate.ID, TemplateVersion: 3,
+		Kind: model.DocumentKindRegenerate, Status: model.DocumentStatusSuccess,
+		FilePath: "outputs/orphan.pdf", SHA256: "sha-orphan", CreatedAt: base.Add(2 * time.Second),
+	}
+	if err := env.store.PutOutputDocument(ctx, orphan); err != nil {
+		t.Fatal(err)
+	}
+	linked := &model.OutputDocument{
+		ContractID: env.contractID, TemplateID: env.templateID, TemplateVersion: 1,
+		Kind: model.DocumentKindInitial, Status: model.DocumentStatusSuccess,
+		FilePath: "outputs/linked.pdf", SHA256: "sha-linked", CreatedAt: base,
+	}
+	if err := env.store.PutOutputDocument(ctx, linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.store.DeleteContract(ctx, goneContract.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.store.DeleteTemplate(ctx, goneTemplate.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	listed := callToolJSON(t, srv, toolListDocuments, map[string]any{})
+	if listed["total"] != float64(2) {
+		t.Fatalf("documents list = %v", listed)
+	}
+	rows := map[string]map[string]any{}
+	for _, raw := range listed["items"].([]any) {
+		row, _ := raw.(map[string]any)
+		id, _ := row["id"].(string)
+		rows[id] = row
+	}
+
+	orphanRow := rows[orphan.ID]
+	if orphanRow == nil {
+		t.Fatalf("deleted-contract row missing from list: %v", listed)
+	}
+	if orphanRow["contract_no"] != nil || orphanRow["template_name"] != nil {
+		t.Fatalf("deleted contract/template must project empty: %v", orphanRow)
+	}
+	wantPath := "/app/api/v1/documents/" + orphan.ID + "/file"
+	if orphanRow["download_path"] != wantPath {
+		t.Fatalf("download_path = %v, want %q", orphanRow["download_path"], wantPath)
+	}
+	if orphanRow["template_version"] != float64(3) {
+		t.Fatalf("template_version = %v", orphanRow["template_version"])
+	}
+
+	linkedRow := rows[linked.ID]
+	if linkedRow == nil {
+		t.Fatalf("linked row missing from list: %v", listed)
+	}
+	if linkedRow["contract_no"] != "HT-2026-0001" || linkedRow["template_name"] != "租赁模板" {
+		t.Fatalf("linked projection = %v", linkedRow)
 	}
 }

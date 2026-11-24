@@ -21,16 +21,8 @@ type preflightIssue struct {
 // generationPreflight is the subset of the preflight answer the generate tool
 // needs before it may call the render endpoint.
 type generationPreflight struct {
-	ContractID        string           `json:"contract_id"`
-	ContractNo        string           `json:"contract_no"`
-	TemplateID        string           `json:"template_id"`
-	TemplateName      string           `json:"template_name"`
-	TemplateVersion   int              `json:"template_version"`
-	PreviewSHA256     string           `json:"preview_sha256"`
-	Status            string           `json:"status"`
-	Ready             bool             `json:"ready"`
-	Issues            []preflightIssue `json:"issues"`
-	PreviousDocuments int              `json:"previous_documents"`
+	PreviewSHA256 string           `json:"preview_sha256"`
+	Issues        []preflightIssue `json:"issues"`
 }
 
 // preflightBlockedError reports every blocking issue in one tool error. The

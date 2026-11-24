@@ -257,8 +257,8 @@ func knownTool(name string) bool {
 	return false
 }
 
-// isWriteTool reports whether name is one of the create tools. Write tools are
-// exactly the definitions annotated readOnlyHint=false.
+// isWriteTool reports whether name is a write tool. Write tools are exactly the
+// definitions annotated readOnlyHint=false.
 func isWriteTool(name string) bool {
 	for _, tool := range toolDefinitions() {
 		if tool.Name != name {

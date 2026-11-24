@@ -164,7 +164,7 @@ exe，以及 macOS / Linux 产物，不因 zip 内容调整而增减资产。独
 
 本地复现同一个包（Windows，dev 与 CI 调用同一 Go 工具）：
 
-```powershell
+```bash
 make frontend
 go run ./tools/tengshoubuild build -goos windows -goarch amd64  # Windows 桌面 exe + CLI
 go run ./tools/tengshoubuild package-windows-zip dist

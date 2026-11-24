@@ -45,7 +45,9 @@ tengshou-cli mcp                 （同一实现，独立 CLI 资产）
 ## 快速开始
 
 1. 启动腾手桌面应用（或在终端运行 `tengshou-cli serve`），确认数据目录。
-2. 在 MCP 客户端注册下面的 stdio 命令。各平台交付形态不同，请按下表选择：
+2. 在 MCP 客户端注册下面的 stdio 命令。各平台交付形态不同，请按下表选择；
+   桌面应用「设置 → MCP 接入」页会自动生成可直接复制的配置片段（含
+   WorkBuddy / 豆包 / DeepSeek Harness）：
 
 | 平台 | 连接器命令 | 说明 |
 | --- | --- | --- |
@@ -135,21 +137,79 @@ Windows 注意：
   `C:\Users\<用户名>\AppData\Local\Tengshou`）；
 - 连接只走本机回环，不触发 Windows 防火墙对外放行。
 
+## 注册到 WorkBuddy / 豆包 / DeepSeek Harness
+
+桌面应用「设置 → MCP 接入」会根据当前运行位置自动填好可执行文件完整路径
+与实际数据目录，并生成下列片段，可直接复制。各家字段依据公开文档整理，
+**均未实机验证**，请以客户端当前界面为准。三家的接入方式都只用 stdio；
+豆包与 DeepSeek Harness 另支持 HTTP 连接器，但腾手 v0.1 不提供 HTTP 形态。
+
+### WorkBuddy（JSON · stdio）
+
+写入 WorkBuddy 的 `mcpServers` 配置（常见 `~/.workbuddy/mcp.json`），或在
+「技能 → 连接器 → 自定义连接器」添加：
+
+```json
+{
+  "mcpServers": {
+    "tengshou": {
+      "type": "stdio",
+      "command": "D:\\tengshou\\tengshou-windows-amd64.exe",
+      "args": ["mcp", "--data-dir", "C:\\Users\\<用户名>\\AppData\\Local\\Tengshou"]
+    }
+  }
+}
+```
+
+### 豆包（STDIO 表单）
+
+在「技能 · 连接器」添加自定义连接器并选择 STDIO，命令与参数逐个填写
+（每个参数一行）：
+
+```
+服务器名称：tengshou
+传输类型：STDIO
+命令：C:\Users\<用户名>\tengshou\tengshou-windows-amd64.exe
+参数：mcp
+参数：--data-dir
+参数：C:\Users\<用户名>\AppData\Local\Tengshou
+```
+
+### DeepSeek Harness（插件 YAML）
+
+通过官方插件 `@deepseek-ai/dsh-mcp-client` 接入，写入
+`~/.dsh/profiles/web/cordis.patch.yml`（Windows 为
+`%USERPROFILE%\.dsh\profiles\web\cordis.patch.yml`），保留 `- insert:` 行：
+
+```yaml
+- insert:
+    - id: mcp-tengshou
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: tengshou
+        transport: stdio
+        command: 'D:\tengshou\tengshou-windows-amd64.exe'
+        args: ['mcp', '--data-dir', 'C:\Users\<用户名>\AppData\Local\Tengshou']
+```
+
+启动顺序不变：先启动桌面应用，再让 agent 启动连接器。
+
 ## Windows 分发包说明
 
-Windows 预发布版提供一个分发包 `tengshou-windows-amd64.zip`，解压后含
-2 个文件：
+Windows 预发布版提供一个分发包 `tengshou-windows-amd64.zip`，解压后只有
+1 个文件：
 
 | 文件 | 用途 |
 | --- | --- |
-| `tengshou-windows-amd64.exe` | 腾手客户端：桌面应用 + MCP 连接器（`mcp` 子命令） |
-| `MCP-接入.txt` | 客户向接入说明：启动顺序、Claude Desktop 配置示例、默认数据目录 |
+| `tengshou-windows-amd64.exe` | 腾手客户端：桌面应用 + MCP 连接器（`mcp` 子命令），MCP 接入说明在应用「设置 → MCP 接入」页内 |
 
 两条使用路径：
 
 - **只用桌面应用**：双击 `tengshou-windows-amd64.exe`。
-- **接入 MCP**：先启动桌面应用，再让 agent 启动
-  `tengshou-windows-amd64.exe mcp --data-dir "<数据目录>"`。连接器不
+- **接入 MCP**：先启动桌面应用，打开「设置 → MCP 接入」，复制页面生成的
+  配置片段（WorkBuddy / 豆包 / DeepSeek Harness，或 Claude Desktop /
+  Claude Code）；连接器由 agent 以
+  `tengshou-windows-amd64.exe mcp --data-dir "<数据目录>"` 启动。连接器不
   打开数据库，只连本机正在运行的腾手服务；桌面应用未启动时工具返回明确的
   连接错误。
 
@@ -170,7 +230,7 @@ go run ./tools/tengshoubuild build -goos windows -goarch amd64  # Windows 桌面
 go run ./tools/tengshoubuild package-windows-zip dist
 ```
 
-`unzip -l dist/tengshou-windows-amd64.zip` 应只列出上表中的 2 个文件；
+`unzip -l dist/tengshou-windows-amd64.zip` 应只列出上表中的 1 个文件；
 CI 的 tag 发布任务用同一工具打包，并在发布前断言 zip 内容与资产总数。
 
 ## 工具清单

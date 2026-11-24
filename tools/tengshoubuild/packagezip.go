@@ -12,15 +12,15 @@ import (
 )
 
 const (
-	windowsZipName   = "tengshou-windows-amd64.zip"
-	windowsExeName   = "tengshou-windows-amd64.exe"
-	windowsNotesName = "MCP-接入.txt"
+	windowsZipName = "tengshou-windows-amd64.zip"
+	windowsExeName = "tengshou-windows-amd64.exe"
 )
 
-// runPackageWindowsZip 组装 Windows 分发包：桌面应用 + 接入说明，共 2 个文件。
+// runPackageWindowsZip 组装 Windows 分发包：只含桌面 exe，恰好 1 个文件。
 //
-// 客户只拿桌面客户端一个 exe：它同时提供 GUI 与 `mcp` stdio 子命令。
-// 完整 CLI 仍是独立发布资产，不放进 zip。
+// 客户只拿桌面客户端一个 exe：它同时提供 GUI 与 `mcp` stdio 子命令，MCP
+// 接入说明已内置在应用「设置 → MCP 接入」页。完整 CLI 仍是独立发布资产，
+// 不放进 zip。
 func runPackageWindowsZip(args []string) error {
 	if len(args) > 1 {
 		return errors.New("用法：go run ./tools/tengshoubuild package-windows-zip [dist 目录]")
@@ -34,21 +34,16 @@ func runPackageWindowsZip(args []string) error {
 	if len(args) == 1 {
 		outDir = args[0]
 	}
-	// 接入说明是仓库内的固定输入。
-	notesPath := filepath.Join(root, "packaging", "windows", windowsNotesName)
-	return packageWindowsZip(outDir, notesPath)
+	return packageWindowsZip(outDir)
 }
 
-// packageWindowsZip 写出 zip 并断言其恰好包含桌面 exe 与接入说明 2 个文件。
-// 用 archive/zip 而不是 zip(1)：中文文件名需要 UTF-8 通用标志位（0x800），
-// archive/zip 对非 CP437 的合法 UTF-8 名称会自动置位。
-func packageWindowsZip(outDir, notesPath string) error {
+// packageWindowsZip 写出 zip 并断言其恰好包含桌面 exe 1 个文件。
+// 用 archive/zip 而不是 zip(1)：纯 Go、跨平台，且包内命名完全由本工具
+// 控制。
+func packageWindowsZip(outDir string) error {
 	exePath := filepath.Join(outDir, windowsExeName)
-	for _, input := range []string{exePath, notesPath} {
-		info, err := os.Stat(input)
-		if err != nil || info.IsDir() {
-			return fmt.Errorf("缺少打包输入 %s", input)
-		}
+	if info, err := os.Stat(exePath); err != nil || info.IsDir() {
+		return fmt.Errorf("缺少打包输入 %s", exePath)
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("创建输出目录 %s: %w", outDir, err)
@@ -60,15 +55,14 @@ func packageWindowsZip(outDir, notesPath string) error {
 
 	entries := []zipEntry{
 		{src: exePath, name: windowsExeName},
-		{src: notesPath, name: windowsNotesName},
 	}
 	if err := writeZip(zipPath, entries); err != nil {
 		return err
 	}
-	if err := verifyZip(zipPath, []string{windowsExeName, windowsNotesName}); err != nil {
+	if err := verifyZip(zipPath, []string{windowsExeName}); err != nil {
 		return err
 	}
-	fmt.Printf("已生成 %s\n包含文件：\n  %s\n  %s\n", zipPath, windowsExeName, windowsNotesName)
+	fmt.Printf("已生成 %s\n包含文件：\n  %s\n", zipPath, windowsExeName)
 	return nil
 }
 
@@ -127,7 +121,7 @@ func addZipFile(writer *zip.Writer, entry zipEntry) error {
 	return nil
 }
 
-// verifyZip 重新打开 zip，断言恰好 2 个文件且文件名与预期一致。
+// verifyZip 重新打开 zip，断言文件数量与文件名都和预期一致。
 func verifyZip(zipPath string, wantNames []string) error {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -140,8 +134,8 @@ func verifyZip(zipPath string, wantNames []string) error {
 		got = append(got, file.Name)
 	}
 	sort.Strings(got)
-	if len(got) != 2 {
-		return fmt.Errorf("zip 必须恰好 2 个文件，实际 %d 个：%v", len(got), got)
+	if len(got) != len(wantNames) {
+		return fmt.Errorf("zip 必须恰好 %d 个文件，实际 %d 个：%v", len(wantNames), len(got), got)
 	}
 	want := slices.Clone(wantNames)
 	sort.Strings(want)

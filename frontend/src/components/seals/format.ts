@@ -39,23 +39,5 @@ export function readFileBase64(file: File): Promise<string> {
   });
 }
 
-/** 复制文本；非安全上下文回落 execCommand（与 app.js copyText 相同）。 */
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const area = document.createElement("textarea");
-    area.value = text;
-    document.body.appendChild(area);
-    area.select();
-    let ok = false;
-    try {
-      ok = document.execCommand("copy");
-    } catch {
-      /* ignore */
-    }
-    area.remove();
-    return ok;
-  }
-}
+/** 复制文本；回落 execCommand 的逻辑已集中到 ui/clipboard，重导出保持调用点不变。 */
+export { copyText } from "../../ui/clipboard";

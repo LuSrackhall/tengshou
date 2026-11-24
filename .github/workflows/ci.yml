@@ -64,7 +64,6 @@ jobs:
 
           expected = sorted([
               "tengshou-windows-amd64.exe",
-              "MCP-接入.txt",
           ])
           with zipfile.ZipFile(sys.argv[1]) as z:
               got = sorted(z.namelist())
@@ -242,9 +241,9 @@ jobs:
           merge-multiple: true
       - name: 列出产物
         run: ls -lh dist
-      - name: 打包 Windows 分发包（桌面应用 + 接入说明）
+      - name: 打包 Windows 分发包（仅桌面 exe）
         run: go run ./tools/tengshoubuild package-windows-zip dist
-      - name: 校验发布资产（8 个）与 Windows zip 内容（2 个文件）
+      - name: 校验发布资产（8 个）与 Windows zip 内容（1 个文件）
         run: |
           set -euo pipefail
           test "$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 8
@@ -256,7 +255,6 @@ jobs:
 
           expected = sorted([
               "tengshou-windows-amd64.exe",
-              "MCP-接入.txt",
           ])
           with zipfile.ZipFile("dist/tengshou-windows-amd64.zip") as z:
               got = sorted(z.namelist())

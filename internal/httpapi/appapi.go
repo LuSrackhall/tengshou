@@ -585,10 +585,10 @@ func (s *Server) handleAppMCPStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	dataDir := svc.DataDir()
-	command := "tengshou-cli mcp"
+	execPath := currentExecutable(s.opts.Logger)
+	command := mcpAccessCommand(execPath, dataDir)
 	configFile := ""
 	if dataDir != "" {
-		command += ` --data-dir "` + dataDir + `"`
 		configFile = filepath.Join(dataDir, "config.json")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -604,10 +604,11 @@ func (s *Server) handleAppMCPStatus(w http.ResponseWriter, r *http.Request) {
 		"data_dir":             dataDir,
 		"config_file":          configFile,
 		"transport":            "stdio",
+		"exec_path":            execPath,
 		"command":              command,
 		"settings_key":         "mcp.write_enabled",
 		"write_switch_applies": "立即生效（下一次工具调用即按新开关判定）",
-		"connection_help":      "在 Claude Code / Claude Desktop 中以 stdio 注册上面的命令；连接器只经本机回环访问腾手，不打开数据库。本机服务需保持运行。读工具始终可用；关闭写开关后写工具返回 mcp_write_disabled。",
+		"connection_help":      "在 Claude Code / Claude Desktop / WorkBuddy / 豆包 / DeepSeek Harness 中以 stdio 注册上面的命令；连接器只经本机回环访问腾手，不打开数据库。本机服务需保持运行。读工具始终可用；关闭写开关后写工具返回 mcp_write_disabled。",
 	})
 }
 

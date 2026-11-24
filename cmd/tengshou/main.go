@@ -16,11 +16,23 @@ import (
 	"github.com/LuSrackhall/tengshou/internal/app"
 	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/httpapi"
+	"github.com/LuSrackhall/tengshou/internal/mcpconn"
 	"github.com/LuSrackhall/tengshou/internal/version"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 func main() {
+	// `tengshou mcp ...` is the single-file MCP delivery form: the customer's
+	// desktop client doubles as the stdio connector. Dispatch before Wails,
+	// the database and the HTTP service so no window opens and no port is
+	// bound; mcpconn is the exact code the CLI runs.
+	if mcpconn.IsMCPCommand(os.Args[1:]) {
+		if err := mcpconn.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "错误："+err.Error())
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "启动失败："+err.Error())
 		os.Exit(1)

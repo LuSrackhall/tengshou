@@ -38,7 +38,6 @@ jobs:
           set -euo pipefail
           tmp="$(mktemp -d)"
           printf 'desktop' > "$tmp/tengshou-windows-amd64.exe"
-          printf 'cli' > "$tmp/tengshou-cli-windows-amd64.exe"
           bash scripts/package-windows-zip.sh "$tmp"
           python3 -I - "$tmp/tengshou-windows-amd64.zip" <<'PY'
           import sys
@@ -46,7 +45,6 @@ jobs:
 
           expected = sorted([
               "tengshou-windows-amd64.exe",
-              "tengshou-cli-windows-amd64.exe",
               "MCP-接入.txt",
           ])
           with zipfile.ZipFile(sys.argv[1]) as z:
@@ -100,8 +98,6 @@ jobs:
             goarch: amd64
           - goos: linux
             goarch: arm64
-          - goos: windows
-            goarch: amd64
           - goos: darwin
             goarch: arm64
     steps:
@@ -115,19 +111,14 @@ jobs:
         with:
           name: frontend-dist
           path: internal/httpapi/web/app/dist
-      - name: 构建
+      - name: 构建（scripts/build.sh，与本地同一脚本）
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-        run: |
-          EXT=""
-          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          VERSION="${GITHUB_REF_NAME:-0.1.0-dev}"
-          go build -trimpath -ldflags "-s -w \
-            -X github.com/LuSrackhall/tengshou/internal/version.Version=${VERSION} \
-            -X github.com/LuSrackhall/tengshou/internal/version.Commit=${GITHUB_SHA::7}" \
-            -o "dist/tengshou-cli-${GOOS}-${GOARCH}${EXT}" ./cmd/tengshou-cli
+          VERSION: ${{ github.ref_name }}
+          NAME_SUFFIX: -${{ matrix.goos }}-${{ matrix.goarch }}
+        run: scripts/build.sh cli
       - uses: actions/upload-artifact@v4
         with:
           name: tengshou-cli-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -144,11 +135,9 @@ jobs:
           - os: macos-15
             goos: darwin
             goarch: arm64
-            cgo: "1"
           - os: windows-latest
             goos: windows
             goarch: amd64
-            cgo: "0"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -164,28 +153,57 @@ jobs:
       - name: vet 桌面壳（cgo）
         if: matrix.goos == 'darwin'
         run: go vet ./cmd/tengshou
-      - name: 构建桌面应用
-        shell: bash
+      - name: 构建（macOS · scripts/build.sh，与本地同一脚本）
+        if: matrix.goos == 'darwin'
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: ${{ matrix.cgo }}
+          GOOS: darwin
+          GOARCH: arm64
+          CGO_ENABLED: "1"
+          VERSION: ${{ github.ref_name }}
+          NAME_SUFFIX: -darwin-arm64
         run: |
-          EXT=""
-          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          VERSION="${GITHUB_REF_NAME:-0.1.0-dev}"
-          LDFLAGS="-s -w -X github.com/LuSrackhall/tengshou/internal/version.Version=${VERSION} -X github.com/LuSrackhall/tengshou/internal/version.Commit=${GITHUB_SHA::7}"
-          if [ "$GOOS" = "windows" ]; then LDFLAGS="$LDFLAGS -H windowsgui"; fi
-          go build -trimpath -ldflags "$LDFLAGS" -o "dist/tengshou-${GOOS}-${GOARCH}${EXT}" ./cmd/tengshou
+          scripts/build.sh desktop
+          # 冒烟用的同版 CLI 单独放临时目录，避免混入发布资产。
+          OUT="$RUNNER_TEMP/smoke-cli" scripts/build.sh cli
+      - name: MCP stdio 冒烟（macOS 桌面二进制 + 管道）
+        if: matrix.goos == 'darwin'
+        run: |
+          bash scripts/smoke-mcp-desktop.sh \
+            dist/tengshou-darwin-arm64 \
+            "$RUNNER_TEMP/smoke-cli/tengshou-cli-darwin-arm64"
       - name: 打包（macOS）
         if: matrix.goos == 'darwin'
         run: |
           cd dist
           tar -czf tengshou-darwin-arm64.tar.gz tengshou-darwin-arm64
+      - name: 构建（Windows · scripts/build-windows.ps1，与本地同一脚本）
+        if: matrix.goos == 'windows'
+        shell: powershell
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: .\scripts\build-windows.ps1
+      - name: MCP stdio 冒烟（Windows GUI 子系统 · 管道）
+        if: matrix.goos == 'windows'
+        shell: powershell
+        run: |
+          .\scripts\smoke-mcp-desktop.ps1 `
+            -Desktop "dist\tengshou-windows-amd64.exe" `
+            -Cli "dist\tengshou-cli-windows-amd64.exe"
       - uses: actions/upload-artifact@v4
+        if: matrix.goos == 'darwin'
         with:
-          name: tengshou-desktop-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*
+          name: tengshou-desktop-darwin-arm64
+          path: |
+            dist/tengshou-darwin-arm64
+            dist/tengshou-darwin-arm64.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: matrix.goos == 'windows'
+        with:
+          name: tengshou-desktop-windows-amd64
+          path: |
+            dist/tengshou-windows-amd64.exe
+            dist/tengshou-cli-windows-amd64.exe
           if-no-files-found: error
 
   release:
@@ -204,9 +222,9 @@ jobs:
           merge-multiple: true
       - name: 列出产物
         run: ls -lh dist
-      - name: 打包 Windows 分发包（桌面应用 + MCP 连接器 + 接入说明）
+      - name: 打包 Windows 分发包（桌面应用 + 接入说明）
         run: bash scripts/package-windows-zip.sh dist
-      - name: 校验发布资产（8 个）与 Windows zip 内容（3 个文件）
+      - name: 校验发布资产（8 个）与 Windows zip 内容（2 个文件）
         run: |
           set -euo pipefail
           test "$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 8
@@ -217,7 +235,6 @@ jobs:
 
           expected = sorted([
               "tengshou-windows-amd64.exe",
-              "tengshou-cli-windows-amd64.exe",
               "MCP-接入.txt",
           ])
           with zipfile.ZipFile("dist/tengshou-windows-amd64.zip") as z:

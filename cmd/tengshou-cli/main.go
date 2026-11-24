@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -20,7 +19,7 @@ import (
 	"github.com/LuSrackhall/tengshou/internal/config"
 	"github.com/LuSrackhall/tengshou/internal/demo"
 	"github.com/LuSrackhall/tengshou/internal/httpapi"
-	"github.com/LuSrackhall/tengshou/internal/mcp"
+	"github.com/LuSrackhall/tengshou/internal/mcpconn"
 	"github.com/LuSrackhall/tengshou/internal/model"
 	"github.com/LuSrackhall/tengshou/internal/pdfdoc"
 	"github.com/LuSrackhall/tengshou/internal/version"
@@ -100,7 +99,9 @@ func run(args []string) error {
 		}
 		return runRestore(*c.dataDir, *file)
 	case "mcp":
-		return runMCP(args[1:])
+		// The desktop client exposes the exact same subcommand through
+		// internal/mcpconn; the two entry points must never grow copies.
+		return mcpconn.Run(args[1:], os.Stdin, os.Stdout, os.Stderr)
 	default:
 		usage()
 		return fmt.Errorf("未知子命令 %q", cmd)
@@ -132,6 +133,8 @@ mcp 参数：
   --api-url <地址>    本机服务地址（默认 http://127.0.0.1:<配置端口>，自动探测端口回退）
   --token <令牌>      数据接口令牌（默认读取 config.json）
   环境变量：TENGHSHOU_API_URL、TENGHSHOU_API_TOKEN
+
+桌面客户端（tengshou）内置同一个 mcp 子命令，客户单文件交付时无需 CLI。
 
 示例：
   tengshou-cli demo --data-dir ./data
@@ -354,74 +357,4 @@ func runRestore(dataDir, file string) error {
 		len(manifest.Files), manifest.SchemaVersion, manifest.AppVersion)
 	fmt.Printf("恢复前数据副本：%s\n", res.SafetyDir)
 	return nil
-}
-
-// runMCP starts the B6 stdio MCP connector. It never opens the database: the
-// connector talks to the running local HTTP service over loopback, so all
-// reads, validation and audit logging stay in the one application process.
-func runMCP(args []string) error {
-	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	dataDir := fs.String("data-dir", "", "数据目录（读取端口与令牌，默认使用系统应用数据目录）")
-	apiURL := fs.String("api-url", os.Getenv("TENGHSHOU_API_URL"), "本机服务地址（默认 http://127.0.0.1:<配置端口>）")
-	token := fs.String("token", os.Getenv("TENGHSHOU_API_TOKEN"), "数据接口令牌（默认读取 config.json）")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	bases, tokenValue, err := mcpTargets(*dataDir, *apiURL, *token)
-	if err != nil {
-		return err
-	}
-	api, err := mcp.NewAPI(mcp.APIOptions{BaseURLs: bases, Token: tokenValue})
-	if err != nil {
-		return err
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	logger.Info("腾手 MCP 服务已启动（stdio）", "api", strings.Join(bases, "、"), "data_dir", *dataDir)
-	opts := mcp.Options{API: api, Version: version.String(), Logger: logger}
-	// The connector re-reads config.json before each write tool call, so
-	// switching MCP writes off in the desktop app applies without restarting
-	// this process. The HTTP guard remains the authoritative gate.
-	if paths, err := config.ResolvePaths(*dataDir); err == nil {
-		opts.WriteEnabled = config.MCPWriteGate(paths)
-	} else {
-		logger.Warn("读取配置失败，MCP 写开关交由 HTTP 门禁判定", "error", err)
-	}
-	server := mcp.New(opts)
-	return server.Serve(context.Background(), os.Stdin, os.Stdout)
-}
-
-// mcpTargets resolves candidate loopback endpoints and the read API token.
-// Without an explicit --api-url it reads config.json and assumes the desktop
-// app's port fallback range (configured port .. +9).
-func mcpTargets(dataDir, apiURL, token string) ([]string, string, error) {
-	apiURL = strings.TrimSpace(apiURL)
-	token = strings.TrimSpace(token)
-	if apiURL == "" || token == "" {
-		paths, err := config.ResolvePaths(dataDir)
-		if err != nil {
-			return nil, "", err
-		}
-		cfg, cfgErr := config.Load(paths)
-		if cfgErr != nil {
-			if apiURL == "" {
-				return nil, "", fmt.Errorf("读取配置失败：%w", cfgErr)
-			}
-			// An explicit address still works for writes; reads may need the
-			// token, which the user can pass with --token.
-			return []string{apiURL}, token, nil
-		}
-		if token == "" {
-			token = cfg.HTTP.Token
-		}
-		if apiURL != "" {
-			return []string{apiURL}, token, nil
-		}
-		bases := make([]string, 0, 10)
-		for port := cfg.HTTP.Port; port < cfg.HTTP.Port+10 && port <= 65535; port++ {
-			bases = append(bases, fmt.Sprintf("http://127.0.0.1:%d", port))
-		}
-		return bases, token, nil
-	}
-	return []string{apiURL}, token, nil
 }

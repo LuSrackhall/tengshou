@@ -3,20 +3,25 @@
 
 一、压缩包里有什么
 ------------------
-1. tengshou-windows-amd64.exe       腾手桌面应用（主程序）
-2. tengshou-cli-windows-amd64.exe   MCP 连接器（供 Claude Desktop 等 agent 调用）
-3. MCP-接入.txt                     本说明
+1. tengshou-windows-amd64.exe   腾手客户端（桌面应用 + MCP 连接器）
+2. MCP-接入.txt                 本说明
 
-请把整个压缩包解压到一个固定目录（例如 D:\tengshou），再运行 exe。
+腾手客户端只有一个 exe，但有两种用法：
+- 双击启动：桌面应用（台账界面）。
+- 带 `mcp` 参数启动：MCP stdio 连接器，供同机 agent 调用。
+
+请把压缩包解压到一个固定目录（例如 D:\tengshou），再运行 exe。
 下文命令和配置示例中的路径，请按你实际解压的位置填写。
 
-二、两条使用路径
-----------------
+二、使用路径
+------------
 1. 只在电脑上使用腾手：
    双击 tengshou-windows-amd64.exe 启动桌面应用即可。
 
-2. 让同机 agent（如 Claude Desktop）通过 MCP 读写腾手数据：
-   先启动腾手桌面应用，再让 agent 启动 tengshou-cli-windows-amd64.exe mcp。
+2. 让同机 agent（如 Claude Desktop / WorkBuddy / 豆包 / DeepSeek Harness）
+   通过 MCP 读写腾手数据：
+   先启动腾手桌面应用，再让 agent 启动
+   tengshou-windows-amd64.exe mcp --data-dir "C:\Users\<用户名>\AppData\Local\Tengshou"
 
 启动顺序：先桌面应用，后 agent。MCP 连接器不直接打开数据库，只连接本机
 正在运行的腾手服务；桌面应用没启动时，agent 调用会提示无法连接。
@@ -30,7 +35,7 @@
 {
   "mcpServers": {
     "tengshou": {
-      "command": "D:\\tengshou\\tengshou-cli-windows-amd64.exe",
+      "command": "D:\\tengshou\\tengshou-windows-amd64.exe",
       "args": ["mcp", "--data-dir", "C:\\Users\\<用户名>\\AppData\\Local\\Tengshou"]
     }
   }
@@ -42,6 +47,8 @@
   C:\Users\<用户名>\AppData\Local\Tengshou
   如果你在桌面应用里改过数据目录，以实际目录为准。
 - 连接只走本机回环（127.0.0.1），不会触发 Windows 防火墙对外放行。
+- 可选参数：--api-url / TENGHSHOU_API_URL 指定本机服务地址；
+  --token / TENGHSHOU_API_TOKEN 指定只读数据接口令牌（默认读 config.json）。
 
 四、验证与排查
 --------------
@@ -53,4 +60,6 @@
    - 确认 --data-dir 与桌面应用实际使用的数据目录一致；
    - 确认 command 指向的 exe 路径存在，且反斜杠已写成 \\。
 
-工具清单、写开关与安全边界等更多说明，见项目文档 docs/mcp.md。
+分发包不再附带单独的 CLI。serve / backup / restore / demo 等高级用途，
+请从 GitHub Release 下载独立的 tengshou-cli 资产。工具清单、写开关与
+安全边界见项目文档 docs/mcp.md。

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# 组装 Windows 分发包：桌面应用 + MCP 连接器 + 接入说明，共 3 个文件。
+# 组装 Windows 分发包：桌面应用 + 接入说明，共 2 个文件。
 # CI 发布与本地复现共用本脚本，保证两边打出的 zip 内容一致。
+#
+# 客户只拿桌面客户端一个 exe：它同时提供 GUI 与 `mcp` stdio 子命令。
+# 完整 CLI（serve / backup / restore / demo 等高级用途）仍作为独立发布资产，
+# 不再放进 zip。
 #
 # 用法：scripts/package-windows-zip.sh [dist 目录]
 #
 # dist 目录需包含：
-#   tengshou-windows-amd64.exe       桌面应用
-#   tengshou-cli-windows-amd64.exe   MCP 连接器 / CLI
+#   tengshou-windows-amd64.exe       桌面应用（内置 MCP 连接器）
 # 产出：
 #   <dist>/tengshou-windows-amd64.zip
 #
@@ -19,7 +22,6 @@ OUT_DIR="${1:-$ROOT/dist}"
 ZIP_NAME="tengshou-windows-amd64.zip"
 FILES=(
   "tengshou-windows-amd64.exe"
-  "tengshou-cli-windows-amd64.exe"
 )
 README_NAME="MCP-接入.txt"
 README_SRC="$ROOT/packaging/windows/$README_NAME"
@@ -34,8 +36,9 @@ if [ ! -f "$README_SRC" ]; then
   echo "错误：缺少接入说明 $README_SRC" >&2
   exit 1
 fi
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "错误：未找到 python3（CI runner 与 macOS 开发者工具均自带）" >&2
+PYTHON="$(command -v python3 || command -v python || true)"
+if [ -z "$PYTHON" ]; then
+  echo "错误：未找到 python3 / python（CI runner 与 macOS 开发者工具均自带）" >&2
   exit 1
 fi
 
@@ -44,9 +47,8 @@ OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 ZIP_PATH="$OUT_DIR/$ZIP_NAME"
 rm -f "$ZIP_PATH"
 
-python3 -I - "$ZIP_PATH" \
+"$PYTHON" -I - "$ZIP_PATH" \
   "$OUT_DIR/${FILES[0]}" "${FILES[0]}" \
-  "$OUT_DIR/${FILES[1]}" "${FILES[1]}" \
   "$README_SRC" "$README_NAME" <<'PY'
 import sys
 import zipfile

@@ -12,13 +12,17 @@
 
 ## 形态与架构
 
-MCP 连接器是 `tengshou-cli` 的 stdio 子命令，不是第二个数据库进程：
+MCP 连接器内置于桌面客户端：`tengshou-windows-amd64.exe mcp` 就是 stdio
+连接器，客户只需要这一个 exe。`tengshou-cli mcp` 调用**同一份实现**
+（`internal/mcpconn`），作为独立发布资产保留给高级用途——开发、测试与
+发布走同一条代码路径，不存在两份连接器。
 
 ```
-Claude Code / Claude Desktop / 用户侧 agent
+Claude Code / Claude Desktop / WorkBuddy / 用户侧 agent
         │  MCP（JSON-RPC over stdio）
         ▼
-tengshou-cli mcp
+tengshou-windows-amd64.exe mcp   （桌面客户端内置，客户交付形态）
+tengshou-cli mcp                 （同一实现，独立 CLI 资产）
         │  本机 HTTP（仅回环）
         ├─ GET  /api/v1/*         只读数据（令牌保护）
         └─ POST /app/api/v1/*     写操作（X-Tengshou-App + X-Tengshou-MCP）
@@ -35,14 +39,18 @@ tengshou-cli mcp
   返回明确错误，不会静默失败。
 - 配置中的端口被占用时，桌面应用会回退到后续 9 个端口；连接器在不带
   `--api-url` 时会自动探测这段端口。
+- 桌面客户端带 `mcp` 参数启动时**不初始化窗口、不监听新端口、不打开
+  数据库**，只把 stdin/stdout 接到共享连接器；桌面应用本体的行为不变。
 
 ## 快速开始
 
 1. 启动腾手桌面应用（或在终端运行 `tengshou-cli serve`），确认数据目录。
-2. 在 MCP 客户端注册下面的 stdio 命令：
+2. 在 MCP 客户端注册下面的 stdio 命令（Windows 用桌面 exe，macOS/Linux 用
+   对应的桌面二进制或 `tengshou-cli`）：
 
 ```bash
-tengshou-cli mcp --data-dir "/path/to/data"
+tengshou-windows-amd64.exe mcp --data-dir "C:\Users\<用户名>\AppData\Local\Tengshou"
+# 等价：tengshou-cli mcp --data-dir "/path/to/data"
 ```
 
 `--data-dir` 用于读取 `config.json` 中的端口与只读数据接口令牌，不会打开
@@ -64,11 +72,11 @@ tengshou-cli mcp --data-dir "/path/to/data"
 
 ## 注册到 Claude Code
 
-命令行注册（二进制路径换成实际位置）：
+命令行注册（二进制路径换成实际位置；桌面 exe 与 `tengshou-cli` 等价）：
 
 ```bash
 claude mcp add --transport stdio tengshou -- \
-  /path/to/tengshou-cli mcp --data-dir "/path/to/data"
+  /path/to/tengshou-darwin-arm64 mcp --data-dir "/path/to/data"
 ```
 
 项目级 `.mcp.json`：
@@ -78,7 +86,7 @@ claude mcp add --transport stdio tengshou -- \
   "mcpServers": {
     "tengshou": {
       "type": "stdio",
-      "command": "/path/to/tengshou-cli",
+      "command": "/path/to/tengshou-darwin-arm64",
       "args": ["mcp", "--data-dir", "/path/to/data"]
     }
   }
@@ -93,7 +101,7 @@ macOS 配置：`~/Library/Application Support/Claude/claude_desktop_config.json`
 {
   "mcpServers": {
     "tengshou": {
-      "command": "/path/to/tengshou-cli",
+      "command": "/path/to/tengshou-darwin-arm64",
       "args": ["mcp", "--data-dir", "/path/to/data"]
     }
   }
@@ -106,7 +114,7 @@ Windows 配置：`%APPDATA%\Claude\claude_desktop_config.json`
 {
   "mcpServers": {
     "tengshou": {
-      "command": "C:\\Users\\<用户名>\\AppData\\Local\\Tengshou\\tengshou-cli-windows-amd64.exe",
+      "command": "C:\\Users\\<用户名>\\tengshou\\tengshou-windows-amd64.exe",
       "args": ["mcp", "--data-dir", "C:\\Users\\<用户名>\\AppData\\Local\\Tengshou"]
     }
   }
@@ -117,49 +125,47 @@ Windows 注意：
 
 - JSON 中的反斜杠要写成 `\\`，且 **不会展开 `%LOCALAPPDATA%` 等环境变量**，
   请写完整路径；
-- `tengshou-cli-windows-amd64.exe`（分发包内的 CLI）放在哪里，`command`
-  就填哪里；`--data-dir` 指向桌面
-  应用实际使用的数据目录（默认即 `C:\Users\<用户名>\AppData\Local\Tengshou`）；
+- `command` 指向解压后的 `tengshou-windows-amd64.exe`（桌面客户端本身
+  就是连接器）；`--data-dir` 指向桌面应用实际使用的数据目录（默认即
+  `C:\Users\<用户名>\AppData\Local\Tengshou`）；
 - 连接只走本机回环，不触发 Windows 防火墙对外放行。
 
 ## Windows 分发包说明
 
 Windows 预发布版提供一个分发包 `tengshou-windows-amd64.zip`，解压后含
-3 个文件：
+2 个文件：
 
 | 文件 | 用途 |
 | --- | --- |
-| `tengshou-windows-amd64.exe` | 腾手桌面应用（主程序，双击运行） |
-| `tengshou-cli-windows-amd64.exe` | MCP 连接器 / CLI（供 Claude Desktop 等 agent 调用） |
+| `tengshou-windows-amd64.exe` | 腾手客户端：桌面应用 + MCP 连接器（`mcp` 子命令） |
 | `MCP-接入.txt` | 客户向接入说明：启动顺序、Claude Desktop 配置示例、默认数据目录 |
 
 两条使用路径：
 
 - **只用桌面应用**：双击 `tengshou-windows-amd64.exe`。
 - **接入 MCP**：先启动桌面应用，再让 agent 启动
-  `tengshou-cli-windows-amd64.exe mcp --data-dir "<数据目录>"`。连接器不
+  `tengshou-windows-amd64.exe mcp --data-dir "<数据目录>"`。连接器不
   打开数据库，只连本机正在运行的腾手服务；桌面应用未启动时工具返回明确的
   连接错误。
 
 默认数据目录为 `C:\Users\<用户名>\AppData\Local\Tengshou`
 （即 `%LOCALAPPDATA%\Tengshou`）。Claude Desktop 配置见上一节的 Windows
-示例：`command` 填 CLI 的完整路径，反斜杠写成 `\\`。
+示例：`command` 填桌面 exe 的完整路径，反斜杠写成 `\\`。
 
 发布固定 8 个资产：除上述 zip 外，仍保留独立的 Windows 桌面 exe 与 CLI
-exe，以及 macOS / Linux 产物，不因 zip 内容调整而增减资产。
+exe，以及 macOS / Linux 产物，不因 zip 内容调整而增减资产。独立 CLI
+（`serve` / `backup` / `restore` / `demo` 等高级用途）不在 zip 内，客户
+只需要桌面 exe。
 
-本地复现同一个包（需先构建前端与两个 Windows exe）：
+本地复现同一个包（Windows，dev 与 CI 调用同一脚本）：
 
-```bash
+```powershell
 make frontend
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-H windowsgui" -o dist/tengshou-windows-amd64.exe ./cmd/tengshou
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
-  -o dist/tengshou-cli-windows-amd64.exe ./cmd/tengshou-cli
-bash scripts/package-windows-zip.sh dist
+powershell -File scripts/build-windows.ps1
+bash scripts/package-windows-zip.sh dist   # Git Bash；需要 python3
 ```
 
-`unzip -l dist/tengshou-windows-amd64.zip` 应只列出上表中的 3 个文件；
+`unzip -l dist/tengshou-windows-amd64.zip` 应只列出上表中的 2 个文件；
 CI 的 tag 发布任务用同一脚本打包，并在发布前断言 zip 内容与资产总数。
 
 ## 工具清单
@@ -433,7 +439,24 @@ go test -count=1 ./internal/mcp/ -v
 - 写开关关闭时只读仍可用、桌面 UI 写入不受影响；
 - 服务未启动时的清晰错误、端口回退探测、非回环地址拒绝。
 
-手工冒烟：
+`internal/mcpconn` 的测试从桌面与 CLI 共用的 `Run` 出发，用真实本地服务
+验证 initialize、`tools/list`、只读与写工具，并锁定非回环地址拒绝——两个
+入口只有这一条实现。
+
+发布形态冒烟（CI 的 windows-latest 与 macos-15，二进制即发布形态）：
+
+```bash
+# Windows（GUI 子系统 exe，真实 stdin/stdout 管道）
+powershell -File scripts/smoke-mcp-desktop.ps1 \
+  -Desktop dist\tengshou-windows-amd64.exe -Cli dist\tengshou-cli-windows-amd64.exe
+# macOS
+bash scripts/smoke-mcp-desktop.sh dist/tengshou-darwin-arm64 dist/tengshou-cli-darwin-arm64
+```
+
+两步都用桌面二进制：先在本地服务未启动时断言 `initialize` / `tools/list`，
+再启动同版 `tengshou-cli serve` 后调用一次写工具成功。
+
+手工冒烟（桌面二进制）：
 
 ```bash
 tengshou-cli demo --data-dir /tmp/ts-mcp
@@ -444,7 +467,7 @@ printf '%s\n' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
   '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tengshou_list_contracts","arguments":{"year":2026}}}' \
-  | tengshou-cli mcp --data-dir /tmp/ts-mcp --api-url http://127.0.0.1:18765
+  | ./dist/tengshou-darwin-arm64 mcp --data-dir /tmp/ts-mcp --api-url http://127.0.0.1:18765
 ```
 
 常见问题：
@@ -454,7 +477,7 @@ printf '%s\n' \
 | `无法连接腾手本地服务` | 启动桌面应用；确认 `--data-dir` 与桌面端一致；未带 `--api-url` 时会自动探测端口回退 |
 | `401 unauthorized` | 令牌不匹配：使用同一数据目录，或显式传 `--token` |
 | `403 mcp_write_disabled` | `mcp.write_enabled=false`；在桌面应用「设置」页打开写开关即即时生效（也可修改 `config.json`） |
-| Windows 配置不生效 | 反斜杠写成 `\\`，使用完整路径，确认 `command` 指向 `tengshou-cli-windows-amd64.exe` |
+| Windows 配置不生效 | 反斜杠写成 `\\`，使用完整路径，确认 `command` 指向 `tengshou-windows-amd64.exe`（桌面客户端内置 mcp） |
 | 工具列表为空 | 客户端未完成 `initialize`，或连接的是其它 MCP 服务 |
 
 ## 明确不做

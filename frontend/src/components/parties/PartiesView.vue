@@ -169,7 +169,7 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="party in parties" :key="party.id" @click="openEdit(party)">
+            <tr v-for="party in parties" :key="party.id" :data-id="party.id" @click="openEdit(party)">
               <td
                 v-for="field in tableFields"
                 :key="field.key"

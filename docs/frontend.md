@@ -70,6 +70,15 @@ npm run dev           # 打开提示的地址，页面里可切换同步状态�
 同步状态徽标，不参与生产构建（`vite build` 只以 `src/main.ts` 为入口）。
 完整界面通过 `make serve` 后打开 `/app/` 查看。
 
+## agent 操作可见层
+
+MCP agent（`tengshou-mcp`）写入数据时，`components/shell/AgentActivityOverlay.vue`
+监听 `tengshou:change`，自动切到实体对应的页面，并用模拟光标、点击波纹与
+目标行高亮回放这次操作，顶部同时显示「agent 操作」徽标。它是纯视觉层
+（叠加层 `pointer-events: none`，不抢焦点、不改 `shell/realtime.ts` 的派发
+语义）；设置页可关闭动画（默认开启，`localStorage` 持久化），
+`prefers-reduced-motion: reduce` 下只保留行高亮与徽标。
+
 ## API 客户端与类型
 
 阶段 1 起，所有 `/app/api/v1` 调用统一走 `frontend/src/api/`：

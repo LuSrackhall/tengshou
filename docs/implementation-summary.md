@@ -141,7 +141,7 @@ trace:
 | `internal/*/*_test.go` | 配置、存储、迁移、API、PDF、demo 集成测试 |
 | `docs/api.md` / `docs/architecture.md` / `docs/templates.md` / `docs/b1-acceptance.md` | 接口、架构、模板与验收说明 |
 | `.github/workflows/ci.yml` | 测试、多平台构建、`v*` 标签 pre-release |
-| `scripts/build.sh` / `scripts/build-windows.ps1` / `scripts/demo.sh` | 一键构建与示例 |
+| `tools/tengshoubuild` / `scripts/demo.sh` | 一键构建（三端同一命令）与示例 |
 | `Makefile` / `README.md` / `go.mod` / `go.sum` | 工程入口与依赖锁定 |
 
 ## Verification
@@ -164,7 +164,7 @@ TENGHSHOU_FONT="/System/Library/Fonts/Supplemental/Arial Unicode.ttf" \
 go vet ./internal/... ./cmd/tengshou-cli          # 无输出，通过
 go test -count=1 ./internal/... ./cmd/tengshou-cli
 # ok config / demo / httpapi / pdfdoc / store；其余包无测试文件
-./scripts/build.sh
+go run ./tools/tengshoubuild build
 # 产出 dist/tengshou (20M) 与 dist/tengshou-cli (18M)
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
   -trimpath -ldflags "-s -w -H windowsgui" \

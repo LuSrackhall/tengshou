@@ -69,7 +69,7 @@
   公章 / 模板 / PDF + 配置 + manifest 摘要），校验后恢复，换机可迁移；启动时
   数据库完整性检查与孤儿资产报告；签名导出二次确认并写审计。详见
   [docs/b9-backup.md](docs/b9-backup.md)。
-- **构建与发布**：`scripts/build.sh`、`scripts/build-windows.ps1`；GitHub Actions。
+- **构建与发布**：`tools/tengshoubuild`（三端同一 Go 命令：构建 / 冒烟 / 打包）；GitHub Actions。
 
 ## 快速开始
 
@@ -99,7 +99,7 @@ go run ./cmd/tengshou mcp --data-dir ./data
 
 ```bash
 go run ./cmd/tengshou
-# 或先构建：./scripts/build.sh && ./dist/tengshou
+# 或先构建：go run ./tools/tengshoubuild build && ./dist/tengshou
 ```
 
 ### 第一次使用
@@ -175,11 +175,19 @@ PDF 流水线需要一份覆盖中文的字体。解析顺序：
 ## 构建与 CI
 
 ```bash
-./scripts/build.sh                  # 当前平台：dist/tengshou + dist/tengshou-cli
-./scripts/build.sh cli              # 只构建 CLI
-powershell -File scripts/build-windows.ps1   # Windows：桌面 exe + CLI（GUI/控制台子系统在此收口）
-bash scripts/package-windows-zip.sh dist     # 用已构建的 Windows 桌面 exe 打发布 zip
+go run ./tools/tengshoubuild build              # 当前平台：dist/tengshou + dist/tengshou-cli
+go run ./tools/tengshoubuild build cli          # 只构建 CLI
+go run ./tools/tengshoubuild build -goos windows -goarch amd64  # Windows 目标（GUI/控制台子系统同一处收口）
+go run ./tools/tengshoubuild package-windows-zip dist  # 用已构建的 Windows 桌面 exe 打发布 zip
+go run ./tools/tengshoubuild smoke-mcp dist/tengshou dist/tengshou-cli  # stdio MCP 发布形态冒烟
 ```
+
+构建 / 冒烟 / 打包三端共用 `tools/tengshoubuild` 一个实现，不再维护
+`.sh` / `.ps1` 双份脚本；保留原有环境变量契约（`VERSION` / `COMMIT` /
+`BUILD_DATE` / `OUT` / `GOOS` / `GOARCH` / `CGO_ENABLED` / `NAME_SUFFIX`），
+Windows 桌面自动使用 GUI 子系统、CLI 保持控制台子系统，macOS 桌面要求
+`CGO_ENABLED=1`。`go run` 自身会按 `GOOS`/`GOARCH` 交叉编译工具，因此
+跨平台目标用 `-goos` / `-goarch` 参数而不是这两个环境变量。
 
 Windows 发布 zip 内含桌面客户端（GUI + 内置 `mcp`）与 `MCP-接入.txt`，
 不再附带单独 CLI；完整 CLI 仍是独立发布资产。说明见
@@ -195,18 +203,17 @@ Windows 发布 zip 内含桌面客户端（GUI + 内置 `mcp`）与 `MCP-接入.
 
 GitHub Actions：
 - push / PR：静态检查 + 单元与集成测试（含真实中文 PDF 生成）；
-- 脚本静态检查：`bash -n`、CRLF 检查、`.ps1` 非 ASCII 必须带 UTF-8 BOM，
-  Windows 作业另用 Windows PowerShell 5.1 解析器校验全部 `.ps1`；
-- 构建 Linux / macOS CLI 与 macOS / Windows 桌面壳（统一调用上述构建脚本），
-  并在 linux（CLI 自连）、windows-latest（GUI 子系统）、macos-15 三端用发布
-  形态二进制做 MCP stdio 管道冒烟；
-- `v*` 标签：发布固定 8 个资产；Windows zip 由发布任务用上述同一脚本组装。
+- 剩余 shell 脚本静态检查：`bash -n` 与 CRLF 检查；仓库不再保留 `.ps1`；
+- 构建 Linux / macOS CLI 与 macOS / Windows 桌面壳（统一调用
+  `tools/tengshoubuild`），并在 linux（CLI 自连）、windows-latest（GUI
+  子系统）、macos-15 三端用发布形态二进制做 MCP stdio 管道冒烟；
+- `v*` 标签：发布固定 8 个资产；Windows zip 由发布任务用同一工具组装。
 
 ## 开发
 
 ```bash
-go test ./internal/... ./cmd/tengshou-cli
-go vet ./internal/... ./cmd/tengshou-cli
+go test ./internal/... ./cmd/tengshou-cli ./tools/...
+go vet ./internal/... ./cmd/tengshou-cli ./tools/...
 ./scripts/demo.sh        # 一键示例
 ```
 

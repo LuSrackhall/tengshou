@@ -162,16 +162,16 @@ exe，以及 macOS / Linux 产物，不因 zip 内容调整而增减资产。独
 （`serve` / `backup` / `restore` / `demo` 等高级用途）不在 zip 内，客户
 只需要桌面 exe。
 
-本地复现同一个包（Windows，dev 与 CI 调用同一脚本）：
+本地复现同一个包（Windows，dev 与 CI 调用同一 Go 工具）：
 
 ```powershell
 make frontend
-powershell -File scripts/build-windows.ps1
-bash scripts/package-windows-zip.sh dist   # Git Bash；需要 python3
+go run ./tools/tengshoubuild build -goos windows -goarch amd64  # Windows 桌面 exe + CLI
+go run ./tools/tengshoubuild package-windows-zip dist
 ```
 
 `unzip -l dist/tengshou-windows-amd64.zip` 应只列出上表中的 2 个文件；
-CI 的 tag 发布任务用同一脚本打包，并在发布前断言 zip 内容与资产总数。
+CI 的 tag 发布任务用同一工具打包，并在发布前断言 zip 内容与资产总数。
 
 ## 工具清单
 
@@ -448,21 +448,23 @@ go test -count=1 ./internal/mcp/ -v
 验证 initialize、`tools/list`、只读与写工具，并锁定非回环地址拒绝——两个
 入口只有这一条实现。
 
-发布形态冒烟（CI 的 windows-latest 与 macos-15，二进制即发布形态）：
+发布形态冒烟（CI 的 windows-latest 与 macos-15，二进制即发布形态；
+三端同一命令 `go run ./tools/tengshoubuild smoke-mcp <被测二进制> <tengshou-cli>`）：
 
 ```bash
 # Windows（GUI 子系统 exe，真实 stdin/stdout 管道）
-powershell -File scripts/smoke-mcp-desktop.ps1 \
-  -Desktop dist\tengshou-windows-amd64.exe -Cli dist\tengshou-cli-windows-amd64.exe
+go run ./tools/tengshoubuild smoke-mcp dist/tengshou-windows-amd64.exe dist/tengshou-cli-windows-amd64.exe
 # macOS
-bash scripts/smoke-mcp-desktop.sh dist/tengshou-darwin-arm64 dist/tengshou-cli-darwin-arm64
+go run ./tools/tengshoubuild smoke-mcp dist/tengshou-darwin-arm64 dist/tengshou-cli-darwin-arm64
+# Linux（CLI 同时作为连接器与 serve 实例）
+go run ./tools/tengshoubuild smoke-mcp dist/tengshou-cli-linux-amd64 dist/tengshou-cli-linux-amd64
 ```
 
 两步都用桌面二进制：先在本地服务未启动时断言 `initialize` / `tools/list`，
 再启动同版 `tengshou-cli serve` 后调用一次写工具成功。
 
 手工冒烟（桌面二进制；发布资产名为 `dist/tengshou-darwin-arm64`，
-本地默认 `./scripts/build.sh` 的产物为 `dist/tengshou`）：
+本地默认 `go run ./tools/tengshoubuild build` 的产物为 `dist/tengshou`）：
 
 ```bash
 tengshou-cli demo --data-dir /tmp/ts-mcp

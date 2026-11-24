@@ -7,7 +7,7 @@ B1（te-h7l.11）范围：Wails v3 桌面壳 + 本地服务 + SQLite + HTML→PD
 | --- | --- | --- |
 | 开发机可启动桌面应用 | `cmd/tengshou`（Wails v3），窗口加载本地 UI | 本机启动 `dist/tengshou`，窗口创建，`/api/v1/health` 与 `/` 均 200，SIGTERM 干净退出 |
 | 本地服务可被同局域网手机访问测试页 | `httpapi` 默认绑定 `0.0.0.0`，`/` 公开测试页 | 启动后列出局域网地址（如 `http://192.168.x.x:8765/`）；`GET /` 返回 200；手机访问受网络环境限制，未在真机复测 |
-| Windows 构建脚本可用 | `scripts/build-windows.ps1`；CI `desktop` job（windows-latest） | 本机 `GOOS=windows CGO_ENABLED=0 go build` 通过；CI 产出 `tengshou-windows-amd64.zip` |
+| Windows 构建可用 | `tools/tengshoubuild` 的 Windows 目标；CI `desktop` job（windows-latest） | 本机 `GOOS=windows CGO_ENABLED=0 go build` 通过；CI 产出 `tengshou-windows-amd64.zip` |
 | 干净 Windows 环境验证 | 后置到 B10 前（B1 描述允许） | 待 B10 |
 | SQLite 持久化，重启不丢数据 | `internal/store`，WAL，写入路径与只读连接分离 | `TestPartyContractRoundTripAndPersistence`（关闭重开校验） |
 | 迁移可在空库 / 旧库执行 | `0001_init.sql` + `0002_api_indexes.sql`，事务内迁移 | `TestMigrationsOnEmptyDatabase`、`TestMigrationFromOldDatabase` |
@@ -15,7 +15,7 @@ B1（te-h7l.11）范围：Wails v3 桌面壳 + 本地服务 + SQLite + HTML→PD
 | 中文字体 | 系统 / 用户字体自动解析，强制关闭导致 ToUnicode 缺字的 GSUB 替换 | 同上；`Missing` 为空；PDF 文本提取包含「甲方 / 房屋租赁合同」 |
 | 分页 | 段落 / 表格 / 图片自动换页，重复表头，页脚页码 | `TestRenderHardPageBreak`、`TestRenderTableAcrossPages`、demo PDF（第 1 页 / 共 2 页） |
 | 签名图片落位 | `assets/signatures/*.png` 安全解析与嵌入 | demo + PDF 内嵌图片断言 |
-| 一键构建脚本 | `scripts/build.sh`、`scripts/build-windows.ps1` | 本机执行 `./scripts/build.sh` 产出桌面壳与 CLI |
+| 一键构建工具 | `tools/tengshoubuild`（三端同一 Go 命令） | 本机执行 `go run ./tools/tengshoubuild build` 产出桌面壳与 CLI |
 | 基础测试通过 | `go test ./internal/... ./cmd/tengshou-cli` | 见下方最终验证 |
 | 不依赖外部服务器 | 全部本地；SQLite 纯 Go；PDF 纯 Go；无运行时网络调用 | 代码审查 + 测试（无网络依赖） |
 | 稳定只读数据 API（B6 前置） | `/api/v1/*`，`tengshou.data.v1` 契约，Bearer 令牌，双重只读 | `internal/httpapi` 测试；`docs/api.md`；`/api/v1/schema` |
@@ -26,7 +26,7 @@ B1（te-h7l.11）范围：Wails v3 桌面壳 + 本地服务 + SQLite + HTML→PD
 ```bash
 go vet ./internal/... ./cmd/tengshou-cli
 go test -count=1 ./internal/... ./cmd/tengshou-cli
-./scripts/build.sh
+go run ./tools/tengshoubuild build
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
   -trimpath -ldflags "-s -w -H windowsgui" -o dist/tengshou-windows-amd64.exe ./cmd/tengshou
 ```

@@ -29,52 +29,35 @@ jobs:
           echo "TENGHSHOU_FONT=/usr/share/fonts/truetype/arphic/uming.ttc" >> "$GITHUB_ENV"
       - name: 静态检查
         run: |
-          test -z "$(gofmt -l ./cmd ./internal)"
-          go vet ./internal/... ./cmd/tengshou-cli
-      - name: 构建/冒烟脚本静态检查（三端共用）
+          test -z "$(gofmt -l ./cmd ./internal ./tools)"
+          go vet ./internal/... ./cmd/tengshou-cli ./tools/...
+      - name: 剩余 shell 脚本静态检查
         run: |
           set -euo pipefail
+          # 构建/冒烟/打包已收口到 tools/tengshoubuild，仓库不再保留 .ps1。
+          test -z "$(git ls-files '*.ps1')"
           # 1) 所有 shell 脚本必须能通过 bash 语法解析。
           for f in scripts/*.sh; do
             bash -n "$f"
           done
           # 2) 脚本必须是 LF；CRLF 在 Linux/macOS 上会让 shebang 解析失败。
           bad=0
-          for f in scripts/*.sh scripts/*.ps1; do
+          for f in scripts/*.sh; do
             if grep -q $'\r' "$f"; then
               echo "错误：$f 含 CR（请保持 LF 换行）"
               bad=1
             fi
           done
-          # 3) .ps1 含非 ASCII 时必须带 UTF-8 BOM：Windows PowerShell 5.1
-          #    会把无 BOM 文件按系统 ANSI 解码，中文注释会破坏脚本解析。
-          python3 -I - <<'PY'
-          import pathlib
-          import sys
-
-          problems = []
-          for path in sorted(pathlib.Path("scripts").glob("*.ps1")):
-              data = path.read_bytes()
-              non_ascii = any(byte > 0x7F for byte in data)
-              has_bom = data.startswith(b"\xef\xbb\xbf")
-              if non_ascii and not has_bom:
-                  problems.append(
-                      f"{path}：含非 ASCII 字符但没有 UTF-8 BOM"
-                      "（Windows PowerShell 5.1 会按 ANSI 解码）"
-                  )
-          if problems:
-              sys.exit("错误：\n" + "\n".join(problems))
-          print("PowerShell 脚本编码检查通过（非 ASCII 必须带 UTF-8 BOM）")
-          PY
           exit "$bad"
       - name: 单元与集成测试
-        run: go test -count=1 ./internal/... ./cmd/tengshou-cli
-      - name: Windows 分发包脚本冒烟测试
+        run: go test -count=1 ./internal/... ./cmd/tengshou-cli ./tools/...
+      - name: Windows 分发包工具冒烟测试
         run: |
           set -euo pipefail
           tmp="$(mktemp -d)"
           printf 'desktop' > "$tmp/tengshou-windows-amd64.exe"
-          bash scripts/package-windows-zip.sh "$tmp"
+          go run ./tools/tengshoubuild package-windows-zip "$tmp"
+          # 独立校验（不复用打包工具自身的断言）。
           python3 -I - "$tmp/tengshou-windows-amd64.zip" <<'PY'
           import sys
           import zipfile
@@ -147,18 +130,16 @@ jobs:
         with:
           name: frontend-dist
           path: internal/httpapi/web/app/dist
-      - name: 构建（scripts/build.sh，与本地同一脚本）
+      - name: 构建（Go 工具，与本地同一命令；跨架构用 -goos/-goarch）
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
           VERSION: ${{ github.ref_name }}
           NAME_SUFFIX: -${{ matrix.goos }}-${{ matrix.goarch }}
-        run: scripts/build.sh cli
+        run: go run ./tools/tengshoubuild build -goos ${{ matrix.goos }} -goarch ${{ matrix.goarch }} cli
       - name: 发布形态 MCP stdio 冒烟（Linux CLI：connector 与 serve 同一二进制）
         if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
         run: |
-          bash scripts/smoke-mcp-desktop.sh \
+          go run ./tools/tengshoubuild smoke-mcp \
             dist/tengshou-cli-linux-amd64 \
             dist/tengshou-cli-linux-amd64
       - uses: actions/upload-artifact@v4
@@ -195,22 +176,20 @@ jobs:
       - name: vet 桌面壳（cgo）
         if: matrix.goos == 'darwin'
         run: go vet ./cmd/tengshou
-      - name: 构建（macOS · scripts/build.sh，与本地同一脚本）
+      - name: 构建（macOS · Go 工具，与本地同一命令）
         if: matrix.goos == 'darwin'
         env:
-          GOOS: darwin
-          GOARCH: arm64
           CGO_ENABLED: "1"
           VERSION: ${{ github.ref_name }}
           NAME_SUFFIX: -darwin-arm64
         run: |
-          scripts/build.sh desktop
+          go run ./tools/tengshoubuild build -goos darwin -goarch arm64 desktop
           # 冒烟用的同版 CLI 单独放临时目录，避免混入发布资产。
-          OUT="$RUNNER_TEMP/smoke-cli" scripts/build.sh cli
+          OUT="$RUNNER_TEMP/smoke-cli" go run ./tools/tengshoubuild build -goos darwin -goarch arm64 cli
       - name: MCP stdio 冒烟（macOS 桌面二进制 + 管道）
         if: matrix.goos == 'darwin'
         run: |
-          bash scripts/smoke-mcp-desktop.sh \
+          go run ./tools/tengshoubuild smoke-mcp \
             dist/tengshou-darwin-arm64 \
             "$RUNNER_TEMP/smoke-cli/tengshou-cli-darwin-arm64"
       - name: 打包（macOS）
@@ -218,44 +197,14 @@ jobs:
         run: |
           cd dist
           tar -czf tengshou-darwin-arm64.tar.gz tengshou-darwin-arm64
-      - name: 校验 PowerShell 脚本（Windows PowerShell 5.1 语法解析）
+      - name: 构建（Windows · Go 工具，与本地同一命令）
         if: matrix.goos == 'windows'
-        shell: powershell
-        run: |
-          # Keep this block ASCII-only: it is executed by Windows PowerShell 5.1
-          # itself, the same interpreter whose parsing we are guarding.
-          $ok = $true
-          Get-ChildItem -Path scripts -Filter *.ps1 | ForEach-Object {
-            $tokens = $null
-            $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile(
-              $_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
-            if ($errors.Count -gt 0) {
-              $errors | ForEach-Object {
-                Write-Host ("Parse error: {0}:{1} {2}" -f `
-                  $_.Extent.File, $_.Extent.StartLineNumber, $_.Message)
-              }
-              $ok = $false
-            } else {
-              Write-Host ("OK: {0}" -f $_.Name)
-            }
-          }
-          if (-not $ok) {
-            throw "PowerShell script syntax check failed (Windows PowerShell 5.1 parser)"
-          }
-      - name: 构建（Windows · scripts/build-windows.ps1，与本地同一脚本）
-        if: matrix.goos == 'windows'
-        shell: powershell
         env:
           VERSION: ${{ github.ref_name }}
-        run: .\scripts\build-windows.ps1
+        run: go run ./tools/tengshoubuild build -goos windows -goarch amd64
       - name: MCP stdio 冒烟（Windows GUI 子系统 · 管道）
         if: matrix.goos == 'windows'
-        shell: powershell
-        run: |
-          .\scripts\smoke-mcp-desktop.ps1 `
-            -Desktop "dist\tengshou-windows-amd64.exe" `
-            -Cli "dist\tengshou-cli-windows-amd64.exe"
+        run: go run ./tools/tengshoubuild smoke-mcp dist/tengshou-windows-amd64.exe dist/tengshou-cli-windows-amd64.exe
       - uses: actions/upload-artifact@v4
         if: matrix.goos == 'darwin'
         with:
@@ -280,6 +229,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       # 只取构建产物：frontend-dist 是 cli/desktop 的构建输入，不属于发布资产
       #（发布固定 8 个文件，与 alpha.6 及以前一致）。
       - uses: actions/download-artifact@v4
@@ -290,12 +243,13 @@ jobs:
       - name: 列出产物
         run: ls -lh dist
       - name: 打包 Windows 分发包（桌面应用 + 接入说明）
-        run: bash scripts/package-windows-zip.sh dist
+        run: go run ./tools/tengshoubuild package-windows-zip dist
       - name: 校验发布资产（8 个）与 Windows zip 内容（2 个文件）
         run: |
           set -euo pipefail
           test "$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 8
           unzip -l dist/tengshou-windows-amd64.zip
+          # 独立校验（不复用打包工具自身的断言）。
           python3 -I - <<'PY'
           import sys
           import zipfile

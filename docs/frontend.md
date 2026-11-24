@@ -46,11 +46,12 @@ CDN。`index.html` 只加载本地 pdf.js vendor 与 module 入口。
 一键构建（前端 + Go）：
 
 ```bash
-make build            # 先构建前端，再执行 scripts/build.sh
+make build            # 先构建前端，再执行 go run ./tools/tengshoubuild build
 make serve            # 先构建前端，再启动本地服务
 ```
 
-直接运行 `scripts/build.sh` 时请先执行 `make frontend`（或上面的 npm 命令）。
+直接运行 `go run ./tools/tengshoubuild build` 时请先执行 `make frontend`
+（或上面的 npm 命令）。
 
 ### 没有 node 时
 

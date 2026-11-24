@@ -1,0 +1,15 @@
+{
+  "name": "tengshou-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "腾手界面端到端测试：Playwright 驱动发布形态 tengshou-cli serve，三端同一套业务场景。",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}

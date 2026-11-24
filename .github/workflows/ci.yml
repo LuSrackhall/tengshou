@@ -104,6 +104,85 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+  e2e:
+    name: E2E 界面测试（${{ matrix.label }}）
+    needs: frontend
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: Linux · Chromium
+            artifact: linux-chromium
+            cli: dist/tengshou-cli
+          - os: windows-latest
+            label: Windows · Chromium
+            artifact: windows-chromium
+            cli: dist/tengshou-cli-windows-amd64.exe
+          - os: macos-15
+            label: macOS · WebKit
+            artifact: macos-webkit
+            cli: dist/tengshou-cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: 取回前端构建产物（go:embed 需要）
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: internal/httpapi/web/app/dist
+      - name: 安装中文字体（Linux）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-arphic-uming
+          echo "TENGHSHOU_FONT=/usr/share/fonts/truetype/arphic/uming.ttc" >> "$GITHUB_ENV"
+      - name: 构建本端 tengshou-cli（与发布同一命令）
+        env:
+          CGO_ENABLED: "0"
+        run: go run ./tools/tengshoubuild build cli
+      - name: 安装 E2E 依赖
+        working-directory: e2e
+        run: npm ci
+      - name: 安装 Playwright 浏览器（Linux · Chromium）
+        if: runner.os == 'Linux'
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: 安装 Playwright 浏览器（Windows · Chromium）
+        if: runner.os == 'Windows'
+        working-directory: e2e
+        run: npx playwright install chromium
+      - name: 安装 Playwright 浏览器（macOS · WebKit）
+        if: runner.os == 'macOS'
+        working-directory: e2e
+        run: npx playwright install webkit
+      - name: 运行 E2E 套件
+        working-directory: e2e
+        env:
+          TENGHSHOU_CLI: ${{ github.workspace }}/${{ matrix.cli }}
+        run: npx playwright test
+      - name: 上传可视报告与工件（每 OS 一份，保留 90 天）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report-${{ matrix.artifact }}
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          retention-days: 90
+          include-hidden-files: true
+          if-no-files-found: warn
+
   cli:
     name: 构建 CLI（${{ matrix.goos }}/${{ matrix.goarch }}）
     needs: frontend

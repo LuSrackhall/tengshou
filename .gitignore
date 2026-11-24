@@ -19,6 +19,11 @@
 /plans/
 .playwright-cli/
 
+# Playwright E2E 本地运行工件（HTML 报告、视频、trace、截图）
+playwright-report/
+test-results/
+blob-report/
+
 # OS
 .DS_Store
 

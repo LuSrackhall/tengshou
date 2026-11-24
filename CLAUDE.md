@@ -21,14 +21,14 @@ CodeGraph 是可选的本地开发工具，未安装不影响构建、测试与�
 
 ## Go 工程约定
 
-- **格式**：`gofmt -l ./cmd ./internal` 必须为空，CI 强制检查。
+- **格式**：`gofmt -l ./cmd ./internal ./tools` 必须为空，CI 强制检查。
 - **文件组织**：Go 文件按职责组织（如 `internal/store/reader_contracts.go` / `reader_fields.go`），
   不按类型堆砌。Go 没有官方行数上限，本仓库也不设硬门禁；单文件接近
   1000 行时，新增逻辑优先落到新文件，单函数超过约 80 行时考虑拆分，
   不为凑行数而拆。
 - **静态检查**：`go vet ./...` 无输出。桌面壳 `./cmd/tengshou` 依赖 cgo，
   在 macOS 桌面构建 job 内 vet；Linux 测试 job 覆盖
-  `./internal/... ./cmd/tengshou-cli`。
+  `./internal/... ./cmd/tengshou-cli ./tools/...`。
 - **测试**：`go test -count=1 ./...` 全绿；新增逻辑必须有测试，测试不依赖
   外网、不绑定固定端口。
 - **错误处理**：向上包装用 `fmt.Errorf("动作: %w", err)`；对用户可见的错误

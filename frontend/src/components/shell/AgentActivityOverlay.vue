@@ -144,7 +144,7 @@ async function play(item: AgentActivityItem): Promise<void> {
   }
   const tab = AGENT_ACTIVITY_TABS[item.entity];
   if (!tab) {
-    // 没有可定位的行（seal/template/...）：只更新徽标。
+    // 没有 tab 映射的实体：只更新徽标。
     return;
   }
   if (currentTab.value !== tab) {
@@ -177,7 +177,9 @@ function attributeValue(value: string): string {
 }
 
 async function waitForRow(entityId: string): Promise<HTMLElement | null> {
-  const selector = `[data-id="${attributeValue(entityId)}"]`;
+  // 限定在当前激活视图内：data-id 被多处复用（公章卡片、关联弹窗里的合同
+  // 复选框等），全局查询可能命中隐藏元素（尺寸全 0），导致光标跑到 (0,0)。
+  const selector = `.view.active [data-id="${attributeValue(entityId)}"]`;
   const deadline = Date.now() + ROW_WAIT_MS;
   for (;;) {
     const row = document.querySelector<HTMLElement>(selector);

@@ -39,11 +39,11 @@ export function setAgentActivityAnimationsEnabled(enabled: boolean): void {
 
 /**
  * 变更实体 → 主 tab。未列出的实体（seal/template/signature/backup/import）
- * 没有稳定可定位的行，只更新徽标、不做切页与光标回放。
+ * 按需求不在回放范围，只更新徽标、不做切页与光标回放。
  */
 export const AGENT_ACTIVITY_TABS: Readonly<Record<string, string>> = {
   contract: "contracts",
-  // 文档生成类变更没有独立 tab，按产物归属落到合同台账。
+  // 预留映射：当前变更词表不会产生 document 实体，本分支暂不会命中。
   document: "contracts",
   party: "parties",
   field: "fields",

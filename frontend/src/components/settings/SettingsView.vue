@@ -162,6 +162,16 @@ onBeforeUnmount(() => {
         <p class="hint">关闭后：agent 仍可读取；写工具返回 <code>mcp_write_disabled</code>，桌面界面的写入不受影响。改动即时生效，并写入变更记录。</p>
         <p class="hint">配置文件：<code>{{ status.config_file || "config.json" }}</code>（键 <code>{{ status.settings_key || "mcp.write_enabled" }}</code>）。</p>
       </div>
+      <div class="mcp-card full">
+        <h3>连接说明</h3>
+        <p>{{ status.connection_help || "" }}</p>
+        <p class="hint">注册命令（填到 Claude Code / Claude Desktop 的 MCP 配置中）：</p>
+        <pre class="mono mcp-command">{{ status.command || "tengshou-cli mcp" }}</pre>
+        <p class="hint">本面板只展示状态与开关，不启动或停止 MCP 进程。</p>
+      </div>
+    </div>
+    <p v-else class="hint">正在读取 MCP 状态…</p>
+    <div class="mcp-grid agent-activity-grid">
       <div class="mcp-card">
         <h3>界面提示</h3>
         <div class="switch-row">
@@ -177,14 +187,6 @@ onBeforeUnmount(() => {
         </div>
         <p class="hint">开启后，MCP agent 写入时界面会切到对应页面，并用模拟光标、点击波纹与目标行高亮回放这次操作；关闭后只保留顶部「agent 操作」徽标。本开关只影响本机界面的展示，不改变 agent 的读写权限。</p>
       </div>
-      <div class="mcp-card full">
-        <h3>连接说明</h3>
-        <p>{{ status.connection_help || "" }}</p>
-        <p class="hint">注册命令（填到 Claude Code / Claude Desktop 的 MCP 配置中）：</p>
-        <pre class="mono mcp-command">{{ status.command || "tengshou-cli mcp" }}</pre>
-        <p class="hint">本面板只展示状态与开关，不启动或停止 MCP 进程。</p>
-      </div>
     </div>
-    <p v-else class="hint">正在读取 MCP 状态…</p>
   </div>
 </template>

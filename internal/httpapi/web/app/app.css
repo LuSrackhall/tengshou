@@ -537,6 +537,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .mcp-card dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13.5px; }
 .mcp-card dt { color: var(--muted); }
 .mcp-card dd { margin: 0; }
+.agent-activity-grid { margin-top: 14px; }
 .switch-row { margin-bottom: 8px; }
 .switch { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .switch input { width: 16px; height: 16px; }

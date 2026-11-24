@@ -7,11 +7,13 @@
 // counts, so the two stay in sync.
 package mcpspec
 
-// Tool counts exposed by the B6 connector.
+// Tool counts exposed by the B6/B4 connector.
 const (
-	// ReadToolCount is the number of read-only tools.
-	ReadToolCount = 10
+	// ReadToolCount is the number of read-only tools (including generation
+	// preflight and generated-document queries).
+	ReadToolCount = 12
 	// WriteToolCount is the number of write tools (create field, party and
-	// contract draft). Deletion and bulk mutation are intentionally absent.
-	WriteToolCount = 3
+	// contract draft, plus generating a contract PDF). Deletion, signature,
+	// activation and bulk mutation are intentionally absent.
+	WriteToolCount = 4
 )

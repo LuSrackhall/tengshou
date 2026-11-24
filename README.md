@@ -58,10 +58,11 @@
 - **只读数据接口**：`/api/v1/*`，供 B6 MCP 连接器与用户侧 agent 取数；
   新增 `/api/v1/fields` 暴露字段定义，签名资产可按合同查询。
 - **MCP 数据连接器（B6）**：`tengshou-cli mcp` 以 stdio 启动，经本机回环
-  HTTP 读取合同 / 相对方 / 动态字段 / 签名状态 / 模板版本；写工具仅限新建
-  字段、相对方档案与合同草稿，复用同一 `internal/service` 校验，并以
-  `tengshou-mcp` 记入变更记录；`config.json` 的 `mcp.write_enabled` 可关闭
-  写入。注册方式、工具 schema 与安全边界见 [docs/mcp.md](docs/mcp.md)。
+  HTTP 读取合同 / 相对方 / 动态字段 / 签名状态 / 模板版本 / 生成预检 /
+  已生成 PDF；写工具仅限新建字段、相对方档案、合同草稿与生成合同 PDF
+  （生成前自动预检，未通过不产文件），复用同一 `internal/service` 校验，
+  并以 `tengshou-mcp` 记入变更记录；`config.json` 的 `mcp.write_enabled`
+  可关闭写入。注册方式、工具 schema 与安全边界见 [docs/mcp.md](docs/mcp.md)。
 - **数据安全与备份（B9）**：一键导出完整备份包（一致性数据库快照 + 签名 /
   公章 / 模板 / PDF + 配置 + manifest 摘要），校验后恢复，换机可迁移；启动时
   数据库完整性检查与孤儿资产报告；签名导出二次确认并写审计。详见

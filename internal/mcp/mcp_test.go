@@ -30,6 +30,7 @@ type testEnv struct {
 	server     *httptest.Server
 	store      *store.Store
 	reader     *store.Reader
+	svc        *service.Service
 	partyAID   string
 	partyBID   string
 	contractID string
@@ -66,7 +67,7 @@ func newTestEnv(t *testing.T, writeEnabled bool) *testEnv {
 		t.Fatal(err)
 	}
 	contract := &model.Contract{
-		Year: 2026, Title: "幸福村房屋租赁合同",
+		Year: 2026, Title: "幸福村房屋租赁合同", ContractNo: "HT-2026-0001",
 		PartyAID: partyA.ID, PartyBID: partyB.ID, TemplateID: tpl.ID,
 		Status: model.ContractActive, Data: map[string]any{"rent": 1200.0},
 	}
@@ -113,6 +114,7 @@ func newTestEnv(t *testing.T, writeEnabled bool) *testEnv {
 		server:     ts,
 		store:      st,
 		reader:     reader,
+		svc:        svc,
 		partyAID:   partyA.ID,
 		partyBID:   partyB.ID,
 		contractID: contract.ID,
@@ -250,7 +252,8 @@ func TestProtocolInitializeListAndPing(t *testing.T) {
 	expected := []string{
 		toolStatus, toolGetDataSchema, toolListFields, toolListParties, toolGetParty,
 		toolListContracts, toolGetContract, toolListSignatureAssets, toolListTemplates,
-		toolGetTemplate, toolCreateField, toolCreateParty, toolCreateContractDraft,
+		toolGetTemplate, toolListDocuments, toolPreflightGeneration,
+		toolCreateField, toolCreateParty, toolCreateContractDraft, toolGenerateContract,
 	}
 	if len(tools) != len(expected) {
 		t.Fatalf("tools = %d, want %d", len(tools), len(expected))
@@ -308,7 +311,7 @@ func TestToolCatalogHasNoDestructiveTools(t *testing.T) {
 			t.Fatalf("%s schema is not a closed object: %v", name, schema)
 		}
 		annotations, _ := tool["annotations"].(map[string]any)
-		if strings.HasPrefix(name, "tengshou_create_") {
+		if isWriteTool(name) {
 			if annotations["readOnlyHint"] != false || annotations["destructiveHint"] != false {
 				t.Fatalf("%s write annotations = %v", name, annotations)
 			}

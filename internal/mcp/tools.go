@@ -24,9 +24,12 @@ const (
 	toolListSignatureAssets = "tengshou_list_signature_assets"
 	toolListTemplates       = "tengshou_list_templates"
 	toolGetTemplate         = "tengshou_get_template"
+	toolListDocuments       = "tengshou_list_documents"
+	toolPreflightGeneration = "tengshou_preflight_generation"
 	toolCreateField         = "tengshou_create_field"
 	toolCreateParty         = "tengshou_create_party"
 	toolCreateContractDraft = "tengshou_create_contract_draft"
+	toolGenerateContract    = "tengshou_generate_contract"
 )
 
 type toolDefinition struct {
@@ -106,6 +109,20 @@ func toolDefinitions() []toolDefinition {
 			objectSchema(map[string]any{
 				"id": stringProp("模板 id"),
 			}, []string{"id"})),
+		readTool(toolListDocuments, "查询已生成 PDF 文档",
+			"查询 PDF 生成记录（成功与失败），可按合同与状态筛选并分页。每条记录含合同编号、模板名称与版本、生成类型、状态、时间与下载路径 /app/api/v1/documents/{id}/file；失败记录没有可下载文件。",
+			objectSchema(map[string]any{
+				"contract_id": stringProp("合同 id；省略返回全部合同的文档"),
+				"status":      enumProp("success", "failed", "生成状态；省略为全部"),
+				"limit":       intProp("每页条数，1～500，默认 50"),
+				"offset":      intProp("偏移量，默认 0"),
+			}, nil)),
+		readTool(toolPreflightGeneration, "预检合同生成",
+			"生成 PDF 前的只读检查：返回是否可生成（ready）、阻断项 issues、警告 warnings、预览摘要 preview_sha256、将使用的签名与已生成数量。阻断项需要用户在桌面应用内处理，本工具不会产生文件或记录。",
+			objectSchema(map[string]any{
+				"template_id": stringProp("PDF 模板 id"),
+				"contract_id": stringProp("合同 id"),
+			}, []string{"template_id", "contract_id"})),
 		writeTool(toolCreateField, "新建动态字段",
 			"新建合同 / 档案的动态字段（无需重启）。字段键创建后不可修改；新字段立即用于表单、Excel 与模板占位符。写操作以 actor=tengshou-mcp 记入变更记录。",
 			objectSchema(map[string]any{
@@ -151,6 +168,14 @@ func toolDefinitions() []toolDefinition {
 				"contract_no": stringProp("自定义合同编号；省略时自动分配"),
 				"data":        map[string]any{"type": "object", "additionalProperties": true, "description": "动态字段值，键必须已在字段定义中"},
 			}, []string{"title"})),
+		writeTool(toolGenerateContract, "生成合同 PDF",
+			"为合同套用 PDF 模板生成合同文件。内部先执行预检：未通过时返回 isError 并逐条列出阻断项，不写记录、不产生文件；通过后用预检的预览摘要生成，返回 {item, warnings}。生成后合同模板版本可能更新为所选版本。不提供签名、激活、删除或修改工具；写开关关闭时返回 403 mcp_write_disabled。",
+			objectSchema(map[string]any{
+				"template_id":           stringProp("PDF 模板 id"),
+				"contract_id":           stringProp("合同 id"),
+				"allow_stale_signature": boolProp("确认复用合同内容修改前采集的旧签名（默认 false；仅在某份内容未实质变化、用户明确知情时使用）"),
+				"kind":                  enumProp("initial", "regenerate", "生成类型；省略时按合同是否已有成功 PDF 自动判断"),
+			}, []string{"template_id", "contract_id"})),
 	}
 }
 
@@ -232,8 +257,8 @@ func knownTool(name string) bool {
 	return false
 }
 
-// isWriteTool reports whether name is one of the create tools. Write tools are
-// exactly the definitions annotated readOnlyHint=false.
+// isWriteTool reports whether name is a write tool. Write tools are exactly the
+// definitions annotated readOnlyHint=false.
 func isWriteTool(name string) bool {
 	for _, tool := range toolDefinitions() {
 		if tool.Name != name {
@@ -278,12 +303,18 @@ func (s *Server) executeTool(ctx context.Context, name string, args json.RawMess
 		raw, err = s.toolListTemplates(ctx, args)
 	case toolGetTemplate:
 		raw, err = s.toolGetByID(ctx, args, "/api/v1/templates/")
+	case toolListDocuments:
+		raw, err = s.toolListDocuments(ctx, args)
+	case toolPreflightGeneration:
+		raw, err = s.toolPreflightGeneration(ctx, args)
 	case toolCreateField:
 		raw, err = s.toolCreateField(ctx, args)
 	case toolCreateParty:
 		raw, err = s.toolCreateParty(ctx, args)
 	case toolCreateContractDraft:
 		raw, err = s.toolCreateContractDraft(ctx, args)
+	case toolGenerateContract:
+		raw, err = s.toolGenerateContract(ctx, args)
 	default:
 		err = fmt.Errorf("未知工具 %q", name)
 	}

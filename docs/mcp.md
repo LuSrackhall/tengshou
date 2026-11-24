@@ -1,7 +1,7 @@
-# B6 MCP 数据连接器（读 + 写）
+# B6 MCP 数据连接器（读 + 写 + 生成）
 
 本文说明腾手的 MCP 连接器：形态、工具、注册方式、安全边界与验收证据。
-对应 bead `te-h7l.16`。
+对应 bead `te-h7l.16`；合同 PDF 生成与文档查询工具对应 `te-h7l.49`。
 
 ## 定位
 
@@ -141,6 +141,8 @@ false`）。只读工具标注 `readOnlyHint=true`；写工具标注
 | `tengshou_list_signature_assets` | `contract_id`、`q`、`limit`、`offset` | 签名状态与 `content_sha256`（不含图片内容） |
 | `tengshou_list_templates` | `q`、`limit`、`offset` | 模板列表与版本号（HTML / PDF 两类；不含正文） |
 | `tengshou_get_template` | `id` | 模板详情（含 kind、变量；HTML 模板含正文，PDF 模板含 pdf_path / page_count / placements） |
+| `tengshou_list_documents` | `contract_id`、`status`、`limit`、`offset` | 已生成 PDF 记录：合同编号、模板名称与版本、生成类型（initial / regenerate）、状态、时间与下载路径 |
+| `tengshou_preflight_generation` | `template_id`、`contract_id` | 生成前只读预检：`ready`、`issues`、`warnings`、`preview_sha256`、`signatures`、`previous_documents` |
 
 ### 写工具
 
@@ -149,6 +151,7 @@ false`）。只读工具标注 `readOnlyHint=true`；写工具标注
 | `tengshou_create_field` | `entity`、`key`、`label`、`type`、`required`、`default_value`、`options`、`in_ledger`、`in_template`、`note` | 新建动态字段，立即用于表单 / Excel / 模板 |
 | `tengshou_create_party` | `name`、`kind`、`id_number`、`phone`、`address`、`note`、`data` | 新建相对方档案 |
 | `tengshou_create_contract_draft` | `title`、`year`、`type`、`party_b_id` / `party_b`、`amount`、`template_id`、日期、`contract_no`、`data` | 新建合同草稿（状态固定 `draft`） |
+| `tengshou_generate_contract` | `template_id`、`contract_id`、`allow_stale_signature`、`kind` | 套用 PDF 模板生成合同文件；内部先预检，未通过不写记录、不产文件 |
 
 写工具的共同约束：
 
@@ -159,12 +162,56 @@ false`）。只读工具标注 `readOnlyHint=true`；写工具标注
 - **不提供**删除、修改既有记录、替换公章、归档字段、批量导入等破坏性工具。
 - 合同草稿只能以 `draft` 新建；生效 / 归档仍由用户在桌面应用内完成。
 
+### 生成工具的共同约束
+
+- `tengshou_generate_contract` 内部先执行与服务端一致的预检：未通过时返回
+  `isError=true` 并逐条列出阻断项，**不写 `output_documents` 记录、不产生
+  文件**；通过后才用预检返回的 `preview_sha256` 调用生成接口（服务端要求
+  回传该摘要，防止预览后数据被改动）。
+- `allow_stale_signature` 默认 `false`。只有用户明确确认「合同内容未实质
+  变化、可复用旧签名」时才可置 `true`；它只放行 `content_changed`，其余
+  阻断项仍然生效，确认行为会写入变更记录。
+- 生成成功后合同可能被固定为所选模板版本；不提供签名采集、合同激活、
+  删除或修改既有记录的工具。
+
+## 典型 agent 流程
+
+1. `tengshou_list_templates` / `tengshou_get_template`：确认 PDF 模板与版本。
+2. `tengshou_get_contract`：确认合同字段、相对方、签名状态与已生成记录。
+3. `tengshou_create_contract_draft`（如尚无草稿）：录入合同数据。
+4. `tengshou_preflight_generation`：确认 `ready=true`；否则把 `issues`
+   转告用户先行处理。
+5. `tengshou_generate_contract`：生成并返回 `{item, warnings}`。
+6. `tengshou_list_documents`：核对记录；成功记录的 `download_path`
+   （`/app/api/v1/documents/{id}/file`）可交给用户下载 / 打印。
+
+签名采集、合同激活、删除或修改既有记录不在 MCP 范围内；遇到时提示用户
+在桌面应用内完成。
+
+## 生成被阻断：排查表
+
+`tengshou_preflight_generation` 与 `tengshou_generate_contract` 的
+`issues[].code` 对应下列阻断项。所有处理都在桌面应用内由用户完成，
+agent 不代为签名或激活。
+
+| 阻断项 code | 含义 | 人工处理方式 |
+| --- | --- | --- |
+| `missing_signature` | 模板有签名位，但合同没有对应签名，或签名图片文件缺失 | 打开该合同，用手机扫码重新采集签名后再试 |
+| `missing_seal` | 模板有公章位，但没有可用公章，或公章图片文件缺失 | 在「公章」页导入 / 重新导入公章，并在模板标定中指定 |
+| `content_changed` | 签名采集后合同内容被修改，旧签名不能自动复用 | 重新采集签名；若确认内容未实质变化且用户明确同意，可用 `allow_stale_signature=true` |
+| `missing_field` | 合同或相对方的必填字段为空 | 补齐字段后重新预检 |
+| `missing_party` | 合同缺少相对方（乙方）档案，或模板引用甲方但合同未关联甲方 | 关联或新建相对方档案，或补齐甲方信息 |
+| 其它 `code` | 服务端新增的阻断项 | 按 `message` 提示处理，不要绕过预检直接生成 |
+
 ## 返回结构
 
 `tools/call` 的 `result.content[0].text` 是 UTF-8 JSON（已缩进）：
 
 - 列表：`{"items":[...],"total":n,"limit":50,"offset":0}`；
-- 写操作：`{"item":{...},"warnings":["..."]}`；
+- 预检：直接返回服务端预检报告（`ready`、`issues`、`warnings`、
+  `preview_sha256`、`signatures`、`previous_documents` 等）；
+- 写操作：`{"item":{...},"warnings":[...]}`；生成 PDF 时 `item` 为新增的
+  `output_documents` 记录，`warnings` 为版式提示对象数组；
 - 工具执行错误：`result.isError=true`，文本为中文说明 + 本地接口原始错误
   JSON，例如：
 
@@ -194,8 +241,9 @@ false`）。只读工具标注 `readOnlyHint=true`；写工具标注
 ```
 
 - 默认 `true`；旧配置没有 `mcp` 段时按开启处理。
-- 关闭后：只读工具正常；写工具返回 HTTP 403 `mcp_write_disabled`，桌面 UI
-  的写入不受影响。
+- 关闭后：只读工具（含生成预检与文档查询）正常；写工具（含生成合同 PDF）
+  返回 HTTP 403 `mcp_write_disabled`，桌面 UI 的写入不受影响。预检虽然走
+  POST，但属于只读动作，不带 `X-Tengshou-MCP` 标记，因此不受写开关影响。
 - **即时生效（B18）**：桌面应用「设置」页提供读写开关。写开关由 HTTP 服务的
   运行时设置持有，切换后下一次请求立即按新值判定；连接器在每次写工具调用前
   也会重新读取 `config.json`，因此无需重启 MCP 进程或桌面应用。
@@ -265,6 +313,59 @@ false`）。只读工具标注 `readOnlyHint=true`；写工具标注
 }
 ```
 
+预检通过后生成合同 PDF（节选）：
+
+```json
+{
+  "item": {
+    "id": "doc_...",
+    "contract_id": "ctr_...",
+    "template_id": "tpl_...",
+    "template_version": 2,
+    "file_path": "outputs/ctr_...-v2-20261124-080000-123456.pdf",
+    "sha256": "…",
+    "page_count": 1,
+    "operator": "tengshou-mcp",
+    "kind": "initial",
+    "status": "success",
+    "created_at": "2026-11-24T08:00:00Z"
+  },
+  "warnings": []
+}
+```
+
+查询已生成文档：
+
+```json
+{
+  "items": [
+    {
+      "id": "doc_...",
+      "contract_id": "ctr_...",
+      "contract_no": "HT-2026-0001",
+      "template_id": "tpl_...",
+      "template_name": "租赁模板",
+      "template_version": 2,
+      "kind": "initial",
+      "status": "success",
+      "created_at": "2026-11-24T08:00:00Z",
+      "download_path": "/app/api/v1/documents/doc_.../file"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+预检阻断时 `tengshou_generate_contract` 返回 `isError=true`，文本示例：
+
+```
+生成前置检查未通过（1 项），未生成文件、未写入 PDF 记录：
+- [missing_signature] 签名位置「sig」没有乙方签名，请先扫码采集
+请转告用户先在腾手桌面应用内处理这些问题，然后重试。
+```
+
 ## 验收与排查
 
 自动化测试：
@@ -281,6 +382,12 @@ go test -count=1 ./internal/mcp/ -v
 - 初始化、`tools/list`、`ping`、未知方法；
 - 全部只读工具（合同 / 相对方 / 动态字段 / 签名状态 / 模板版本 / schema）；
 - 建字段、建档案、建合同草稿；变更记录 actor = `tengshou-mcp`；
+- 预检通过 → 生成 PDF → 文档可查询、可经 `download_path` 下载；变更记录
+  actor = `tengshou-mcp`；
+- 预检阻断（模板含签名位但合同未签名）→ 生成返回 `isError`，且不产生
+  `output_documents` 记录；
+- `tengshou_list_documents` 的合同 / 状态过滤与分页；
+- 写开关关闭时预检与文档查询仍可用、生成返回 403 `mcp_write_disabled`；
 - 校验错误、重复键、未知参数、只读模式下写工具被拒绝；
 - 写开关关闭时只读仍可用、桌面 UI 写入不受影响；
 - 服务未启动时的清晰错误、端口回退探测、非回环地址拒绝。
@@ -313,5 +420,7 @@ printf '%s\n' \
 
 - 不解析 / 生成 / 代填外部部门表格；不内置外部表模板引擎。
 - 不做平台登录、自动填报、爬取或对外提交。自动填报是未来付费插件。
-- 不暴露删除 / 修改 / 批量破坏性写接口；写接口默认只到「新建草稿」。
+- 不暴露删除 / 修改 / 批量破坏性写接口；写接口只到「新建草稿」与
+  「生成合同 PDF」，不提供签名采集、合同激活或替换公章。
+- 不代填外部部门表格；不承诺自动填报。
 - 不通过局域网或公网提供 MCP 服务；只有本机 stdio 客户端可用。

@@ -31,36 +31,28 @@ function Write-AsciiFile([string]$Path, [string]$Text) {
     [System.IO.File]::WriteAllText($Path, $Text, [System.Text.Encoding]::ASCII)
 }
 
-# Drives the GUI-subsystem exe through real OS stdin/stdout pipes (the same
-# shape an MCP agent uses); no console window and no cmd quoting involved.
+# Drives the GUI-subsystem exe through a real cmd.exe pipe (the same shape an
+# MCP agent uses). cmd.exe, not a PowerShell text writer, wires stdin: the
+# managed writer can prepend a UTF-8 BOM that the connector's JSON reader
+# rejects before the first value.
 function Invoke-McpPipe([string]$RequestsPath, [string]$OutputPath, [string]$ErrorPath, [string[]]$ExtraArgs) {
+    $exeArgs = @("mcp", "--data-dir", "`"$Data`"") + $ExtraArgs
+    $cmdLine = 'type "' + $RequestsPath + '" | "' + $Desktop + '" ' +
+        ($exeArgs -join " ") + ' > "' + $OutputPath + '" 2> "' + $ErrorPath + '"'
+    $ComSpec = if ($env:ComSpec) { $env:ComSpec } else { "$env:SystemRoot\System32\cmd.exe" }
+
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $Desktop
-    $psi.Arguments = (@("mcp", "--data-dir", "`"$Data`"") + $ExtraArgs) -join " "
-    $psi.RedirectStandardInput = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
+    $psi.FileName = $ComSpec
+    $psi.Arguments = '/d /s /c "' + $cmdLine + '"'
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
 
     $proc = [System.Diagnostics.Process]::Start($psi)
-    # Write the request bytes straight to the pipe: PowerShell 5.1's text
-    # writer for redirected stdin can prepend a UTF-8 BOM, which the
-    # connector's JSON reader rejects before the first JSON value. (The
-    # request file is written with ASCII above, so it carries no BOM. The
-    # ProcessStartInfo.*Encoding properties are not available here.)
-    $requestBytes = [System.IO.File]::ReadAllBytes($RequestsPath)
-    $stdin = $proc.StandardInput.BaseStream
-    $stdin.Write($requestBytes, 0, $requestBytes.Length)
-    $stdin.Flush()
-    $proc.StandardInput.Close()
-    $stdout = $proc.StandardOutput.ReadToEnd()
-    $stderr = $proc.StandardError.ReadToEnd()
     $proc.WaitForExit()
-    [System.IO.File]::WriteAllText($OutputPath, $stdout, (New-Object System.Text.UTF8Encoding($false)))
-    [System.IO.File]::WriteAllText($ErrorPath, $stderr, (New-Object System.Text.UTF8Encoding($false)))
     if ($proc.ExitCode -ne 0) {
-        Write-Host $stderr
+        if (Test-Path -LiteralPath $ErrorPath) {
+            Get-Content -LiteralPath $ErrorPath -Encoding UTF8 | Write-Host
+        }
         throw "mcp exited with code $($proc.ExitCode)"
     }
 }

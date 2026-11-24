@@ -190,8 +190,9 @@ Windows 桌面自动使用 GUI 子系统、CLI 保持控制台子系统，macOS 
 跨平台目标用 `-goos` / `-goarch` 参数而不是这两个环境变量。
 
 Windows 发布 zip 只含桌面客户端一个 exe（GUI + 内置 `mcp`），MCP 接入说明
-在应用「设置 → MCP 接入」页内，不再附带说明文件或单独 CLI；完整 CLI 仍是
-独立发布资产。说明见 [docs/mcp.md](docs/mcp.md#windows-分发包说明)。
+在应用「设置 → MCP 接入」页内，不再附带说明文件或单独 CLI；完整 CLI 不随
+发布页分发，需要时用 `go run ./tools/tengshoubuild build` 从源码构建（或取
+CI 构建产物）。说明见 [docs/mcp.md](docs/mcp.md#windows-分发包说明)。
 
 各平台 MCP 连接器形态：
 
@@ -207,7 +208,9 @@ GitHub Actions：
 - 构建 Linux / macOS CLI 与 macOS / Windows 桌面壳（统一调用
   `tools/tengshoubuild`），并在 linux（CLI 自连）、windows-latest（GUI
   子系统）、macos-15 三端用发布形态二进制做 MCP stdio 管道冒烟；
-- `v*` 标签：发布固定 8 个资产；Windows zip 由发布任务用同一工具组装。
+- `v*` 标签：发布固定 4 个客户端资产（Windows zip、Windows 桌面 exe、macOS
+  桌面二进制与 tar.gz）；完整 CLI 不进发布页，仅作为 CI 构建产物；Windows
+  zip 由发布任务用同一工具组装。
 
 ## 开发
 

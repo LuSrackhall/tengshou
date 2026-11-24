@@ -174,12 +174,16 @@ PDF 流水线需要一份覆盖中文的字体。解析顺序：
 ```bash
 ./scripts/build.sh                  # 当前平台：dist/tengshou + dist/tengshou-cli
 powershell -File scripts/build-windows.ps1   # Windows zip 产物
+bash scripts/package-windows-zip.sh dist     # 用已构建的 Windows 双 exe 打发布 zip
 ```
+
+Windows 发布 zip 内含桌面应用、MCP 连接器与 `MCP-接入.txt`，说明见
+[docs/mcp.md](docs/mcp.md#windows-分发包说明)。
 
 GitHub Actions：
 - push / PR：静态检查 + 单元与集成测试（含真实中文 PDF 生成）；
 - 构建 Linux / Windows / macOS CLI 与 macOS / Windows 桌面壳；
-- `v*` 标签：把产物发布为 GitHub pre-release。
+- `v*` 标签：发布固定 8 个资产；Windows zip 由发布任务用上述同一脚本组装。
 
 ## 开发
 

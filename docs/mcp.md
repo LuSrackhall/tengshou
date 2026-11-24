@@ -106,7 +106,7 @@ Windows 配置：`%APPDATA%\Claude\claude_desktop_config.json`
 {
   "mcpServers": {
     "tengshou": {
-      "command": "C:\\Users\\<用户名>\\AppData\\Local\\Tengshou\\tengshou-cli.exe",
+      "command": "C:\\Users\\<用户名>\\AppData\\Local\\Tengshou\\tengshou-cli-windows-amd64.exe",
       "args": ["mcp", "--data-dir", "C:\\Users\\<用户名>\\AppData\\Local\\Tengshou"]
     }
   }
@@ -117,9 +117,50 @@ Windows 注意：
 
 - JSON 中的反斜杠要写成 `\\`，且 **不会展开 `%LOCALAPPDATA%` 等环境变量**，
   请写完整路径；
-- `tengshou-cli.exe` 放在哪里，`command` 就填哪里；`--data-dir` 指向桌面
+- `tengshou-cli-windows-amd64.exe`（分发包内的 CLI）放在哪里，`command`
+  就填哪里；`--data-dir` 指向桌面
   应用实际使用的数据目录（默认即 `C:\Users\<用户名>\AppData\Local\Tengshou`）；
 - 连接只走本机回环，不触发 Windows 防火墙对外放行。
+
+## Windows 分发包说明
+
+Windows 预发布版提供一个分发包 `tengshou-windows-amd64.zip`，解压后含
+3 个文件：
+
+| 文件 | 用途 |
+| --- | --- |
+| `tengshou-windows-amd64.exe` | 腾手桌面应用（主程序，双击运行） |
+| `tengshou-cli-windows-amd64.exe` | MCP 连接器 / CLI（供 Claude Desktop 等 agent 调用） |
+| `MCP-接入.txt` | 客户向接入说明：启动顺序、Claude Desktop 配置示例、默认数据目录 |
+
+两条使用路径：
+
+- **只用桌面应用**：双击 `tengshou-windows-amd64.exe`。
+- **接入 MCP**：先启动桌面应用，再让 agent 启动
+  `tengshou-cli-windows-amd64.exe mcp --data-dir "<数据目录>"`。连接器不
+  打开数据库，只连本机正在运行的腾手服务；桌面应用未启动时工具返回明确的
+  连接错误。
+
+默认数据目录为 `C:\Users\<用户名>\AppData\Local\Tengshou`
+（即 `%LOCALAPPDATA%\Tengshou`）。Claude Desktop 配置见上一节的 Windows
+示例：`command` 填 CLI 的完整路径，反斜杠写成 `\\`。
+
+发布固定 8 个资产：除上述 zip 外，仍保留独立的 Windows 桌面 exe 与 CLI
+exe，以及 macOS / Linux 产物，不因 zip 内容调整而增减资产。
+
+本地复现同一个包（需先构建前端与两个 Windows exe）：
+
+```bash
+make frontend
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
+  -ldflags "-H windowsgui" -o dist/tengshou-windows-amd64.exe ./cmd/tengshou
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
+  -o dist/tengshou-cli-windows-amd64.exe ./cmd/tengshou-cli
+bash scripts/package-windows-zip.sh dist
+```
+
+`unzip -l dist/tengshou-windows-amd64.zip` 应只列出上表中的 3 个文件；
+CI 的 tag 发布任务用同一脚本打包，并在发布前断言 zip 内容与资产总数。
 
 ## 工具清单
 
@@ -413,7 +454,7 @@ printf '%s\n' \
 | `无法连接腾手本地服务` | 启动桌面应用；确认 `--data-dir` 与桌面端一致；未带 `--api-url` 时会自动探测端口回退 |
 | `401 unauthorized` | 令牌不匹配：使用同一数据目录，或显式传 `--token` |
 | `403 mcp_write_disabled` | `mcp.write_enabled=false`；在桌面应用「设置」页打开写开关即即时生效（也可修改 `config.json`） |
-| Windows 配置不生效 | 反斜杠写成 `\\`，使用完整路径，确认 `command` 指向 `tengshou-cli.exe` |
+| Windows 配置不生效 | 反斜杠写成 `\\`，使用完整路径，确认 `command` 指向 `tengshou-cli-windows-amd64.exe` |
 | 工具列表为空 | 客户端未完成 `initialize`，或连接的是其它 MCP 服务 |
 
 ## 明确不做

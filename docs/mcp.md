@@ -14,8 +14,9 @@
 
 MCP 连接器内置于桌面客户端：`tengshou-windows-amd64.exe mcp` 就是 stdio
 连接器，客户只需要这一个 exe。`tengshou-cli mcp` 调用**同一份实现**
-（`internal/mcpconn`），作为独立发布资产保留给高级用途——开发、测试与
-发布走同一条代码路径，不存在两份连接器。
+（`internal/mcpconn`），保留给高级用途——开发、测试与发布走同一条代码
+路径，不存在两份连接器。完整 CLI 不随发布页分发，需要时从源码构建或取
+CI 构建产物。
 
 ```
 Claude Code / Claude Desktop / WorkBuddy / 用户侧 agent
@@ -217,10 +218,11 @@ Windows 预发布版提供一个分发包 `tengshou-windows-amd64.zip`，解压�
 （即 `%LOCALAPPDATA%\Tengshou`）。Claude Desktop 配置见上一节的 Windows
 示例：`command` 填桌面 exe 的完整路径，反斜杠写成 `\\`。
 
-发布固定 8 个资产：除上述 zip 外，仍保留独立的 Windows 桌面 exe 与 CLI
-exe，以及 macOS / Linux 产物，不因 zip 内容调整而增减资产。独立 CLI
-（`serve` / `backup` / `restore` / `demo` 等高级用途）不在 zip 内，客户
-只需要桌面 exe。
+发布固定 4 个客户端资产：上述 zip、独立的 Windows 桌面 exe、macOS 桌面
+二进制与 tar.gz。完整 CLI（`serve` / `backup` / `restore` / `demo` 等运维
+用途）**不进发布页**，需要时用 `go run ./tools/tengshoubuild build` 从
+源码构建，或从 CI 构建产物获取；Linux 用户没有桌面壳，只能以这种方式
+获得 CLI。客户只需要桌面 exe。
 
 本地复现同一个包（Windows，dev 与 CI 调用同一 Go 工具）：
 

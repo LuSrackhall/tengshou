@@ -1,7 +1,9 @@
 package doctopdf
 
 import (
+	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"net/url"
 	"os"
@@ -122,6 +124,9 @@ func (l *LibreOffice) Convert(ctx context.Context, docxPath, pdfPath string) err
 		"--outdir", outDir,
 		input,
 	)
+	if extra := fontConfigEnv(temp); len(extra) > 0 {
+		cmd.Env = append(os.Environ(), extra...)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("LibreOffice 转换失败：%s",
@@ -149,6 +154,73 @@ func (l *LibreOffice) Convert(ctx context.Context, docxPath, pdfPath string) err
 		return errEmptyPDF
 	}
 	return writeFileAtomic(pdfPath, data)
+}
+
+// fontConfigEnv 为 LibreOffice 转换进程准备 fontconfig 环境。
+//
+// macOS 上 LibreOffice 自带的 fontconfig 默认配置不会扫描系统字体目录
+// （/System/Library/Fonts 等），headless 转换只剩随包附带的少量西文字体：
+// 中文整体丢失——PDF 显示为空白，文字层退化成同一个字符。三端业务验收
+// 在 macOS 上实测如此。这里显式提供一个包含 macOS 字体目录的配置；用户
+// 自己设置了 FONTCONFIG_FILE 时保持用户配置不变。
+func fontConfigEnv(tempDir string) []string {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	if strings.TrimSpace(os.Getenv("FONTCONFIG_FILE")) != "" {
+		return nil
+	}
+	cacheDir := filepath.Join(tempDir, "fontconfig-cache")
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		return nil
+	}
+	confPath := filepath.Join(tempDir, "fonts.conf")
+	if err := os.WriteFile(confPath, []byte(macOSFontsConf(cacheDir)), 0o600); err != nil {
+		return nil
+	}
+	return []string{"FONTCONFIG_FILE=" + confPath}
+}
+
+// macOSFontsConf 列出 macOS 上字体可能出现的目录（fontconfig 会忽略不存在
+// 的目录），缓存放进本次转换的临时目录，避免污染用户缓存。
+func macOSFontsConf(cacheDir string) string {
+	home := os.Getenv("HOME")
+	dirs := []string{
+		"/System/Library/Fonts",
+		"/System/Library/Fonts/Supplemental",
+		"/Library/Fonts",
+		"/System/Library/Assets",
+		"/System/Library/AssetsV2",
+		"/usr/local/share/fonts",
+		"/opt/homebrew/share/fonts",
+	}
+	if home != "" {
+		dirs = append(dirs, filepath.Join(home, "Library", "Fonts"))
+	}
+	if dataHome := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); dataHome != "" {
+		dirs = append(dirs, filepath.Join(dataHome, "fonts"))
+	} else if home != "" {
+		dirs = append(dirs, filepath.Join(home, ".local", "share", "fonts"))
+	}
+	var b strings.Builder
+	b.WriteString("<?xml version=\"1.0\"?>\n<fontconfig>\n")
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		b.WriteString("  <dir>" + xmlEscape(dir) + "</dir>\n")
+	}
+	b.WriteString("  <cachedir>" + xmlEscape(cacheDir) + "</cachedir>\n</fontconfig>\n")
+	return b.String()
+}
+
+// xmlEscape 转义 fontconfig 配置里的路径（HOME 可能含 & 等字符）。
+func xmlEscape(value string) string {
+	var buf bytes.Buffer
+	if err := xml.EscapeText(&buf, []byte(value)); err != nil {
+		return value
+	}
+	return buf.String()
 }
 
 func copyFile(src, dst string) error {

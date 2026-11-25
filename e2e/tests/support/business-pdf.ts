@@ -29,6 +29,72 @@ export interface PdfAnalysis {
   imageDraws: number;
 }
 
+/** 视觉行：同一 y（±3pt）的文本项按 x 排序，text 为去掉空白后的拼接。 */
+export interface PdfLine {
+  y: number;
+  items: Array<{ item: PdfTextItem; text: string }>;
+  text: string;
+}
+
+/**
+ * 把一页 PDF 的文本项重排成视觉行。LibreOffice 在不同平台导出 PDF 时会把
+ * 同一行的文字按字体/格式分块，内容流顺序与视觉顺序并不一致（Windows 实测
+ * 如此）；按 y 聚类、按 x 排序后拼接才能还原用户看到的阅读顺序。文本项
+ * 去掉空白，锚点匹配不受分块与空格影响。
+ */
+export function pdfLines(page: PdfPageLayout): PdfLine[] {
+  const entries = page.items
+    .map((item) => ({ item, text: item.str.replace(/\s+/g, "") }))
+    .filter((entry) => entry.text !== "");
+  const lines: PdfLine[] = [];
+  for (const entry of [...entries].sort(
+    (a, b) => a.item.y - b.item.y || a.item.x - b.item.x,
+  )) {
+    const line = lines.find(
+      (candidate) => Math.abs(candidate.y - entry.item.y) < 3,
+    );
+    if (line) {
+      line.items.push(entry);
+    } else {
+      lines.push({ y: entry.item.y, items: [entry], text: "" });
+    }
+  }
+  for (const line of lines) {
+    line.items.sort((a, b) => a.item.x - b.item.x);
+    line.text = line.items.map((entry) => entry.text).join("");
+  }
+  return lines.sort((a, b) => a.y - b.y);
+}
+
+/** 行内第 index 个字符的 x 坐标；跨文本项时按宽度比例插值。 */
+export function lineXAt(line: PdfLine, index: number): number {
+  let consumed = 0;
+  for (const entry of line.items) {
+    if (index <= consumed + entry.text.length) {
+      const ratio = (index - consumed) / entry.text.length;
+      return entry.item.x + entry.item.width * ratio;
+    }
+    consumed += entry.text.length;
+  }
+  const last = line.items[line.items.length - 1];
+  return last ? last.item.x + last.item.width : 0;
+}
+
+/** 行内第 index 个字符所在的文本项（用于基线 y 与字号）。 */
+export function lineEntryAt(
+  line: PdfLine,
+  index: number,
+): { item: PdfTextItem; text: string } | undefined {
+  let consumed = 0;
+  for (const entry of line.items) {
+    if (index < consumed + entry.text.length) {
+      return entry;
+    }
+    consumed += entry.text.length;
+  }
+  return line.items[line.items.length - 1];
+}
+
 export interface LabelAnchor {
   /** 1 起页码。 */
   page: number;

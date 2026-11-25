@@ -76,6 +76,8 @@ test.describe("场景 A：合同主流程", () => {
         .filter({ has: page.getByRole("heading", { name: "新建字段", exact: true }) });
       await expect(fieldDialog).toBeVisible();
       await fieldDialog.locator("#fieldLabel").fill(fieldLabel);
+      // 字段键默认自动生成；本场景绑定固定英文键，展开高级选项手填。
+      await fieldDialog.locator("details.advanced-options summary").click();
       await fieldDialog.locator("#fieldKey").fill(fieldKey);
       await fieldDialog
         .getByRole("button", { name: "保存", exact: true })

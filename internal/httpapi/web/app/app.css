@@ -150,6 +150,11 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .field textarea { min-height: 90px; resize: vertical; }
 .check-row { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 14px; }
 .check-row input { width: 16px; height: 16px; }
+.advanced-options { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.advanced-options summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
+.advanced-options[open] summary { margin-bottom: 10px; }
+.advanced-options .adv-reset { align-self: flex-start; min-height: 24px; padding: 1px 8px; font-size: 12px; }
+.key-problem { color: var(--danger); }
 .form-errors { background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line)); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; color: var(--danger); font-size: 13.5px; }
 .form-errors ul { margin: 4px 0 0; padding-left: 18px; }
 .warning-list { background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 8px 14px; margin-bottom: 14px; font-size: 13px; }

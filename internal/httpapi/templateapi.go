@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/LuSrackhall/tengshou/internal/model"
 	"github.com/LuSrackhall/tengshou/internal/service"
@@ -84,6 +85,11 @@ func (s *Server) handleAppGetTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAppImportTemplate(w http.ResponseWriter, r *http.Request) {
+	// 导入要把 Word 文档转成 PDF，服务端转换上限是 conversionTimeout
+	// （service 侧 3 分钟），而服务端 WriteTimeout 是 30s 的绝对截止时间。
+	// 与 SSE 相同，先清除本响应的写截止时间；否则转换超过 30s 的导入响应
+	// 永远写不回浏览器，界面一直停在「导入中」。
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	svc, ok := s.appService(w)
 	if !ok {
 		return

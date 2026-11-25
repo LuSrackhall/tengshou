@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"image/color"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tdewolff/canvas"
 	"github.com/tdewolff/canvas/renderers/pdf"
@@ -208,6 +210,46 @@ func TestTemplateAPIImportRejectsInvalidFile(t *testing.T) {
 		map[string]any{"name": "空文件"}, nil)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("empty status=%d body=%s", resp.StatusCode, body)
+	}
+}
+
+// deadlineWriter 记录响应写截止时间的变化，用来证明导入处理器在长耗时转换
+// 前清除了服务端 WriteTimeout（否则超过 30s 的响应永远写不回浏览器）。
+type deadlineWriter struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *deadlineWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadlines = append(w.deadlines, deadline)
+	return nil
+}
+
+func TestTemplateImportClearsWriteDeadline(t *testing.T) {
+	f := newFixture(t)
+	pdf := testTemplatePDF(t)
+	payload, err := json.Marshal(map[string]any{
+		"name":        "写截止时间模板",
+		"file_name":   "deadline-template.pdf",
+		"file_base64": base64.StdEncoding.EncodeToString(pdf),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/app/api/v1/templates/import", bytes.NewReader(payload))
+	req.RemoteAddr = "127.0.0.1:12345" // 本机请求才能通过 loopback 守卫
+	req.Header.Set("X-Tengshou-App", "1")
+	req.Header.Set("Content-Type", "application/json")
+	w := &deadlineWriter{ResponseRecorder: httptest.NewRecorder()}
+	f.handler.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("import status = %d body=%s", w.Code, w.Body.String())
+	}
+	if len(w.deadlines) == 0 {
+		t.Fatal("导入处理器没有清除写截止时间")
+	}
+	if last := w.deadlines[len(w.deadlines)-1]; !last.IsZero() {
+		t.Fatalf("写截止时间 = %v，want 零值（无截止）", last)
 	}
 }
 

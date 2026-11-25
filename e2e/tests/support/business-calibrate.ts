@@ -2,7 +2,14 @@
 // 界面新增标定框并拖动到锚点位置。坐标全部是 PDF 点、左上原点；编辑器缩放
 // 固定为 100%，因此 1px = 1pt，拖动距离可直接由锚点坐标换算。
 import { expect, type Page } from "@playwright/test";
-import { analyzePdf, type LabelAnchor, type PdfTextItem } from "./business-pdf";
+import {
+  analyzePdf,
+  lineEntryAt,
+  lineXAt,
+  pdfLines,
+  type LabelAnchor,
+  type PdfLine,
+} from "./business-pdf";
 
 export type PlacementKind = "field" | "signature" | "seal";
 
@@ -163,42 +170,47 @@ export async function locateAnchors(
     return btoa(binary);
   }, templateId);
   const analysis = await analyzePdf(page, Buffer.from(base64, "base64"));
-  const all: Array<{ page: number; item: PdfTextItem }> = [];
+  const lines: Array<{ page: number; line: PdfLine }> = [];
   analysis.pages.forEach((pdfPage, index) => {
-    for (const item of pdfPage.items) {
-      all.push({ page: index + 1, item });
+    for (const line of pdfLines(pdfPage)) {
+      lines.push({ page: index + 1, line });
     }
   });
   const anchors = new Map<string, LabelAnchor>();
   for (const label of labels) {
-    const matches = all.filter(({ item }) => item.str.includes(label));
+    const want = label.replace(/\s+/g, "");
+    const matches = lines.filter(({ line }) => line.text.includes(want));
     if (matches.length === 0) {
       const snippet = analysis.text.replace(/\s+/g, " ").slice(0, 240);
       throw new Error(`模板 PDF 中找不到锚点「${label}」。文档文字片段：${snippet}`);
     }
     if (matches.length > 1) {
       const where = matches
-        .map(({ page, item }) => `第 ${page} 页 x=${item.x.toFixed(0)}`)
+        .map(
+          ({ page, line }) =>
+            `第 ${page} 页 x=${lineXAt(line, line.text.indexOf(want)).toFixed(0)}`,
+        )
         .join("、");
       throw new Error(`锚点「${label}」不唯一：${where}`);
     }
     const match = matches[0]!;
-    const pdfPage = analysis.pages[match.page - 1]!;
-    const { item } = match;
-    const line = pdfPage.items
-      .filter((candidate) => Math.abs(candidate.y - item.y) < 3)
-      .sort((a, b) => a.x - b.x);
-    const blank = line.find(
-      (candidate) =>
-        candidate.x > item.x && /^[_＿]+$/.test(candidate.str.trim()),
+    const line = match.line;
+    const index = line.text.indexOf(want);
+    const start = lineEntryAt(line, index);
+    if (!start) {
+      throw new Error(`模板 PDF 中无法定位锚点「${label}」的坐标`);
+    }
+    const startX = lineXAt(line, index);
+    const endX = lineXAt(line, index + want.length);
+    const blank = line.items.find(
+      (entry) => entry.item.x >= startX && /^[_＿]+$/.test(entry.text),
     );
-    const fontSize = item.height || 10.5;
-    const ratio = (item.str.indexOf(label) + label.length) / Math.max(item.str.length, 1);
+    const pdfPage = analysis.pages[match.page - 1]!;
     anchors.set(label, {
       page: match.page,
-      x: blank ? blank.x : item.x + item.width * ratio,
-      baseline: item.y,
-      fontSize,
+      x: blank ? blank.item.x : endX,
+      baseline: start.item.y,
+      fontSize: start.item.height || 10.5,
       pageWidth: pdfPage.width,
       pageHeight: pdfPage.height,
     });

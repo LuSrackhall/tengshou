@@ -150,7 +150,6 @@ export async function createParty(
   return id;
 }
 
-
 export interface ContractDetailView {
   contract: { contract_no: string; status: string; amount: number };
   party_a?: { name: string };
@@ -233,4 +232,3 @@ export async function createContract(
   expect(detail.party_b?.name).toBe(PARTY_B_NAME);
   return { contractId, contractNo: detail.contract.contract_no, detail };
 }
-

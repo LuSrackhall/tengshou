@@ -166,16 +166,6 @@ export async function calibrateTemplate(
       });
     }
   }
-  await expect(
-    page.locator("#tplPlacementList .tpl-list-item[data-id]"),
-  ).toHaveCount(placements.length);
-  await frames?.capture(
-    `⑥ 全部 ${placements.length} 个位置到位：第 1 页 23 个字段、第 2 页 1 个字段、第 3 页签名+公章`,
-    {
-      region: page.locator(".tpl-side"),
-      targets: [page.locator("#tplPlacementList")],
-    },
-  );
   const pageSummary = (kind: PlacementDraft["kind"]): string => {
     const counts = new Map<number, number>();
     for (const spec of placements) {
@@ -189,6 +179,28 @@ export async function calibrateTemplate(
       .map(([pageNumber, count]) => `第 ${pageNumber} 页 ${count} 个`)
       .join("、");
   };
+  const kindNames: Record<PlacementDraft["kind"], string> = {
+    field: "字段",
+    signature: "乙方签名",
+    seal: "甲方公章",
+  };
+  const placementBreakdown = (["field", "signature", "seal"] as const)
+    .map((kind) => {
+      const summary = pageSummary(kind);
+      return summary === "" ? "" : `${kindNames[kind]}（${summary}）`;
+    })
+    .filter((text) => text !== "")
+    .join("、");
+  await expect(
+    page.locator("#tplPlacementList .tpl-list-item[data-id]"),
+  ).toHaveCount(placements.length);
+  await frames?.capture(
+    `⑥ 全部 ${placements.length} 个位置到位：${placementBreakdown}`,
+    {
+      region: page.locator(".tpl-side"),
+      targets: [page.locator("#tplPlacementList")],
+    },
+  );
   return (
     `已按 Word 锚点把字段（${pageSummary("field")}）、乙方手写签名（${pageSummary("signature")}）` +
     `与甲方公章（${pageSummary("seal")}）逐个拖动到位。`
@@ -234,4 +246,3 @@ export async function saveCalibration(
   });
   return { label, templateId };
 }
-

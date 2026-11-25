@@ -41,6 +41,11 @@ const visibleFields = computed(() =>
   ),
 );
 
+/** 同实体全部字段键（含已归档），新建字段时供自动生成避让冲突。 */
+const existingKeys = computed(() =>
+  fieldsByEntity.value[entity.value].map((field) => field.key),
+);
+
 // 与 app.js renderFields 的 fieldSummary 文案一致（已归档计数只按过滤后的
 // 列表统计：未勾选「显示已归档」时不追加已归档后缀）。
 const summary = computed(() => {
@@ -235,6 +240,7 @@ onBeforeUnmount(() => {
     :key="editingField?.id ?? 'new'"
     :field="editingField"
     :entity="entity"
+    :existing-keys="existingKeys"
     @close="closeForm"
   />
 </template>

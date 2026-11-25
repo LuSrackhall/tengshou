@@ -39,6 +39,8 @@ export async function createFields(
       });
     await expect(dialog).toBeVisible();
     await dialog.locator("#fieldLabel").fill(field.label);
+    // 字段键默认按名称自动生成；业务模板绑定固定英文键，展开高级选项手填。
+    await dialog.locator("details.advanced-options summary").click();
     await dialog.locator("#fieldKey").fill(field.key);
     await dialog.locator("#fieldType").selectOption(field.type);
     if (!firstSaved) {

@@ -219,6 +219,92 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
 
+  tutorial:
+    name: 生成使用教程包（macOS · WebKit）
+    # 只在发版标签上生成：教程包作为公开资产随版本发布（单平台即可）。
+    # 与 e2e 矩阵共用同一套前端产物与发布形态 CLI，教程来自真实产品运行。
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: frontend
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: 取回前端构建产物（go:embed 需要）
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: internal/httpapi/web/app/dist
+      - name: 安装 LibreOffice（macOS）
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          brew install --cask libreoffice
+          # 产品检测路径：internal/doctopdf/libreoffice.go 的 macOS 候选。
+          test -x "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+      - name: 构建 CLI（与发布同一命令）
+        env:
+          CGO_ENABLED: "0"
+        run: go run ./tools/tengshoubuild build cli
+      - name: 安装 E2E 依赖与 WebKit
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install webkit
+      - name: 生成使用教程（慢速高清录制 + 章节标题卡）
+        working-directory: e2e
+        env:
+          TENGHSHOU_CLI: ${{ github.workspace }}/dist/tengshou-cli
+          E2E_REQUIRE_DOCX: "1"
+          # 教程录制模式：slowMo 0.5s、点击圆点 + 波纹、每步 1 秒章节卡。
+          E2E_TUTORIAL: "1"
+        run: npx playwright test business-acceptance.spec.ts
+      - name: 打包教程包（HTML + 录像 + 示例 PDF + SHA256SUMS）
+        working-directory: e2e/test-results/business-acceptance
+        env:
+          ZIP_NAME: tengshou-tutorial-${{ github.ref_name }}.zip
+        run: |
+          set -euo pipefail
+          python3 -I - "$ZIP_NAME" <<'PY'
+          import hashlib
+          import sys
+          import zipfile
+
+          names = ["腾手使用教程.html", "验收过程录像.webm", "农产品购销合同-已签字盖章.pdf"]
+          with open("SHA256SUMS", "w", encoding="utf-8") as out:
+              for name in names:
+                  with open(name, "rb") as handle:
+                      digest = hashlib.sha256(handle.read()).hexdigest()
+                  out.write(f"{digest}  {name}\n")
+          # 用 zipfile 而不是 zip(1)：中文文件名会写入 UTF-8 标志位，
+          # Windows 解压不会乱码。
+          with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:
+              for name in names + ["SHA256SUMS"]:
+                  z.write(name)
+          print("written:", sys.argv[1])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tutorial-package
+          path: e2e/test-results/business-acceptance/tengshou-tutorial-*.zip
+          if-no-files-found: error
+      - name: 上传教程运行产物（排查用）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tutorial-run
+          path: e2e/test-results/business-acceptance
+          retention-days: 90
+          if-no-files-found: warn
+
   cli:
     name: 构建 CLI（${{ matrix.goos }}/${{ matrix.goarch }}）
     needs: frontend
@@ -339,7 +425,7 @@ jobs:
   release:
     name: 发布预发布版
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, cli, desktop]
+    needs: [test, cli, desktop, tutorial]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -354,23 +440,30 @@ jobs:
           path: dist
           pattern: tengshou-*
           merge-multiple: true
+      - name: 取回使用教程包（HTML + 录像 + 示例 PDF + SHA256SUMS）
+        uses: actions/download-artifact@v4
+        with:
+          name: tutorial-package
+          path: dist
       - name: 列出产物
         run: ls -lh dist
       - name: 打包 Windows 分发包（仅桌面 exe）
         run: go run ./tools/tengshoubuild package-windows-zip dist
-      - name: 校验构建产物（8 个）、发布清单（4 个客户端）与 Windows zip 内容（1 个文件）
+      - name: 校验构建产物（9 个）、发布清单（5 个：4 客户端 + 1 教程包）与包内容
         run: |
           set -euo pipefail
-          test "$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 8
-          # 发布页只上传客户端资产；完整 CLI（serve/backup/restore/demo 等运维
-          # 用途）仅作为 CI 构建产物，不进发布页。
+          # 7 个下载产物 + Windows zip + 教程包 = 9。
+          test "$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 9
+          # 发布页只上传客户端资产与使用教程包；完整 CLI（serve/backup/restore/
+          # demo 等运维用途）仅作为 CI 构建产物，不进发布页。
           release_files=(
             dist/tengshou-windows-amd64.zip
             dist/tengshou-windows-amd64.exe
             dist/tengshou-darwin-arm64
             dist/tengshou-darwin-arm64.tar.gz
+            "dist/tengshou-tutorial-${GITHUB_REF_NAME}.zip"
           )
-          test "${#release_files[@]}" -eq 4
+          test "${#release_files[@]}" -eq 5
           for f in "${release_files[@]}"; do test -f "$f"; done
           if printf '%s\n' "${release_files[@]}" | grep -q 'tengshou-cli'; then
             echo "错误：发布清单不得包含 CLI" >&2
@@ -391,14 +484,47 @@ jobs:
               sys.exit(f"错误：Windows zip 内容不符：{got} != {expected}")
           print("Windows zip 内容校验通过：" + "、".join(got))
           PY
+          # 教程包必须恰好包含教程 HTML、录像、示例 PDF 与 SHA256SUMS，
+          # 且 SHA256SUMS 与包内文件真实一致。
+          python3 -I - <<'PY'
+          import glob
+          import hashlib
+          import sys
+          import zipfile
+
+          paths = glob.glob("dist/tengshou-tutorial-*.zip")
+          if len(paths) != 1:
+              sys.exit(f"错误：应恰有 1 个教程包，实际 {len(paths)} 个")
+          zip_path = paths[0]
+          files = [
+              "腾手使用教程.html",
+              "验收过程录像.webm",
+              "农产品购销合同-已签字盖章.pdf",
+          ]
+          expected = sorted(files + ["SHA256SUMS"])
+          with zipfile.ZipFile(zip_path) as z:
+              names = sorted(z.namelist())
+              if names != expected:
+                  sys.exit(f"错误：教程包内容不符：{names} != {expected}")
+              sums = {}
+              for line in z.read("SHA256SUMS").decode("utf-8").splitlines():
+                  digest, name = line.split("  ", 1)
+                  sums[name] = digest
+              for name in files:
+                  got = hashlib.sha256(z.read(name)).hexdigest()
+                  if got != sums.get(name):
+                      sys.exit(f"错误：{name} 的 SHA256 与 SHA256SUMS 不一致")
+          print("教程包校验通过：" + "、".join(expected))
+          PY
       - uses: softprops/action-gh-release@v2
         with:
           prerelease: true
           generate_release_notes: true
-          # 只发布客户端资产；完整 CLI 不发布（需要时从 CI 构建产物或源码构建获取）。
+          # 只发布客户端资产与使用教程包；完整 CLI 不发布（需要时从 CI 构建产物或源码构建获取）。
           files: |
             dist/tengshou-windows-amd64.zip
             dist/tengshou-windows-amd64.exe
             dist/tengshou-darwin-arm64
             dist/tengshou-darwin-arm64.tar.gz
+            dist/tengshou-tutorial-${{ github.ref_name }}.zip
           fail_on_unmatched_files: true

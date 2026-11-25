@@ -5,9 +5,11 @@
 //   2. 英文名称 → snake_case；同实体派生键冲突 → 自动加 _2；数字开头补
 //      field_ 前缀，超长名称截断到 63 字符；
 //   3. 「高级选项」可手改字段键，非法/重复键在前端就被拦住并提示，
-//      手改后可「恢复自动生成」；
-//   4. 编辑字段时字段键仍禁用；内置字段既有 key 不变；
-//   5. 已归档字段键与内置键参与冲突避让。
+//      手改后可「恢复自动生成」；手改后预览文案不再说「将自动生成」；
+//   4. 编辑字段时字段键仍禁用；内置字段既有 key 不变；预览文案为「字段键：」；
+//   5. 已归档字段键与内置键参与冲突避让；
+//   6. 字段列表「键」列默认隐藏，工具栏「显示字段键」开关打开后才显示，
+//      每次进入字段页回到默认隐藏（不持久化）。
 import type { Locator } from "@playwright/test";
 import { expect, test } from "./support/app-fixture";
 import { trackConsoleErrors } from "./support/ui";
@@ -29,6 +31,45 @@ test.describe("字段键自动生成", () => {
     await expect(page.locator("#tabs")).toBeVisible();
     await page.locator('#tabs button[data-tab="fields"]').click();
     await expect(page.locator("#view-fields")).toHaveClass(/active/);
+
+    const showKeys = page
+      .locator("#view-fields")
+      .getByLabel("显示字段键", { exact: true });
+
+    await test.step("键列默认隐藏，打开「显示字段键」后显示在名称列之后", async () => {
+      const headers = page.locator("#view-fields thead th");
+      // 默认隐藏：表头 9 列，没有「键」列，数据行同样 9 个单元格。
+      await expect(showKeys).not.toBeChecked();
+      await expect(headers).toHaveCount(9);
+      await expect(headers.filter({ hasText: /^键$/ })).toHaveCount(0);
+      await expect(
+        page.locator("#view-fields tbody tr[data-id]").first().locator("td"),
+      ).toHaveCount(9);
+
+      // 打开开关：键列出现在名称之后（第 2 列），列序与接口数据不变。
+      await showKeys.check();
+      await expect(headers).toHaveCount(10);
+      await expect(headers.nth(1)).toHaveText("键");
+      await expect(
+        page.locator("#view-fields tbody tr[data-id]").first().locator("td"),
+      ).toHaveCount(10);
+
+      // 关闭后恢复隐藏，开关即时生效。
+      await showKeys.uncheck();
+      await expect(headers).toHaveCount(9);
+      await showKeys.check();
+      await expect(headers).toHaveCount(10);
+
+      // 切走再回到字段页：回到默认隐藏（每次进入页面默认关闭，不持久化）。
+      await page.locator('#tabs button[data-tab="contracts"]').click();
+      await page.locator('#tabs button[data-tab="fields"]').click();
+      await expect(showKeys).not.toBeChecked();
+      await expect(headers).toHaveCount(9);
+
+      // 后续步骤要读取键列，重新打开并保持。
+      await showKeys.check();
+      await expect(headers).toHaveCount(10);
+    });
 
     const newButton = page
       .locator("#view-fields")
@@ -52,6 +93,7 @@ test.describe("字段键自动生成", () => {
     }
 
     async function rowKey(label: string): Promise<string> {
+      // 「键」列默认隐藏；本用例在第一步已打开「显示字段键」，键固定在第 2 列。
       // 名称列精确匹配：:has-text 不区分大小写，会误中同名不同大小写的行。
       const row = page.locator(
         `#view-fields tr[data-id]:has(td:first-child:text-is("${label}"))`,
@@ -65,6 +107,8 @@ test.describe("字段键自动生成", () => {
       await dialog.locator("#fieldLabel").fill(cnLabel1);
       const preview = dialog.locator(".form-grid code");
       await expect(preview).toHaveText(/^field_[0-9]+$/);
+      // 自动生成时预览文案说明来源。
+      await expect(dialog.getByText("字段键将自动生成：")).toBeVisible();
       const firstKey = (await preview.innerText()).trim();
       await save(dialog);
       await expect(dialog).toBeHidden();
@@ -151,6 +195,9 @@ test.describe("字段键自动生成", () => {
       const manualKey = `manual_${stamp}`;
       await keyInput.fill(manualKey);
       await expect(dialog.getByText(`字段键 ${manualKey} 已存在`)).toHaveCount(0);
+      // 手改后预览显示手填值，文案不再说「将自动生成」。
+      await expect(dialog.locator(".form-grid code")).toHaveText(manualKey);
+      await expect(dialog.getByText("字段键将自动生成：")).toHaveCount(0);
       await save(dialog);
       await expect(dialog).toBeHidden();
       expect(await rowKey(manualLabel)).toBe(manualKey);
@@ -174,6 +221,8 @@ test.describe("字段键自动生成", () => {
       await resume.click();
       await expect(resume).toHaveCount(0);
       await expect(keyInput).toHaveValue(/^field_[0-9]+$/);
+      // 恢复自动生成后回到自动文案。
+      await expect(dialog.getByText("字段键将自动生成：")).toBeVisible();
       const autoKey = await keyInput.inputValue();
       await save(dialog);
       await expect(dialog).toBeHidden();
@@ -234,6 +283,11 @@ test.describe("字段键自动生成", () => {
           has: page.getByRole("heading", { name: /编辑字段/ }),
         });
       await expect(editDialog).toBeVisible();
+      // 编辑态预览文案固定为「字段键：<key>」，不说「将自动生成」。
+      await expect(editDialog.getByText("字段键将自动生成：")).toHaveCount(0);
+      await expect(editDialog.locator(".form-grid code")).toHaveText(
+        /^field_[0-9]+$/,
+      );
       await editDialog.locator("details.advanced-options summary").click();
       const editKey = editDialog.locator("#fieldKey");
       await expect(editKey).toBeDisabled();

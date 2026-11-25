@@ -1,14 +1,15 @@
 <script setup lang="ts">
 // 字段管理（阶段 1 迁移）：实体切换、归档过滤、字段台账表格与归档/恢复。
 // 结构与 app.js renderFields 的输出一致（toolbar / segmented / summary /
-// data-table / actions 类名不变），数据走 frontend/src/api 的 typed 端点。
+// data-table / actions 类名不变），数据走 frontend/src/api 的 typed 端点；
+// 「键」列默认隐藏，由工具栏「显示字段键」开关即时控制（第 2 列，不持久化）。
 //
 // 跨域联动：字段由本组件自取，合同表单与模板标定等域各自通过 typed 端点
 // 读取当前字段；本域写操作后调用 refreshAfterWrite()，经 bridge/app.ts 派发
 // tengshou:data-changed，相对方档案等已迁移域据此立即刷新。
 // 外部写入（MCP/curl）经 shell/realtime.ts 的 SSE/轮询后同样派发该事件，
 // 本组件重取。
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   archiveField as archiveFieldRequest,
   listFields,
@@ -23,10 +24,14 @@ import {
 } from "../../bridge/app";
 import FieldFormModal from "./FieldFormModal.vue";
 import { FIELD_TYPE_LABELS, entityLabel } from "./labels";
+import { currentTab } from "../../shell/tabs";
 
 const fieldsByEntity = ref<FieldsByEntityResponse>({ contract: [], party: [] });
 const entity = ref<FieldEntity>("contract");
 const showArchived = ref(false);
+// 「键」列默认隐藏：字段键是给模板/agent 用的机器标识，普通用户不需要看。
+// 每次进入页面默认关闭，不做持久化。
+const showKeys = ref(false);
 const loaded = ref(false);
 const formOpen = ref(false);
 const editingField = ref<FieldDefinition | null>(null);
@@ -130,6 +135,13 @@ async function archive(field: FieldDefinition): Promise<void> {
   }
 }
 
+// 每次进入「字段」页都回到默认隐藏（不做持久化）；页内切换实体不重置。
+watch(currentTab, (tab) => {
+  if (tab === "fields") {
+    showKeys.value = false;
+  }
+});
+
 onMounted(() => {
   void fetchData();
   unsubscribe = subscribeDataChanged((detail) => {
@@ -167,6 +179,9 @@ onBeforeUnmount(() => {
     <label class="inline">
       <input v-model="showArchived" type="checkbox"> 显示已归档
     </label>
+    <label class="inline">
+      <input v-model="showKeys" type="checkbox"> 显示字段键
+    </label>
     <span class="spacer"></span>
     <button type="button" class="primary" @click="openCreate">新建字段</button>
   </div>
@@ -178,7 +193,7 @@ onBeforeUnmount(() => {
         <thead>
           <tr>
             <th>名称</th>
-            <th>键</th>
+            <th v-if="showKeys">键</th>
             <th>类型</th>
             <th>必填</th>
             <th>默认值</th>
@@ -203,7 +218,7 @@ onBeforeUnmount(() => {
                 field.archived ? " " : ""
               }}<span v-if="field.archived" class="badge archived">已归档</span>
             </td>
-            <td class="mono">{{ field.key }}</td>
+            <td v-if="showKeys" class="mono">{{ field.key }}</td>
             <td>{{ FIELD_TYPE_LABELS[field.type] ?? field.type }}</td>
             <td>{{ field.required ? "是" : "否" }}</td>
             <td>{{ field.default_value || "—" }}</td>
@@ -229,7 +244,7 @@ onBeforeUnmount(() => {
             </td>
           </tr>
           <tr v-if="!visibleFields.length">
-            <td class="empty" colspan="10">还没有字段。</td>
+            <td class="empty" :colspan="showKeys ? 10 : 9">还没有字段。</td>
           </tr>
         </tbody>
       </template>

@@ -434,7 +434,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       # 只取构建产物：frontend-dist 是 cli/desktop 的构建输入，不属于发布资产。
-      # dist 共 8 个构建产物；其中完整 CLI 4 个不进发布页，发布页只上传 4 个客户端资产。
+      # dist 共 8 个构建产物；其中完整 CLI 4 个不进发布页，发布页只上传 4 个客户端资产与 1 个使用教程包。
       - uses: actions/download-artifact@v4
         with:
           path: dist

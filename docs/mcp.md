@@ -218,11 +218,12 @@ Windows 预发布版提供一个分发包 `tengshou-windows-amd64.zip`，解压�
 （即 `%LOCALAPPDATA%\Tengshou`）。Claude Desktop 配置见上一节的 Windows
 示例：`command` 填桌面 exe 的完整路径，反斜杠写成 `\\`。
 
-发布固定 4 个客户端资产：上述 zip、独立的 Windows 桌面 exe、macOS 桌面
-二进制与 tar.gz。完整 CLI（`serve` / `backup` / `restore` / `demo` 等运维
-用途）**不进发布页**，需要时用 `go run ./tools/tengshoubuild build` 从
-源码构建，或从 CI 构建产物获取；Linux 用户没有桌面壳，只能以这种方式
-获得 CLI。客户只需要桌面 exe。
+发布固定 5 个资产 = 4 个客户端资产（上述 zip、独立的 Windows 桌面 exe、
+macOS 桌面二进制与 tar.gz）+ 1 个使用教程包（`tengshou-tutorial-<tag>.zip`：
+教程 HTML、过程录像、示例 PDF 与 SHA256SUMS）。完整 CLI（`serve` /
+`backup` / `restore` / `demo` 等运维用途）**不进发布页**，需要时用
+`go run ./tools/tengshoubuild build` 从源码构建，或从 CI 构建产物获取；
+Linux 用户没有桌面壳，只能以这种方式获得 CLI。客户只需要桌面 exe。
 
 本地复现同一个包（Windows，dev 与 CI 调用同一 Go 工具）：
 

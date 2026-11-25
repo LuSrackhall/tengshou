@@ -208,3 +208,282 @@ export async function analyzePdf(
     return { pageCount, pages, text, imageDraws };
   }, bytes.toString("base64"));
 }
+
+/** 与 model.Placement 对齐的最小子集：签名 / 公章标定框（PDF 点、左上原点）。 */
+export interface PlacementBox {
+  page: number;
+  type: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  party?: string;
+}
+
+export interface PdfTextHighlight {
+  page: number;
+  /** 要圈出的完整值或唯一片段；按行内连续文本项匹配。 */
+  values: string[];
+}
+
+export interface RenderPdfOptions {
+  /** 渲染倍率（默认 2，报告里足够清晰）。 */
+  scale?: number;
+  /** 每页要圈出的关键文字。 */
+  textHighlights?: PdfTextHighlight[];
+  /** 签名 / 公章标定框（第 3 页红框）。 */
+  placements?: PlacementBox[];
+  /** 需要额外生成放大图的页（取该页签名 + 公章框的并集）。 */
+  zoomPage?: number;
+}
+
+export interface PdfPageImage {
+  page: number;
+  png: Buffer;
+}
+
+export interface RenderedPdf {
+  pages: PdfPageImage[];
+  /** 签名/公章区域放大图；没有可用标定框时为 null。 */
+  zoom: PdfPageImage | null;
+  /** 未能标注的文字值或缺失的标定框（报告里作为提示展示）。 */
+  missing: string[];
+}
+
+interface PdfJsRenderPage extends PdfJsPage {
+  render(params: {
+    canvasContext: CanvasRenderingContext2D;
+    viewport: { width: number; height: number };
+  }): { promise: Promise<void> };
+}
+
+/**
+ * 用页面自带 pdf.js 把最终 PDF 逐页渲染成 PNG，并在关键文字 / 签名公章
+ * 标定框处画红框；可选生成签名+公章区域的高倍放大图。
+ */
+export async function renderPdfPages(
+  page: Page,
+  bytes: Buffer,
+  options: RenderPdfOptions = {},
+): Promise<RenderedPdf> {
+  const scale = options.scale ?? 2;
+  const textHighlights = options.textHighlights ?? [];
+  const placements = options.placements ?? [];
+  const result = await page.evaluate(
+    async ({ base64, renderScale, highlights, boxes, zoomPage }) => {
+      const runtime = (
+        window as unknown as { pdfjsLib?: PdfJsRuntime }
+      ).pdfjsLib;
+      if (!runtime) {
+        throw new Error("页面缺少本地 pdf.js（/app/vendor/pdf.min.js）");
+      }
+      const raw = atob(base64);
+      const data = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i += 1) {
+        data[i] = raw.charCodeAt(i);
+      }
+      const doc = (await runtime.getDocument({
+        data,
+        isEvalSupported: false,
+        useSystemFonts: true,
+      }).promise) as PdfJsDocument;
+      const missing: string[] = [];
+      const pages: Array<{ page: number; png: string }> = [];
+      const canvases = new Map<
+        number,
+        { canvas: HTMLCanvasElement; boxes: Array<{ x: number; y: number; w: number; h: number }> }
+      >();
+
+      interface LineItem {
+        str: string;
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      }
+
+      const findValueBox = (items: LineItem[], value: string) => {
+        const lines = new Map<number, LineItem[]>();
+        for (const item of items) {
+          const key = Math.round(item.y / 4);
+          const line = lines.get(key) ?? [];
+          line.push(item);
+          lines.set(key, line);
+        }
+        for (const line of lines.values()) {
+          line.sort((left, right) => left.x - right.x);
+          for (let start = 0; start < line.length; start += 1) {
+            let text = "";
+            let left = Number.POSITIVE_INFINITY;
+            let right = Number.NEGATIVE_INFINITY;
+            let top = Number.POSITIVE_INFINITY;
+            let bottom = Number.NEGATIVE_INFINITY;
+            for (let end = start; end < line.length; end += 1) {
+              const item = line[end]!;
+              text += item.str;
+              left = Math.min(left, item.x);
+              right = Math.max(right, item.x + item.width);
+              top = Math.min(top, item.y - item.height);
+              bottom = Math.max(bottom, item.y + item.height * 0.25);
+              if (text.includes(value)) {
+                return { x: left, y: top, w: right - left, h: bottom - top };
+              }
+              if (text.length > value.length + 24) {
+                break;
+              }
+            }
+          }
+        }
+        return null;
+      };
+
+      const drawBox = (
+        context: CanvasRenderingContext2D,
+        box: { x: number; y: number; w: number; h: number },
+        factor: number,
+      ) => {
+        context.save();
+        context.strokeStyle = "#e02424";
+        context.fillStyle = "rgba(224,36,36,.10)";
+        context.lineWidth = Math.max(2, factor * 1.6);
+        context.fillRect(box.x * factor, box.y * factor, box.w * factor, box.h * factor);
+        context.strokeRect(box.x * factor, box.y * factor, box.w * factor, box.h * factor);
+        context.restore();
+      };
+
+      try {
+        for (let n = 1; n <= doc.numPages; n += 1) {
+          const pdfPage = (await doc.getPage(n)) as PdfJsRenderPage;
+          const baseViewport = pdfPage.getViewport({ scale: 1 });
+          const viewport = pdfPage.getViewport({ scale: renderScale });
+          const content = await pdfPage.getTextContent();
+          const items: LineItem[] = [];
+          for (const item of content.items) {
+            const str = typeof item.str === "string" ? item.str : "";
+            if (!str || !item.transform) {
+              continue;
+            }
+            const tx = runtime.Util.transform(baseViewport.transform, item.transform);
+            items.push({
+              str,
+              x: tx[4] ?? 0,
+              y: tx[5] ?? 0,
+              width: typeof item.width === "number" ? item.width : 0,
+              height: typeof item.height === "number" ? item.height : 0,
+            });
+          }
+          const width = Math.max(1, Math.round(viewport.width));
+          const height = Math.max(1, Math.round(viewport.height));
+          // pdf.js 渲染会接管画布（透明底）：先渲染到临时画布，再合成到
+          // 白底画布上，避免报告里出现黑底（透明区域查看器显示为黑色）。
+          const renderCanvas = document.createElement("canvas");
+          renderCanvas.width = width;
+          renderCanvas.height = height;
+          const renderContext = renderCanvas.getContext("2d");
+          if (!renderContext) {
+            throw new Error("无法创建 PDF 渲染画布");
+          }
+          await pdfPage.render({
+            canvasContext: renderContext,
+            viewport,
+          }).promise;
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext("2d");
+          if (!context) {
+            throw new Error("无法创建 PDF 合成画布");
+          }
+          context.fillStyle = "#ffffff";
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(renderCanvas, 0, 0);
+          const pageBoxes: Array<{ x: number; y: number; w: number; h: number }> = [];
+          for (const highlight of highlights) {
+            if (highlight.page !== n) {
+              continue;
+            }
+            for (const value of highlight.values) {
+              const box = findValueBox(items, value);
+              if (box) {
+                drawBox(context, box, renderScale);
+              } else {
+                missing.push(`第 ${n} 页未找到「${value}」的文本位置，未画红框`);
+              }
+            }
+          }
+          for (const box of boxes) {
+            if (box.page !== n || (box.type !== "signature" && box.type !== "seal")) {
+              continue;
+            }
+            drawBox(context, box, renderScale);
+            pageBoxes.push(box);
+          }
+          canvases.set(n, { canvas, boxes: pageBoxes });
+          pages.push({ page: n, png: canvas.toDataURL("image/png") });
+        }
+      } finally {
+        await doc.destroy().catch(() => undefined);
+      }
+
+      let zoom: string | null = null;
+      if (typeof zoomPage === "number" && zoomPage >= 1) {
+        const rendered = canvases.get(zoomPage);
+        const target = rendered?.boxes ?? [];
+        if (!rendered || target.length === 0) {
+          missing.push(`第 ${zoomPage} 页没有签名/公章标定框，无法生成放大图`);
+        } else {
+          let left = Number.POSITIVE_INFINITY;
+          let top = Number.POSITIVE_INFINITY;
+          let right = Number.NEGATIVE_INFINITY;
+          let bottom = Number.NEGATIVE_INFINITY;
+          for (const box of target) {
+            left = Math.min(left, box.x * renderScale);
+            top = Math.min(top, box.y * renderScale);
+            right = Math.max(right, (box.x + box.w) * renderScale);
+            bottom = Math.max(bottom, (box.y + box.h) * renderScale);
+          }
+          const margin = 36;
+          const sx = Math.max(0, left - margin);
+          const sy = Math.max(0, top - margin);
+          const sw = Math.min(rendered.canvas.width - sx, right - left + margin * 2);
+          const sh = Math.min(rendered.canvas.height - sy, bottom - top + margin * 2);
+          const zoomCanvas = document.createElement("canvas");
+          zoomCanvas.width = Math.max(1, Math.round(sw * 2));
+          zoomCanvas.height = Math.max(1, Math.round(sh * 2));
+          const zoomContext = zoomCanvas.getContext("2d");
+          if (zoomContext) {
+            zoomContext.drawImage(
+              rendered.canvas,
+              sx,
+              sy,
+              sw,
+              sh,
+              0,
+              0,
+              zoomCanvas.width,
+              zoomCanvas.height,
+            );
+            zoom = zoomCanvas.toDataURL("image/png");
+          }
+        }
+      }
+      return { pages, zoom, missing };
+    },
+    {
+      base64: bytes.toString("base64"),
+      renderScale: scale,
+      highlights: textHighlights,
+      boxes: placements,
+      zoomPage: options.zoomPage ?? null,
+    },
+  );
+  const toBuffer = (dataUrl: string): Buffer => {
+    const comma = dataUrl.indexOf(",");
+    return Buffer.from(comma >= 0 ? dataUrl.slice(comma + 1) : "", "base64");
+  };
+  return {
+    pages: result.pages.map((item) => ({ page: item.page, png: toBuffer(item.png) })),
+    zoom: result.zoom ? { page: options.zoomPage ?? 0, png: toBuffer(result.zoom) } : null,
+    missing: result.missing,
+  };
+}

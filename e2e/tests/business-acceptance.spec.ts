@@ -40,9 +40,11 @@ import {
   signByPhone,
   verifyFinalPdf,
 } from "./support/business-ui";
+import { installClickVisuals, isTutorialMode } from "./support/tutorial-visuals";
 import { trackConsoleErrors } from "./support/ui";
 
 const REQUIRE_DOCX = process.env.E2E_REQUIRE_DOCX === "1";
+const TUTORIAL = isTutorialMode();
 const OUTPUT_DIR = join(repoRoot(), "e2e", "test-results", "business-acceptance");
 const PDF_NAME = "农产品购销合同-已签字盖章.pdf";
 
@@ -161,13 +163,19 @@ async function captureFirstOpen(
   });
 }
 
-test.describe.configure({ timeout: 600_000 });
+// 教程录制模式（E2E_TUTORIAL=1）为每步加 1 秒标题卡与约 1.2 秒停顿，
+// 整体时长明显变长，单独放宽用例超时；业务断言不变。
+test.describe.configure({ timeout: TUTORIAL ? 900_000 : 600_000 });
 
 test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖章 → 最终 PDF）", () => {
   test("Word 模板导入 → 标定字段/签名/公章 → 建合同 → 扫码签名 → 公章 → 预览 → 生成 → 下载", async ({
     app,
     page,
   }, testInfo) => {
+    if (TUTORIAL) {
+      // 教程录像的点击圆点 + 波纹：注入 context 后对手机签名页同样生效。
+      await installClickVisuals(page.context());
+    }
     const consoleErrors = trackConsoleErrors(page);
     const report = new AcceptanceReport({
       title: "业务验收报告 · 农产品购销合同",
@@ -525,11 +533,17 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
       const artifact = pdfPath
         ? { path: pdfPath, name: PDF_NAME, details: pdfDetails }
         : undefined;
-      const reportPath = await report.write(OUTPUT_DIR, artifact);
+      const written = await report.write(OUTPUT_DIR, artifact);
       await testInfo.attach("业务验收报告.html", {
-        path: reportPath,
+        path: written.reportPath,
         contentType: "text/html",
       });
+      if (written.tutorialPath) {
+        await testInfo.attach("腾手使用教程.html", {
+          path: written.tutorialPath,
+          contentType: "text/html",
+        });
+      }
       if (pdfPath) {
         await testInfo.attach("最终合同.pdf", {
           path: pdfPath,

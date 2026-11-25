@@ -76,6 +76,30 @@ e2e/test-results/business-acceptance/农产品购销合同-已签字盖章.pdf
 与报告同目录，报告内提供相对链接。合同里的单位、姓名、证件号、电话、地址、
 金额与公章编号**全部虚构**，报告中显著声明，仅用于演示与测试。
 
+### 使用教程（教程模式）
+
+场景 C 与验收报告同源再生成一份**面向用户的教程**
+`e2e/test-results/business-acceptance/腾手使用教程.html`：
+
+- 每个业务步骤按已确认样张渲染「你要做什么 / 你会看到什么 / 注意什么」三段式，
+  保留红框标注、点击放大（灯箱）、过程分镜与「看本步视频」章节跳转，结尾可
+  打开示例最终合同 PDF；
+- 教程不渲染测试元信息：控制台检查步骤没有教程文案（不进教程），报告自检与
+  转换器 API 状态卡也不出现在教程里；
+- 教程文案与业务步骤标题绑定在 `e2e/tests/support/business-tutorial-copy.ts`；
+  界面流程变化时文案随步骤一起改，教程随版本自动更新（测试未覆盖的功能不会
+  出现在教程里）；
+- 设 `E2E_TUTORIAL=1` 进入**教程录制模式**：Playwright 录像尺寸显式设为
+  1440×960（缺省会缩到 800×800，教程会糊）、浏览器操作用 `slowMo: 500`
+  （每步 0.4–0.6s）、每次点击显示圆点 + 波纹、每步开头显示 1 秒章节标题卡并
+  在步骤结束停顿约 1.2 秒。教程 HTML 始终生成；慢速与点击指示只在教程模式下
+  存在，普通测试运行保持原速（录像仍是高清）。
+
+发版标签会额外运行一个 macOS · WebKit 的教程任务（单平台即可），把
+`腾手使用教程.html`、`验收过程录像.webm`、`农产品购销合同-已签字盖章.pdf` 与
+`SHA256SUMS` 打成 `tengshou-tutorial-<tag>.zip` 作为发布资产。发布清单断言
+从「4 个客户端资产」改为「4 个客户端 + 1 个教程包」。
+
 主流程：
 
 1. 导入 `e2e/fixtures/contracts/农产品购销合同.docx`，产品调用转换器（Windows
@@ -156,6 +180,7 @@ npm run report                    # 打开 HTML 报告
 | `E2E_BROWSER` | `chromium` / `webkit`，覆盖默认浏览器 |
 | `E2E_KEEP_DATA` | 设为 `1` 时保留临时数据目录，便于排查 |
 | `E2E_REQUIRE_DOCX` | 设为 `1` 时，场景 C 缺少 Word→PDF 转换器必须失败（CI 三端均设） |
+| `E2E_TUTORIAL` | 设为 `1` 时进入教程录制模式（slowMo 0.5s、点击圆点 + 波纹、章节标题卡）；发版时由教程任务设置 |
 
 未设置 `PLAYWRIGHT_BASE_URL` 时，每个测试文件会自行：取空闲端口 → 在系统临时
 目录建数据目录 → 启动 `tengshou-cli serve --loopback` → 测试结束回收进程与目录。
@@ -209,7 +234,8 @@ Word 转换。macOS / Windows runner 使用系统自带中文字体。
 
 Playwright 配置为：
 
-- `video: "on"`：每条用例都有录屏；
+- `video: { mode: "on", size: 1440×960 }`：每条用例都有原生高清录屏
+  （显式指定尺寸，避免缺省缩到 800×800）；
 - `trace: "retain-on-failure"`：失败时保留 trace；
 - 关键业务步骤通过 `testInfo.attach` 附加全页截图（中文步骤名）；
 - HTML 报告离线可打开，按中文 `test.step` 展示截图、视频与失败堆栈。
@@ -222,10 +248,11 @@ CI 在 `e2e` job 中**始终**上传 `e2e/playwright-report` 与 `e2e/test-resul
 三端还会各自上传场景 C 的**业务验收工件**：
 `business-acceptance-linux-chromium` / `business-acceptance-windows-chromium` /
 `business-acceptance-macos-webkit`，内容是
-`e2e/test-results/business-acceptance/`（中文报告 + 过程录像 WebM + 最终合同
-PDF）。产品负责人按平台下载对应工件，解压后双击 `业务验收报告.html`，无需
-安装任何软件；报告内的逐页 PDF 图已内嵌，过程视频为同目录相对引用。报告
-「运行环境」行标明平台与浏览器，转换器步骤与实际转换器信息随平台如实呈现。
+`e2e/test-results/business-acceptance/`（中文报告 + 使用教程 + 过程录像 WebM +
+最终合同 PDF）。产品负责人按平台下载对应工件，解压后双击
+`业务验收报告.html` 或 `腾手使用教程.html`，无需安装任何软件；报告内的逐页
+PDF 图已内嵌，过程视频为同目录相对引用。报告「运行环境」行标明平台与浏览器，
+转换器步骤与实际转换器信息随平台如实呈现。
 
 ## 定位界面回归
 

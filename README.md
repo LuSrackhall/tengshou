@@ -208,9 +208,10 @@ GitHub Actions：
 - 构建 Linux / macOS CLI 与 macOS / Windows 桌面壳（统一调用
   `tools/tengshoubuild`），并在 linux（CLI 自连）、windows-latest（GUI
   子系统）、macos-15 三端用发布形态二进制做 MCP stdio 管道冒烟；
-- `v*` 标签：发布固定 4 个客户端资产（Windows zip、Windows 桌面 exe、macOS
-  桌面二进制与 tar.gz）；完整 CLI 不进发布页，仅作为 CI 构建产物；Windows
-  zip 由发布任务用同一工具组装。
+- `v*` 标签：发布固定 5 个资产 = 4 个客户端资产（Windows zip、Windows 桌面
+  exe、macOS 桌面二进制与 tar.gz）+ 1 个使用教程包（教程 HTML、过程录像、
+  示例 PDF 与 SHA256SUMS，由 CI 在 macOS 上真实运行自动生成）；完整 CLI
+  不进发布页，仅作为 CI 构建产物；Windows zip 由发布任务用同一工具组装。
 
 ## 开发
 

@@ -2,9 +2,12 @@
 //
 // 业务含义：普通用户不需要理解机器标识。断言：
 //   1. 名称下方有只读字段键预览；中文名称 → field_ 递增序号，直接保存成功；
-//   2. 英文名称 → snake_case；同实体派生键冲突 → 自动加 _2；
-//   3. 「高级选项」可手改字段键，非法/重复键在前端就被拦住并提示；
-//   4. 编辑字段时字段键仍禁用；内置字段既有 key 不变。
+//   2. 英文名称 → snake_case；同实体派生键冲突 → 自动加 _2；数字开头补
+//      field_ 前缀，超长名称截断到 63 字符；
+//   3. 「高级选项」可手改字段键，非法/重复键在前端就被拦住并提示，
+//      手改后可「恢复自动生成」；
+//   4. 编辑字段时字段键仍禁用；内置字段既有 key 不变；
+//   5. 已归档字段键与内置键参与冲突避让。
 import type { Locator } from "@playwright/test";
 import { expect, test } from "./support/app-fixture";
 import { trackConsoleErrors } from "./support/ui";
@@ -99,6 +102,29 @@ test.describe("字段键自动生成", () => {
       expect(await rowKey(enLabel2)).toBe(`area_sqm_${stamp}_2`);
     });
 
+    await test.step("数字开头补 field_ 前缀；超长名称截断到 63 字符", async () => {
+      const numericLabel = `2026 contract ${stamp}`;
+      const numeric = await openCreate();
+      await numeric.locator("#fieldLabel").fill(numericLabel);
+      await expect(numeric.locator(".form-grid code")).toHaveText(
+        `field_2026_contract_${stamp}`,
+      );
+      await save(numeric);
+      await expect(numeric).toBeHidden();
+      expect(await rowKey(numericLabel)).toBe(`field_2026_contract_${stamp}`);
+
+      // 80 个 ASCII 字母 → 截断到 63 字符且仍满足后端格式（不保存）。
+      const long = await openCreate();
+      await long.locator("#fieldLabel").fill("a".repeat(80));
+      const longPreview = long.locator(".form-grid code");
+      await expect(longPreview).toHaveText(/^a{63}$/);
+      expect((await longPreview.innerText()).trim()).toMatch(
+        /^[a-z][a-z0-9_]{0,62}$/,
+      );
+      await long.getByRole("button", { name: "取消", exact: true }).click();
+      await expect(long).toBeHidden();
+    });
+
     await test.step("高级选项手改：非法/重复键被拦住，合法键按手填保存", async () => {
       const dialog = await openCreate();
       await dialog.locator("#fieldLabel").fill(manualLabel);
@@ -128,6 +154,72 @@ test.describe("字段键自动生成", () => {
       await save(dialog);
       await expect(dialog).toBeHidden();
       expect(await rowKey(manualLabel)).toBe(manualKey);
+    });
+
+    await test.step("恢复自动生成：手改后可回到自动派生键", async () => {
+      const recoverLabel = `恢复自动${stamp}`;
+      const dialog = await openCreate();
+      await dialog.locator("#fieldLabel").fill(recoverLabel);
+      await dialog.locator("details.advanced-options summary").click();
+      const keyInput = dialog.locator("#fieldKey");
+      await expect(keyInput).toBeVisible();
+
+      const resume = dialog.getByRole("button", {
+        name: "恢复自动生成",
+        exact: true,
+      });
+      await expect(resume).toHaveCount(0);
+      await keyInput.fill(`recover_${stamp}`);
+      await expect(resume).toBeVisible();
+      await resume.click();
+      await expect(resume).toHaveCount(0);
+      await expect(keyInput).toHaveValue(/^field_[0-9]+$/);
+      const autoKey = await keyInput.inputValue();
+      await save(dialog);
+      await expect(dialog).toBeHidden();
+      expect(await rowKey(recoverLabel)).toBe(autoKey);
+    });
+
+    await test.step("归档与内置字段键：新建时自动避让冲突", async () => {
+      const archivedLabel = `Archived key ${stamp}`;
+      const created = await openCreate();
+      await created.locator("#fieldLabel").fill(archivedLabel);
+      await expect(created.locator(".form-grid code")).toHaveText(
+        `archived_key_${stamp}`,
+      );
+      await save(created);
+      await expect(created).toBeHidden();
+
+      const archivedRow = page.locator(
+        `#view-fields tr[data-id]:has(td:first-child:text-is("${archivedLabel}"))`,
+      );
+      await expect(archivedRow).toBeVisible();
+      page.once("dialog", (dialog) => void dialog.accept());
+      await archivedRow
+        .getByRole("button", { name: "归档", exact: true })
+        .click();
+      await expect(archivedRow).toHaveCount(0);
+
+      // 已归档字段的键仍在 existingKeys 中：同名新建自动加 _2。
+      const again = await openCreate();
+      await again.locator("#fieldLabel").fill(archivedLabel);
+      await expect(again.locator(".form-grid code")).toHaveText(
+        `archived_key_${stamp}_2`,
+      );
+      await save(again);
+      await expect(again).toBeHidden();
+      expect(await rowKey(archivedLabel)).toBe(`archived_key_${stamp}_2`);
+
+      // 内置键 contract_no 也参与避让：同基键自动加 _2（不保存）。
+      const builtinClash = await openCreate();
+      await builtinClash.locator("#fieldLabel").fill("Contract No");
+      await expect(builtinClash.locator(".form-grid code")).toHaveText(
+        "contract_no_2",
+      );
+      await builtinClash
+        .getByRole("button", { name: "取消", exact: true })
+        .click();
+      await expect(builtinClash).toBeHidden();
     });
 
     await test.step("编辑字段：键仍禁用；内置字段 key 不变", async () => {

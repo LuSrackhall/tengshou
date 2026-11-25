@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // LibreOffice converts .docx with a headless LibreOffice (soffice) process.
@@ -116,14 +118,8 @@ func (l *LibreOffice) Convert(ctx context.Context, docxPath, pdfPath string) err
 	if err := copyFile(docxPath, input); err != nil {
 		return fmt.Errorf("读取 Word 文件失败：%w", err)
 	}
-	profileURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(profileDir)}).String()
-	cmd := exec.CommandContext(ctx, bin,
-		"--headless", "--norestore", "--nolockcheck", "--nodefault", "--nofirststartwizard",
-		"-env:UserInstallation="+profileURL,
-		"--convert-to", "pdf:writer_pdf_Export",
-		"--outdir", outDir,
-		input,
-	)
+	profileURL := fileURL(profileDir)
+	cmd := libreOfficeCommand(ctx, bin, profileURL, outDir, input)
 	if extra := fontConfigEnv(temp); len(extra) > 0 {
 		cmd.Env = append(os.Environ(), extra...)
 	}
@@ -156,6 +152,37 @@ func (l *LibreOffice) Convert(ctx context.Context, docxPath, pdfPath string) err
 	return writeFileAtomic(pdfPath, data)
 }
 
+// libreOfficeCommand builds the headless conversion command. It is factored
+// out so tests can verify the profile URL and wait behaviour without starting
+// LibreOffice.
+func libreOfficeCommand(ctx context.Context, bin, profileURL, outDir, input string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, bin,
+		"--headless", "--norestore", "--nolockcheck", "--nodefault", "--nofirststartwizard",
+		"-env:UserInstallation="+profileURL,
+		"--convert-to", "pdf:writer_pdf_Export",
+		"--outdir", outDir,
+		input,
+	)
+	// Context cancellation kills only the direct child. A leftover
+	// soffice.bin can keep the output pipes open, so CombinedOutput would
+	// wait forever; WaitDelay bounds that wait after the kill.
+	cmd.WaitDelay = 10 * time.Second
+	return cmd
+}
+
+// fileURL renders an absolute filesystem path as a file:// URL. Windows
+// paths such as C:/Users/... must gain a slash after the scheme
+// (file:///C:/Users/...): without it the drive letter parses as the URL
+// host, and LibreOffice hangs on the invalid profile URL instead of
+// converting. POSIX paths already start with "/" and are unaffected.
+func fileURL(path string) string {
+	p := filepath.ToSlash(path)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return (&url.URL{Scheme: "file", Path: p}).String()
+}
+
 // fontConfigEnv 为 LibreOffice 转换进程准备 fontconfig 环境。
 //
 // macOS 上 LibreOffice 自带的 fontconfig 默认配置不会扫描系统字体目录
@@ -172,10 +199,14 @@ func fontConfigEnv(tempDir string) []string {
 	}
 	cacheDir := filepath.Join(tempDir, "fontconfig-cache")
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		slog.Warn("创建 macOS 字体缓存目录失败，将回退默认字体配置（中文可能显示为空白）",
+			"dir", cacheDir, "error", err)
 		return nil
 	}
 	confPath := filepath.Join(tempDir, "fonts.conf")
 	if err := os.WriteFile(confPath, []byte(macOSFontsConf(cacheDir)), 0o600); err != nil {
+		slog.Warn("写入 macOS 字体配置失败，将回退默认字体配置（中文可能显示为空白）",
+			"path", confPath, "error", err)
 		return nil
 	}
 	return []string{"FONTCONFIG_FILE=" + confPath}

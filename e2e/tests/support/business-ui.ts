@@ -36,6 +36,14 @@ function appUrl(page: Page, path: string): string {
   return new URL(path, page.url()).toString();
 }
 
+/**
+ * 导入 .docx 要把 Word 转成 PDF：服务端转换上限 3 分钟（导入端点已清除
+ * 服务端 WriteTimeout），Windows 还会先尝试 Word COM 再回退 LibreOffice。
+ * 等待取 240s（高于 180s 转换上限 + 余量），确保服务端超时后能回显真实
+ * 错误文案，而不是把「服务端已返回错误」误判为「界面卡死」。
+ */
+const IMPORT_WAIT_MS = 240_000;
+
 /** 模板页导入 .docx（产品转换），自动打开编辑器后关闭并返回最新版本 id。 */
 export async function importTemplate(
   page: Page,
@@ -53,11 +61,25 @@ export async function importTemplate(
   await expect(dialog).toBeVisible();
   await dialog.locator("#tplImportName").fill(name);
   await dialog.getByRole("button", { name: "导入", exact: true }).click();
-  // 首次转换可能明显超过默认的 15s：Windows 会先尝试 Word COM 再回退
-  // LibreOffice，且 LibreOffice 首次运行要初始化配置与字体缓存。用户
-  // 此时看到的是「导入中」的禁用按钮，所以这里与下方编辑器打开的等待
-  // 保持一致（120s）。
-  await expect(dialog).toBeHidden({ timeout: 120_000 });
+  // 等待强度不变；失败时附带界面错误文本与模板表行数，让报告能直接
+  // 区分「转换仍在进行」与「服务端已返回错误」。
+  try {
+    await expect(dialog).toBeHidden({ timeout: IMPORT_WAIT_MS });
+  } catch (error) {
+    const dialogError = await page
+      .locator("#templateImportErrors")
+      .textContent({ timeout: 2_000 })
+      .catch(() => "");
+    const templateRows = await page
+      .locator("#templateTable tr[data-id]")
+      .count()
+      .catch(() => 0);
+    throw new Error(
+      `导入弹窗在 ${IMPORT_WAIT_MS / 1000}s 内未关闭；` +
+        `界面错误：${dialogError?.trim() || "无"}；模板表行数：${templateRows}`,
+      { cause: error },
+    );
+  }
   await expect(page.locator("#tplCloseBtn")).toBeVisible({ timeout: 120_000 });
   const current = (await page.locator("#tplCurrent").textContent()) ?? "";
   let pageCount = Number(current.match(/·\s*(\d+)\s*页/)?.[1] ?? 0);

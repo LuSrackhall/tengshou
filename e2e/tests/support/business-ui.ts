@@ -53,7 +53,11 @@ export async function importTemplate(
   await expect(dialog).toBeVisible();
   await dialog.locator("#tplImportName").fill(name);
   await dialog.getByRole("button", { name: "导入", exact: true }).click();
-  await expect(dialog).toBeHidden();
+  // 首次转换可能明显超过默认的 15s：Windows 会先尝试 Word COM 再回退
+  // LibreOffice，且 LibreOffice 首次运行要初始化配置与字体缓存。用户
+  // 此时看到的是「导入中」的禁用按钮，所以这里与下方编辑器打开的等待
+  // 保持一致（120s）。
+  await expect(dialog).toBeHidden({ timeout: 120_000 });
   await expect(page.locator("#tplCloseBtn")).toBeVisible({ timeout: 120_000 });
   const current = (await page.locator("#tplCurrent").textContent()) ?? "";
   let pageCount = Number(current.match(/·\s*(\d+)\s*页/)?.[1] ?? 0);

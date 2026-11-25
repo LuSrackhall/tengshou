@@ -25,6 +25,11 @@ export default defineConfig({
     ["list"],
     // HTML 报告完全离线（不引用 CDN），直接作为 Actions 工件上传。
     ["html", { outputFolder: "playwright-report", open: "never" }],
+    // 业务验收报告：测试结束后把过程 WebM 复制到报告目录并补全播放器。
+    [
+      "./tests/support/report-video-reporter.ts",
+      { outputDir: "test-results/business-acceptance" },
+    ],
   ],
   use: {
     ...device,

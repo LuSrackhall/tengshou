@@ -11,8 +11,11 @@
 // E2E_REQUIRE_DOCX=1，转换器缺失必须失败而不是跳过。
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { Page } from "@playwright/test";
 import { expect, test } from "./support/business-fixture";
 import { repoRoot } from "./support/app";
+import type { FrameRecorder } from "./support/business-frames";
+import type { PlacementBox } from "./support/business-pdf";
 import { AcceptanceReport } from "./support/business-report";
 import {
   CONTRACT_TITLE,
@@ -28,6 +31,7 @@ import {
   createContract,
   createFields,
   createParty,
+  fetchTemplatePlacements,
   generateContract,
   importAndAttachSeal,
   importTemplate,
@@ -112,6 +116,51 @@ function describeConverters(items: ConverterItem[]): string {
     .join("；");
 }
 
+/**
+ * 打开界面后的三张分镜：新手引导 / 合同台账、本机自检的转换器行、右上角
+ * 实时状态。全新数据目录默认停在引导页；若不在引导页则记录说明而不是失败。
+ */
+async function captureFirstOpen(
+  page: Page,
+  frames: FrameRecorder,
+): Promise<void> {
+  await frames.capture("① 打开腾手（发布形态），首次进入显示新手引导", {
+    wholePage: true,
+  });
+  const onboarding = page.locator("#view-onboarding");
+  await page
+    .waitForFunction(
+      () =>
+        document
+          .querySelector("#view-onboarding")
+          ?.classList.contains("active") ?? false,
+      null,
+      { timeout: 5_000 },
+    )
+    .catch(() => undefined);
+  const onOnboarding = await onboarding
+    .evaluate((element) => element.classList.contains("active"))
+    .catch(() => false);
+  if (onOnboarding) {
+    await page.locator("#onboardRecheckBtn").click();
+    const row = page
+      .locator("#onboardCheckList .onboard-check")
+      .filter({ hasText: "Word 转 PDF（模板导入）" });
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    await frames.capture(
+      "② 本机自检显示转换器可用——第 1 步的界面证据（红框处）",
+      { targets: [row] },
+    );
+  } else {
+    await frames.capture("② 当前不在新手引导页，未展示本机自检面板", {
+      targets: [page.locator("#tabs")],
+    });
+  }
+  await frames.capture("③ 右上角『实时状态』表示界面与后台实时同步", {
+    targets: [page.locator(".live-status")],
+  });
+}
+
 test.describe.configure({ timeout: 600_000 });
 
 test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖章 → 最终 PDF）", () => {
@@ -149,8 +198,9 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           action: "确认 Word → PDF 转换器可用",
           expected:
             "本机已安装 Microsoft Word 或 LibreOffice，能把 .docx 合同模板转成 PDF。",
+          allowEmptyFrames: true,
         },
-        async () => {
+        async (frames) => {
           const converters = await page.request.get(
             `${app.baseURL}/app/api/v1/converters`,
           );
@@ -172,6 +222,14 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
             }
             test.skip(true, reason);
           }
+          frames.card({
+            title: "环境检查（这一步不是用户操作，是后续步骤的前提）",
+            tone: "info",
+            lines: [
+              `转换器 API 状态：${describeConverters(items)}`,
+              "用途：导入 Word 合同时由可用转换器把文档转成 PDF，界面再在 PDF 上标定字段、签名与公章。",
+            ],
+          });
           return (
             `转换器 API 状态：${describeConverters(items)}。` +
             "实际使用的转换器在模板导入后以模板详情的 converter 字段为准。"
@@ -195,6 +253,7 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
       );
       let templateId = "";
       let templatePageCount = 0;
+      let calibratedTemplateId = "";
       let contractId = "";
       let contractNo = "";
       let partyAId = "";
@@ -206,13 +265,14 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           action: "打开发布形态界面",
           expected: "腾手合同台账正常打开，顶部标签栏与实时状态可见。",
         },
-        async () => {
+        async (frames) => {
           const response = await page.goto(`${app.baseURL}/app/`, {
             waitUntil: "domcontentloaded",
           });
           expect(response?.status()).toBe(200);
           await expect(page.locator("#tabs")).toBeVisible();
           await expect(page.locator(".live-status")).toBeVisible();
+          await captureFirstOpen(page, frames);
           return `界面已打开（${app.baseURL}/app/），顶栏标签与实时状态正常；转换器预检见上一步。`;
         },
       );
@@ -225,8 +285,13 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           expected:
             "选择仓库内的 .docx 后，产品把它转换成 PDF 并自动打开标定编辑器。",
         },
-        async () => {
-          const imported = await importTemplate(page, docxPath, TEMPLATE_NAME);
+        async (frames) => {
+          const imported = await importTemplate(
+            page,
+            docxPath,
+            TEMPLATE_NAME,
+            frames,
+          );
           templateId = imported.templateId;
           templatePageCount = imported.pageCount;
           expect(imported.converter).not.toBe("");
@@ -247,7 +312,7 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           expected:
             "在「字段」页建立合同专有字段（≥6 个）和相对方联系人字段，保存后立即可用。",
         },
-        async () => await createFields(page),
+        async (frames) => await createFields(page, frames),
       );
 
       await report.runStep(
@@ -258,11 +323,14 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           expected:
             "甲方合作社与乙方农户的姓名、证件号、地址、电话、联系人分别保存为两份档案。",
         },
-        async () => {
-          partyAId = await createParty(page, PARTY_A_VALUES);
-          const partyBId = await createParty(page, PARTY_B_VALUES);
+        async (frames) => {
+          partyAId = await createParty(page, PARTY_A_VALUES, frames);
+          const partyBId = await createParty(page, PARTY_B_VALUES, frames);
           expect(partyAId).not.toBe("");
           expect(partyBId).not.toBe("");
+          await frames.capture("⑤ 两份档案就绪，后续合同可直接引用", {
+            region: page.locator("#view-parties"),
+          });
           return (
             `甲方档案「${PARTY_A_NAME}（单位）」与乙方档案「${PARTY_B_NAME}（个人）」已保存；` +
             "联系人李国强写入甲方档案。"
@@ -278,8 +346,8 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           expected:
             "按 Word 里的「字段名：＿＿」位置，把 24 个字段、乙方签名与甲方公章位置逐个拖到对应框内。",
         },
-        async () =>
-          await calibrateTemplate(page, templateId, PLACEMENTS),
+        async (frames) =>
+          await calibrateTemplate(page, templateId, PLACEMENTS, frames),
       );
 
       await report.runStep(
@@ -289,8 +357,15 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           action: "保存标定为新模板版本",
           expected: "点击「保存为新版本」后生成 v2，位置列表保留全部 26 个位置。",
         },
-        async () =>
-          `标定已保存为新版本：${await saveCalibration(page, PLACEMENTS.length)}；旧版本 v1 保留。`,
+        async (frames) => {
+          const saved = await saveCalibration(
+            page,
+            PLACEMENTS.length,
+            frames,
+          );
+          calibratedTemplateId = saved.templateId;
+          return `标定已保存为新版本：${saved.label}；旧版本 v1 保留。`;
+        },
       );
 
       await report.runStep(
@@ -301,8 +376,8 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           expected:
             "合同保存为草稿，编号自动分配；甲方=幸福村合作社，相对方=王建国，金额 160,000.00 元，标的与交付信息齐全。",
         },
-        async () => {
-          const created = await createContract(page, partyAId);
+        async (frames) => {
+          const created = await createContract(page, partyAId, frames);
           contractId = created.contractId;
           contractNo = created.contractNo;
           return (
@@ -313,9 +388,6 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         },
       );
 
-      // extras 作为 runStep 的额外截图参数传入（报告会统一 attach 一次），
-      // 因此声明在调用之前，回调内只负责收集签名页与桌面端截图。
-      const extras: Buffer[] = [];
       await report.runStep(
         page,
         testInfo,
@@ -324,12 +396,15 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           expected:
             "生成一次性二维码后，第二页面用鼠标手写多笔并提交；手机页显示「签名已提交」，桌面弹窗显示「签名已保存」。",
         },
-        async () => {
-          const signed = await signByPhone(page, app.baseURL, contractId);
-          extras.push(signed.phoneShot, signed.desktopShot);
+        async (frames) => {
+          const signed = await signByPhone(
+            page,
+            app.baseURL,
+            contractId,
+            frames,
+          );
           return signed.actual;
         },
-        extras,
       );
 
       await report.runStep(
@@ -340,8 +415,14 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           expected:
             "白底红章被产品自动去底并裁剪，卡片出现在「公章」页，且已关联到本合同。",
         },
-        async () =>
-          await importAndAttachSeal(page, sealPath, partyAId, contractId),
+        async (frames) =>
+          await importAndAttachSeal(
+            page,
+            sealPath,
+            partyAId,
+            contractId,
+            frames,
+          ),
       );
 
       await report.runStep(
@@ -351,7 +432,7 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           action: "用目标合同预览版式",
           expected: "生成面板默认选中已标定的模板版本，预览 PDF 能正常打开显示。",
         },
-        async () => await previewContract(page, contractId),
+        async (frames) => await previewContract(page, contractId, frames),
       );
 
       await report.runStep(
@@ -362,9 +443,18 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           expected:
             "生成成功后，生成历史出现「成功」，下载得到以 %PDF- 开头的合同文件。",
         },
-        async () => {
+        async (frames) => {
           pdfPath = testInfo.outputPath(PDF_NAME);
-          const generated = await generateContract(page, pdfPath);
+          const generated = await generateContract(page, pdfPath, frames);
+          frames.card({
+            title: "下载文件信息",
+            tone: "pass",
+            lines: [
+              `文件名：${PDF_NAME}`,
+              `大小：${generated.file.sizeKB} KB`,
+              `文件头：${generated.file.header}（可被任何 PDF 阅读器打开）`,
+            ],
+          });
           return generated.actual;
         },
       );
@@ -376,14 +466,31 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           action: "核对最终合同 PDF",
           expected:
             "页数与模板一致；文本包含合同编号、金额、双方名称、标的等关键值；签名与公章两张图片确实套印。",
+          requirePdfPages: true,
         },
-        async () => {
+        async (frames) => {
           const bytes = await readFile(pdfPath);
+          let placements: PlacementBox[] = [];
+          try {
+            placements = calibratedTemplateId
+              ? await fetchTemplatePlacements(page, calibratedTemplateId)
+              : [];
+          } catch (error) {
+            frames.card({
+              title: "PDF 标定框读取提示",
+              tone: "info",
+              lines: [
+                "读取模板标定位置失败，第 3 页签名/公章框可能缺失：" +
+                  (error instanceof Error ? error.message : String(error)),
+              ],
+            });
+          }
           const verified = await verifyFinalPdf(
             page,
             bytes,
             templatePageCount,
             contractNo,
+            { placements, frames },
           );
           pdfDetails.push(...verified.details);
           return verified.actual;
@@ -396,12 +503,21 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         {
           action: "检查浏览器控制台",
           expected: "从打开界面到生成合同，全程没有 console error 或未捕获异常。",
+          allowEmptyFrames: true,
         },
-        async () => {
+        async (frames) => {
           expect(
             consoleErrors,
             `浏览器控制台出现错误：\n${consoleErrors.join("\n")}`,
           ).toEqual([]);
+          frames.card({
+            title: "浏览器控制台检查通过",
+            tone: "pass",
+            lines: [
+              "全程无 console error",
+              "无未捕获异常（pageerror）",
+            ],
+          });
           return "全程未发现浏览器 console error 或未捕获异常。";
         },
       );

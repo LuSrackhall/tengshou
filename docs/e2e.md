@@ -59,8 +59,8 @@ e2e/test-results/business-acceptance/农产品购销合同-已签字盖章.pdf
 
 主流程：
 
-1. 导入 `e2e/fixtures/contracts/农产品购销合同.docx`，产品调用 LibreOffice /
-   Word 转成 PDF 并自动进入标定编辑器；
+1. 导入 `e2e/fixtures/contracts/农产品购销合同.docx`，产品调用转换器（Windows
+   优先 Microsoft Word，其余平台用 LibreOffice）转成 PDF 并自动进入标定编辑器；
 2. 在「字段」页建立合同专有字段（标的名称、规格、数量、单价、大写金额、
    交货时间/地点、验收标准、付款方式、违约责任、争议解决）与相对方联系人字段；
 3. 建立甲方（单位）与乙方（个人）档案；
@@ -83,11 +83,17 @@ e2e/test-results/business-acceptance/农产品购销合同-已签字盖章.pdf
 
 本地前置与平台：
 
-- 本场景默认**只在 Linux CI 运行**（e2e Linux job 安装 `libreoffice-writer`、
-  `fonts-noto-cjk`）；Windows / macOS 继续只跑场景 A、B。
-- 本地调试需自行安装 LibreOffice，并设 `E2E_BUSINESS_NON_LINUX=1` 才运行；
-  本机没有 Word / LibreOffice 时默认 `test.skip` 并给出中文原因。
-- CI 设 `E2E_REQUIRE_DOCX=1`：转换器缺失必须失败，不允许静默跳过。
+- 本场景在 Linux、Windows、macOS 三端 CI 都真实运行（见下方「场景 × 平台矩阵」）；
+  CI 三端都安装转换器并设 `E2E_REQUIRE_DOCX=1`，转换器缺失必须失败，不允许静默跳过。
+- 本地运行前需自行安装转换器：
+  - Windows：Microsoft Word（产品优先用 COM 导出）或 LibreOffice；
+  - macOS / Linux：LibreOffice（产品的 Word COM 转换仅支持 Windows，macOS 上的
+    Word 不参与自动转换）。
+- 本机没有可用转换器且未设 `E2E_REQUIRE_DOCX=1` 时，用例以中文原因 `test.skip`，
+  提示安装 LibreOffice 或 Windows 上的 Microsoft Word。
+- 报告「运行环境」行写明平台与浏览器项目；转换器步骤展示 `/app/api/v1/converters`
+  的真实状态，导入后以模板详情的 `converter` 字段说明**实际使用**的转换器
+  （Windows 未安装 Word 时会回退 LibreOffice，报告不会声称 Word 可用）。
 - 扫码签名要求 `allow_lan=true`，本场景启动的 serve **不带** `--loopback`
   （`business-fixture.ts`），测试仍以 127.0.0.1 访问。
 
@@ -130,11 +136,33 @@ npm run report                    # 打开 HTML 报告
 | `TENGHSHOU_FONT` | 中文字体（Linux CI 必设，见下方） |
 | `E2E_BROWSER` | `chromium` / `webkit`，覆盖默认浏览器 |
 | `E2E_KEEP_DATA` | 设为 `1` 时保留临时数据目录，便于排查 |
-| `E2E_REQUIRE_DOCX` | 设为 `1` 时，场景 C 缺少 Word→PDF 转换器必须失败（CI Linux 已设） |
-| `E2E_BUSINESS_NON_LINUX` | 设为 `1` 时允许在非 Linux 本地调试场景 C（需自装 LibreOffice） |
+| `E2E_REQUIRE_DOCX` | 设为 `1` 时，场景 C 缺少 Word→PDF 转换器必须失败（CI 三端均设） |
 
 未设置 `PLAYWRIGHT_BASE_URL` 时，每个测试文件会自行：取空闲端口 → 在系统临时
 目录建数据目录 → 启动 `tengshou-cli serve --loopback` → 测试结束回收进程与目录。
+
+## 场景 × 平台矩阵
+
+三端跑同一套场景，场景 C 不再有平台门槛：
+
+| 场景 | Linux · Chromium | Windows · Chromium | macOS · WebKit |
+| --- | --- | --- | --- |
+| A 合同主流程 | 运行 | 运行 | 运行 |
+| B MCP 跨层联动 | 运行 | 运行 | 运行 |
+| C 真实业务场景验收 | 运行（LibreOffice） | 运行（装有 Word 时优先 Word，否则回退 LibreOffice） | 运行（LibreOffice） |
+
+CI 的 `e2e` job 在每一端都安装转换器，并统一设置 `E2E_REQUIRE_DOCX=1`：
+转换器缺失时任务失败，不会跳过场景 C。
+
+| 平台 | 安装方式 | 产品检测路径 |
+| --- | --- | --- |
+| Linux | `apt-get install libreoffice-writer`（另装 `fonts-noto-cjk` 供渲染） | `/usr/bin/soffice` 等 |
+| Windows | `choco install libreoffice-fresh -y --no-progress` | `C:\Program Files\LibreOffice\program\soffice.exe` |
+| macOS | `brew install --cask libreoffice` | `/Applications/LibreOffice.app/Contents/MacOS/soffice` |
+
+Windows 上产品的转换链先尝试 Microsoft Word（COM）。该检测只确认 PowerShell
+可启动，不代表 Word 已安装；转换失败会回退 LibreOffice。报告以导入模板记录的
+`converter` 字段说明实际使用的转换器，不会把「平台可尝试 Word」写成「Word 可用」。
 
 ## 三端与浏览器
 
@@ -144,9 +172,13 @@ npm run report                    # 打开 HTML 报告
 | Windows | Chromium | 近似桌面壳的 WebView2 |
 | macOS | WebKit | 近似桌面壳的 WKWebView |
 
-三端跑同一套场景 A、B。场景 C（真实业务验收）默认只在 Linux 运行，因为
-docx→PDF 依赖 CI 安装的 LibreOffice；Windows / macOS 不安装转换器，用例在
-收集阶段跳过，不阻塞现有门禁。CI 里 `e2e` job 先取 `frontend` job 的构建产物，
+桌面壳（Wails）用系统 WebView 渲染同一份 `go:embed` 界面，但 Wails 原生窗口
+无法被 Playwright 附加——这是已知技术限制。E2E 因此用**同一份 UI 资源**在
+Chromium / WebKit 中驱动发布形态服务：Windows 的 Chromium 近似 WebView2，
+macOS 的 WebKit 近似 WKWebView。三端验证覆盖界面层与发布形态服务，不覆盖
+原生窗口外壳本身。
+
+三端都运行场景 A、B、C。CI 里 `e2e` job 先取 `frontend` job 的构建产物，
 再用 `go run ./tools/tengshoubuild build cli` 构建本端 CLI，然后执行套件；
 PR 与 `main` 均会执行，失败阻塞合入。
 
@@ -168,10 +200,12 @@ CI 在 `e2e` job 中**始终**上传 `e2e/playwright-report` 与 `e2e/test-resul
 `e2e-report-windows-chromium` / `e2e-report-macos-webkit`。下载后在本地解压，
 打开 `playwright-report/index.html` 即可离线查看。
 
-Linux 还会额外上传场景 C 的**业务验收工件**：
-`business-acceptance-linux-chromium`，内容是
+三端还会各自上传场景 C 的**业务验收工件**：
+`business-acceptance-linux-chromium` / `business-acceptance-windows-chromium` /
+`business-acceptance-macos-webkit`，内容是
 `e2e/test-results/business-acceptance/`（中文报告 + 最终合同 PDF）。产品负责人
-只需下载这一个工件，解压后双击 `业务验收报告.html`，无需安装任何软件。
+按平台下载对应工件，解压后双击 `业务验收报告.html`，无需安装任何软件。报告
+「运行环境」行标明平台与浏览器，转换器步骤与实际转换器信息随平台如实呈现。
 
 ## 定位界面回归
 

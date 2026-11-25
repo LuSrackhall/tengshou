@@ -27,6 +27,8 @@ import {
 export interface ImportedTemplate {
   templateId: string;
   pageCount: number;
+  /** 产品记录的转换器：word / libreoffice（模板详情的 converter 字段）。 */
+  converter: string;
 }
 
 /** page.request 需要绝对地址；用当前页面 origin 拼 app API 路径。 */
@@ -64,9 +66,13 @@ export async function importTemplate(
   expect(templateId).not.toBe("");
   const detail = (await (
     await page.request.get(appUrl(page, `/app/api/v1/templates/${templateId}`))
-  ).json()) as { page_count?: number };
+  ).json()) as { page_count?: number; converter?: string };
   pageCount = detail.page_count ?? pageCount;
-  return { templateId, pageCount };
+  return {
+    templateId,
+    pageCount,
+    converter: detail.converter ?? "",
+  };
 }
 
 export async function createFields(

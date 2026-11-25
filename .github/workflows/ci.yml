@@ -108,7 +108,10 @@ jobs:
     name: E2E 界面测试（${{ matrix.label }}）
     needs: frontend
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # 三端都安装 Word→PDF 转换器（Linux apt / Windows Chocolatey /
+    # macOS Homebrew cask），安装耗时 2–10 分钟；45 分钟上限只放宽时间，
+    # 不降低任何测试内容。
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -149,6 +152,25 @@ jobs:
           # （TrueType）继续供 Go PDF 子集化使用。
           sudo apt-get install -y fonts-arphic-uming fonts-noto-cjk libreoffice-writer
           echo "TENGHSHOU_FONT=/usr/share/fonts/truetype/arphic/uming.ttc" >> "$GITHUB_ENV"
+      - name: 安装 LibreOffice（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install libreoffice-fresh -y --no-progress
+          # 产品检测路径：internal/doctopdf/libreoffice.go 的 Windows 候选。
+          $soffice = Join-Path $env:ProgramFiles 'LibreOffice\program\soffice.exe'
+          if (-not (Test-Path -LiteralPath $soffice)) {
+            throw "LibreOffice 未安装到产品检测路径：$soffice"
+          }
+      - name: 安装 LibreOffice（macOS）
+        if: runner.os == 'macOS'
+        env:
+          # runner 已预装 Homebrew；跳过一次自动更新，把时间留给 cask 安装。
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          brew install --cask libreoffice
+          # 产品检测路径：internal/doctopdf/libreoffice.go 的 macOS 候选。
+          test -x "/Applications/LibreOffice.app/Contents/MacOS/soffice"
       - name: 构建本端 tengshou-cli（与发布同一命令）
         env:
           CGO_ENABLED: "0"
@@ -172,9 +194,9 @@ jobs:
         working-directory: e2e
         env:
           TENGHSHOU_CLI: ${{ github.workspace }}/${{ matrix.cli }}
-          # Linux 已安装 LibreOffice：真实业务场景验收必须真实运行，
-          # 转换器缺失时失败而不是静默跳过。Win/macOS 不设该变量。
-          E2E_REQUIRE_DOCX: ${{ runner.os == 'Linux' && '1' || '' }}
+          # 三端都已安装转换器：真实业务场景验收必须真实运行，
+          # 转换器缺失时失败而不是静默跳过。
+          E2E_REQUIRE_DOCX: "1"
         run: npx playwright test
       - name: 上传可视报告与工件（每 OS 一份，保留 90 天）
         if: always()
@@ -187,11 +209,11 @@ jobs:
           retention-days: 90
           include-hidden-files: true
           if-no-files-found: warn
-      - name: 上传业务验收报告与最终合同（Linux，用户可读）
-        if: always() && runner.os == 'Linux'
+      - name: 上传业务验收报告与最终合同（三端各一份，用户可读）
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: business-acceptance-linux-chromium
+          name: business-acceptance-${{ matrix.artifact }}
           path: e2e/test-results/business-acceptance
           retention-days: 90
           include-hidden-files: true

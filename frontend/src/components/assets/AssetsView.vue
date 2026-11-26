@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 房产档案（te-to7tr）：工具栏搜索 / 启用状态筛选、台账表格、新建/编辑与
-// 行内停用/启用。在租/空置由后端按合同派生，本珠还没有合同能引用资产，
-// 因此列表统一显示空置；合同侧联动在后续珠接入。
+// 行内停用/启用。在租/空置由后端按「存在生效中且未终止的合同」派生
+// （te-thrth 接入合同引用），本页只读展示。
 //
 // 实时刷新：shell/realtime.ts 收到变更后派发 tengshou:data-changed，本组件
 // 据此重取，外部（后续 MCP/agent）写入数秒内可见。
@@ -169,7 +169,7 @@ onBeforeUnmount(() => {
     <button type="button" id="newAssetBtn" class="primary" @click="openCreate">新建房产</button>
   </div>
   <div id="assetSummary" class="summary">{{ loaded ? summary : "" }}</div>
-  <p class="hint">在租 / 空置由「生效中且未终止的合同」自动派生，不手工维护；合同关联在后续版本接入。</p>
+  <p class="hint">在租 / 空置由「生效中且未终止的合同」自动派生，不手工维护；合同到期不会自动释放房产，需显式归档/终止合同。</p>
   <div class="table-wrap">
     <table id="assetTable" class="data-table">
       <template v-if="loaded">

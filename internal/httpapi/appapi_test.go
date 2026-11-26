@@ -375,3 +375,172 @@ func TestAppExcelRoundTripEndpoints(t *testing.T) {
 		t.Fatalf("keep_system contract = %+v err=%v", contract, err)
 	}
 }
+
+// te-thrth M4：台账导出包含租赁起止日两列，改表后 preview/commit 能把
+// 租赁日期回写合同。这是需求「租赁起止日进台账、可导入导出」的直接证据。
+func TestAppExcelLedgerLeaseRoundTrip(t *testing.T) {
+	f := newFixture(t)
+
+	resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/assets", map[string]any{
+		"name": "台账租赁房产", "address": "幸福路 9 号", "room_no": "902",
+	}, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("create asset: %d %s", resp.StatusCode, body)
+	}
+	assetID, _ := decodeAppItem(t, body)["id"].(string)
+	if assetID == "" {
+		t.Fatalf("asset id missing: %s", body)
+	}
+
+	resp, body = f.appRequest(t, http.MethodPost, "/app/api/v1/contracts", map[string]any{
+		"year": 2027, "title": "台账租期合同", "party_b_id": f.partyBID,
+		"asset_id": assetID, "lease_start": "2027-03-01", "lease_end": "2028-02-29",
+		"data": map[string]any{},
+	}, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("create contract: %d %s", resp.StatusCode, body)
+	}
+	contract := decodeAppItem(t, body)
+	contractID, _ := contract["id"].(string)
+	contractNo, _ := contract["contract_no"].(string)
+	if contractID == "" || contractNo == "" {
+		t.Fatalf("contract id/no missing: %s", body)
+	}
+
+	// 导出台账：表头必须有租赁起止日，且本合同的单元格带出已保存的日期。
+	resp, ledger := f.get(t, "/app/api/v1/excel/ledger", false)
+	if resp.StatusCode != 200 || len(ledger) == 0 {
+		t.Fatalf("ledger: %d", resp.StatusCode)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(ledger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer book.Close()
+	rows, err := book.GetRows("合同台账")
+	if err != nil || len(rows) < 2 {
+		t.Fatalf("ledger rows: %v", err)
+	}
+	startCol, endCol, noCol := -1, -1, -1
+	for i, header := range rows[0] {
+		switch strings.TrimSpace(header) {
+		case "租赁起租日":
+			startCol = i
+		case "租赁到期日":
+			endCol = i
+		case "合同编号":
+			noCol = i
+		}
+	}
+	if startCol < 0 || endCol < 0 || noCol < 0 {
+		t.Fatalf("ledger header missing lease columns: %v", rows[0])
+	}
+	rowIndex := 0
+	for i, row := range rows[1:] {
+		if noCol >= len(row) || strings.TrimSpace(row[noCol]) != contractNo {
+			continue
+		}
+		if startCol >= len(row) || endCol >= len(row) {
+			t.Fatalf("lease columns out of range: %v", row)
+		}
+		if row[startCol] != "2027-03-01" || row[endCol] != "2028-02-29" {
+			t.Fatalf("ledger lease cells = %q %q", row[startCol], row[endCol])
+		}
+		rowIndex = i + 2 // Excel 行号，第 1 行是表头
+		break
+	}
+	if rowIndex == 0 {
+		t.Fatalf("ledger row for %s not found", contractNo)
+	}
+
+	// 修改台账里的租赁起止日，导入应回写合同（系统侧未改 -> 普通更新）。
+	startCell, _ := excelize.CoordinatesToCellName(startCol+1, rowIndex)
+	endCell, _ := excelize.CoordinatesToCellName(endCol+1, rowIndex)
+	if err := book.SetCellValue("合同台账", startCell, "2027-04-01"); err != nil {
+		t.Fatal(err)
+	}
+	if err := book.SetCellValue("合同台账", endCell, "2028-03-31"); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := book.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	resp, preview := f.appRequest(t, http.MethodPost, "/app/api/v1/excel/preview", map[string]any{
+		"file_base64": encoded,
+		"options":     map[string]any{"file_name": "台账.xlsx"},
+	}, nil)
+	if resp.StatusCode != 200 || !strings.Contains(string(preview), `"action":"update"`) ||
+		!strings.Contains(string(preview), contractNo) {
+		t.Fatalf("lease preview: %d %s", resp.StatusCode, preview)
+	}
+
+	resp, committed := f.appRequest(t, http.MethodPost, "/app/api/v1/excel/commit", map[string]any{
+		"file_base64": encoded,
+		"options":     map[string]any{"file_name": "台账.xlsx"},
+	}, nil)
+	if resp.StatusCode != 200 || !strings.Contains(string(committed), `"updated":1`) {
+		t.Fatalf("lease commit: %d %s", resp.StatusCode, committed)
+	}
+	stored, err := f.reader.GetContract(context.Background(), contractID)
+	if err != nil || stored.LeaseStart != "2027-04-01" || stored.LeaseEnd != "2028-03-31" {
+		t.Fatalf("lease round trip = %+v err=%v", stored, err)
+	}
+}
+
+// te-thrth：合同三方选择（甲方/租户/房产）与租赁起止日期的应用接口链路。
+func TestAppContractAssetAndLease(t *testing.T) {
+	f := newFixture(t)
+	resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/assets", map[string]any{
+		"name": "幸福里 501", "address": "幸福路 1 号", "room_no": "501",
+	}, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("create asset: %d %s", resp.StatusCode, body)
+	}
+	asset := decodeAppItem(t, body)
+	assetID, _ := asset["id"].(string)
+	if assetID == "" {
+		t.Fatalf("asset id missing: %s", body)
+	}
+
+	resp, body = f.appRequest(t, http.MethodPost, "/app/api/v1/contracts", map[string]any{
+		"year": 2026, "title": "幸福里租赁合同", "party_b_id": f.partyBID,
+		"asset_id": assetID, "lease_start": "2026-01-01", "lease_end": "2026-12-31",
+		"status": "active", "data": map[string]any{},
+	}, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("create contract: %d %s", resp.StatusCode, body)
+	}
+	contract := decodeAppItem(t, body)
+	if contract["asset_id"] != assetID || contract["lease_start"] != "2026-01-01" ||
+		contract["lease_end"] != "2026-12-31" {
+		t.Fatalf("contract asset/lease = %+v", contract)
+	}
+
+	resp, body = f.get(t, "/app/api/v1/assets/"+assetID, false)
+	if resp.StatusCode != 200 || !strings.Contains(string(body), `"lease_status":"rented"`) {
+		t.Fatalf("asset lease status: %d %s", resp.StatusCode, body)
+	}
+	resp, body = f.get(t, "/app/api/v1/contracts/"+contract["id"].(string), false)
+	if resp.StatusCode != 200 || !strings.Contains(string(body), `"asset":{"id":"`+assetID+`"`) {
+		t.Fatalf("contract detail asset: %d %s", resp.StatusCode, body)
+	}
+
+	// 租期重叠只提示，不阻断保存。
+	resp, body = f.appRequest(t, http.MethodPost, "/app/api/v1/contracts", map[string]any{
+		"year": 2026, "title": "幸福里租赁合同（重复）", "party_b_id": f.partyBID,
+		"asset_id": assetID, "lease_start": "2026-06-01", "lease_end": "2027-05-31",
+		"data": map[string]any{},
+	}, nil)
+	if resp.StatusCode != 200 || !strings.Contains(string(body), "租期与合同") {
+		t.Fatalf("overlap warning: %d %s", resp.StatusCode, body)
+	}
+
+	// 被合同引用的房产不能删除（in_use → 409）。
+	resp, body = f.appRequest(t, http.MethodDelete, "/app/api/v1/assets/"+assetID, nil, nil)
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "不能删除") {
+		t.Fatalf("delete referenced asset: %d %s", resp.StatusCode, body)
+	}
+}

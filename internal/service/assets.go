@@ -145,9 +145,8 @@ func (s *Service) buildAsset(ctx context.Context, in AssetInput, existing *model
 	return asset, warnings, nil
 }
 
-// DeleteAsset removes a property archive. Assets referenced by contracts will
-// be protected once the contract→asset link lands; until then nothing can
-// reference one, so deletion only needs an existence check.
+// DeleteAsset removes a property archive that no contract references.
+// Referenced archives stay for history and can be disabled instead.
 func (s *Service) DeleteAsset(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	asset, err := s.rd.GetAsset(ctx, id)
@@ -156,6 +155,13 @@ func (s *Service) DeleteAsset(ctx context.Context, id string) error {
 			return business("not_found", "房产档案不存在")
 		}
 		return err
+	}
+	count, err := s.rd.CountContractsByAsset(ctx, id)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return business("in_use", "该房产被 %d 份合同引用，不能删除；如需停用请使用「停用」", count)
 	}
 	if err := s.st.DeleteAsset(ctx, id); err != nil {
 		return err

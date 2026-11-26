@@ -110,7 +110,7 @@ export function toast(message: string, isError = false): void {
 
 /** 本地写入后让各域重取自己的数据；与迁移前 refreshAfterWrite 的实体集一致。 */
 export async function refreshAfterWrite(): Promise<void> {
-  notifyDataChanged(["field", "party", "contract", "seal", "template"]);
+  notifyDataChanged(["field", "party", "asset", "contract", "seal", "template"]);
 }
 
 /** 切换主 tab：更新壳的激活态并派发 tab-change。 */

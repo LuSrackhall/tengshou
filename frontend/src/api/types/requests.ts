@@ -73,12 +73,16 @@ export interface ContractInput {
   type?: string;
   party_a_id?: string;
   party_b_id?: string;
+  /** 租赁房产档案 id；留空的历史合同保持原值。 */
+  asset_id?: string;
   /** 相对方名称；用于无档案时的提示。 */
   party_b?: string;
   status?: ContractStatus;
   signed_on?: string;
   valid_from?: string;
   valid_to?: string;
+  lease_start?: string;
+  lease_end?: string;
   amount?: number;
   template_id?: string;
   /** 仅新建时生效的续签来源。 */

@@ -359,8 +359,17 @@ func TestMigrationUpgradesB1Database(t *testing.T) {
 		t.Fatalf("legacy data lost: %#v", contract.Data)
 	}
 	fields, err := reader.ListFieldDefinitions(ctx, model.FieldEntityContract, false)
-	if err != nil || len(fields) != 10 {
+	if err != nil || len(fields) != 12 {
 		t.Fatalf("seeded contract fields = %d err=%v", len(fields), err)
+	}
+	leaseFields := map[string]bool{}
+	for _, field := range fields {
+		if field.Key == model.FieldLeaseStart || field.Key == model.FieldLeaseEnd {
+			leaseFields[field.Key] = field.BuiltIn
+		}
+	}
+	if !leaseFields[model.FieldLeaseStart] || !leaseFields[model.FieldLeaseEnd] {
+		t.Fatalf("lease fields missing or not built-in: %#v", leaseFields)
 	}
 	dup := model.Contract{ID: "legacy-2", ContractNo: "LEGACY-legacy-1", Year: 2024, Title: "重复"}
 	if err := st.PutContract(ctx, &dup); !errors.Is(err, store.ErrDuplicateContractNo) {

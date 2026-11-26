@@ -17,18 +17,24 @@ import (
 // because they are first-class columns; Data carries dynamic field values by
 // field key. Source is only used for audit summaries ("excel" during import).
 type ContractInput struct {
-	ID         string  `json:"id"`
-	ContractNo string  `json:"contract_no"`
-	Year       int     `json:"year"`
-	Title      string  `json:"title"`
-	Type       string  `json:"type"`
-	PartyAID   string  `json:"party_a_id"`
-	PartyBID   string  `json:"party_b_id"`
-	PartyB     string  `json:"party_b"`
+	ID         string `json:"id"`
+	ContractNo string `json:"contract_no"`
+	Year       int    `json:"year"`
+	Title      string `json:"title"`
+	Type       string `json:"type"`
+	PartyAID   string `json:"party_a_id"`
+	PartyBID   string `json:"party_b_id"`
+	PartyB     string `json:"party_b"`
+	// AssetID links the contract to one property archive (v0.2 three-party
+	// model). Empty is allowed for historical contracts; an update that omits
+	// it keeps the existing link.
+	AssetID    string  `json:"asset_id"`
 	Status     string  `json:"status"`
 	SignedOn   string  `json:"signed_on"`
 	ValidFrom  string  `json:"valid_from"`
 	ValidTo    string  `json:"valid_to"`
+	LeaseStart string  `json:"lease_start"`
+	LeaseEnd   string  `json:"lease_end"`
 	Amount     float64 `json:"amount"`
 	TemplateID string  `json:"template_id"`
 	// SourceContractID records the contract a new contract is renewed from
@@ -217,6 +223,8 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 		{model.FieldSignedOn, "签订日期", in.SignedOn, &contract.SignedOn},
 		{model.FieldValidFrom, "生效日期", in.ValidFrom, &contract.ValidFrom},
 		{model.FieldValidTo, "到期日期", in.ValidTo, &contract.ValidTo},
+		{model.FieldLeaseStart, "租赁起租日", in.LeaseStart, &contract.LeaseStart},
+		{model.FieldLeaseEnd, "租赁到期日", in.LeaseEnd, &contract.LeaseEnd},
 	} {
 		value, ok := normalizeDate(item.raw)
 		if !ok {
@@ -224,6 +232,10 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 			continue
 		}
 		*item.dst = value
+	}
+	if contract.LeaseStart != "" && contract.LeaseEnd != "" &&
+		contract.LeaseEnd < contract.LeaseStart {
+		validation.add(model.FieldLeaseEnd, "租赁到期日", "不能早于租赁起租日")
 	}
 
 	if math.IsNaN(in.Amount) || math.IsInf(in.Amount, 0) || in.Amount < 0 {
@@ -242,6 +254,24 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 		} else {
 			contract.PartyAID = id
 		}
+	}
+	assetName := ""
+	if id := strings.TrimSpace(in.AssetID); id != "" {
+		if asset, err := s.rd.GetAsset(ctx, id); err != nil {
+			if isNotFound(err) {
+				validation.add(model.FieldAssetID, "房产", "档案不存在")
+			} else {
+				return model.Contract{}, "", nil, err
+			}
+		} else {
+			contract.AssetID = asset.ID
+			assetName = asset.Name
+		}
+	} else if existing != nil {
+		// Historical contracts (and callers that omit the field) keep their
+		// asset link; an empty value never silently unlinks a property.
+		contract.AssetID = existing.AssetID
+		assetName = s.assetName(ctx, existing.AssetID)
 	}
 	if id := strings.TrimSpace(in.TemplateID); id != "" {
 		if _, err := s.rd.GetTemplate(ctx, id); err != nil {
@@ -323,7 +353,64 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 				"已存在相同年度、相对方和名称的合同（编号 %s），请确认不是重复录入", other.ContractNo))
 		}
 	}
+	// v0.2 basic occupancy hint: the hard overlap validation (and explicit
+	// termination) lands in te-x54oj. Here a conflicting lease only warns, so
+	// legacy data and the current single-step form keep saving.
+	if contract.AssetID != "" {
+		exclude := ""
+		if existing != nil {
+			exclude = existing.ID
+		}
+		others, err := s.rd.ContractsForAsset(ctx, contract.AssetID, exclude)
+		if err != nil {
+			return model.Contract{}, "", nil, err
+		}
+		label := assetName
+		if label == "" {
+			label = contract.AssetID
+		}
+		active := []string{}
+		overlaps := []string{}
+		for _, other := range others {
+			if other.Status == model.ContractActive {
+				active = append(active, other.ContractNo)
+			}
+			if leasePeriodsOverlap(contract, other) {
+				overlaps = append(overlaps, other.ContractNo)
+			}
+		}
+		if len(active) > 0 {
+			warnings = append(warnings, fmt.Sprintf(
+				"房产「%s」当前有生效中的合同（编号 %s），请确认不是同一租期内的重复录入",
+				label, strings.Join(active, "、")))
+		}
+		if len(overlaps) > 0 {
+			warnings = append(warnings, fmt.Sprintf(
+				"该房产的租期与合同 %s 重叠；当前仅提示，保存不受影响",
+				strings.Join(overlaps, "、")))
+		}
+	}
 	return contract, sourceNo, warnings, nil
+}
+
+// leasePeriodsOverlap reports whether two lease periods intersect. Contracts
+// without a complete lease period (historical rows) never count.
+func leasePeriodsOverlap(a, b model.Contract) bool {
+	if a.LeaseStart == "" || a.LeaseEnd == "" || b.LeaseStart == "" || b.LeaseEnd == "" {
+		return false
+	}
+	return a.LeaseStart <= b.LeaseEnd && b.LeaseStart <= a.LeaseEnd
+}
+
+func (s *Service) assetName(ctx context.Context, id string) string {
+	if strings.TrimSpace(id) == "" {
+		return ""
+	}
+	asset, err := s.rd.GetAsset(ctx, id)
+	if err != nil {
+		return ""
+	}
+	return asset.Name
 }
 
 // createParty creates a stub archive record for a counterparty typed during
@@ -437,10 +524,12 @@ func (s *Service) ListParties(ctx context.Context, f model.ListFilter) (model.Li
 func (s *Service) diffContract(ctx context.Context, before, after *model.Contract) []model.FieldChange {
 	oldName := s.partyName(ctx, before.PartyBID)
 	newName := s.partyName(ctx, after.PartyBID)
+	labels := s.fieldLabels(ctx, model.FieldEntityContract)
+	labels[model.FieldAssetID] = "房产"
 	return diffValueMaps(
 		s.contractValues(ctx, before, oldName),
 		s.contractValues(ctx, after, newName),
-		s.fieldLabels(ctx, model.FieldEntityContract),
+		labels,
 	)
 }
 
@@ -458,6 +547,11 @@ func (s *Service) contractChanges(ctx context.Context, contract *model.Contract)
 		}
 		changes = append(changes, model.FieldChange{Field: field.Key, Label: field.Label, Old: "", New: value})
 	}
+	if value := values[model.FieldAssetID]; value != "" {
+		changes = append(changes, model.FieldChange{
+			Field: model.FieldAssetID, Label: "房产", Old: "", New: value,
+		})
+	}
 	return changes
 }
 
@@ -468,10 +562,13 @@ func (s *Service) contractValues(ctx context.Context, contract *model.Contract, 
 		model.FieldTitle:      contract.Title,
 		model.FieldType:       contract.Type,
 		model.FieldPartyB:     partyBName,
+		model.FieldAssetID:    s.assetName(ctx, contract.AssetID),
 		model.FieldAmount:     displayValue(contract.Amount),
 		model.FieldSignedOn:   contract.SignedOn,
 		model.FieldValidFrom:  contract.ValidFrom,
 		model.FieldValidTo:    contract.ValidTo,
+		model.FieldLeaseStart: contract.LeaseStart,
+		model.FieldLeaseEnd:   contract.LeaseEnd,
 		model.FieldStatus:     StatusLabel(contract.Status),
 	}
 	fields, err := s.rd.ListFieldDefinitions(ctx, model.FieldEntityContract, true)

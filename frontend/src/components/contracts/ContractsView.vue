@@ -21,11 +21,13 @@ import {
   getBootstrap,
   getContract,
   getRenewalDraft,
+  listAssets,
   listContracts,
   listFields,
   listParties,
 } from "../../api/endpoints";
 import type {
+  Asset,
   Bootstrap,
   Contract,
   ContractDetail,
@@ -80,6 +82,7 @@ interface FormDraft {
 const bootstrap = ref<Bootstrap | null>(null);
 const fields = ref<FieldDefinition[]>([]);
 const parties = ref<Party[]>([]);
+const assets = ref<Asset[]>([]);
 const contracts = ref<Contract[]>([]);
 const total = ref(0);
 const years = ref<YearCount[]>([]);
@@ -181,10 +184,11 @@ async function reload(includeMeta: boolean): Promise<void> {
   const seq = ++loadSeq;
   try {
     if (includeMeta) {
-      const [boot, fieldData, partyData] = await Promise.all([
+      const [boot, fieldData, partyData, assetData] = await Promise.all([
         getBootstrap(),
         listFields({ archived: "1" }),
         listParties({ limit: 500 }),
+        listAssets({ limit: 500 }),
       ]);
       if (seq !== loadSeq) {
         return;
@@ -192,6 +196,7 @@ async function reload(includeMeta: boolean): Promise<void> {
       bootstrap.value = boot;
       fields.value = (fieldData.contract ?? []).filter((field) => !field.archived);
       parties.value = partyData.items ?? [];
+      assets.value = assetData.items ?? [];
       years.value = boot.years ?? [];
       if (!yearInitialized) {
         year.value = defaultYear(boot);
@@ -426,7 +431,8 @@ onMounted(() => {
     if (
       entities.length === 0 ||
       entities.includes("contract") ||
-      entities.includes("field")
+      entities.includes("field") ||
+      entities.includes("asset")
     ) {
       scheduleReload(150);
     }
@@ -565,6 +571,7 @@ onBeforeUnmount(() => {
     :party-b="formRequest.partyB"
     :fields="fields"
     :parties="parties"
+    :assets="assets"
     :current-year="currentYear"
     :focus-generate="formRequest.focusGenerate"
     @close="closeForm"

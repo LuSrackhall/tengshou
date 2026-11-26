@@ -73,7 +73,15 @@ const (
 	FieldSignedOn   = "signed_on"
 	FieldValidFrom  = "valid_from"
 	FieldValidTo    = "valid_to"
+	// FieldLeaseStart / FieldLeaseEnd are the formal lease period (v0.2). They
+	// are distinct from valid_from/valid_to, which describe when the contract
+	// itself takes effect: the lease period drives asset occupancy.
+	FieldLeaseStart = "lease_start"
+	FieldLeaseEnd   = "lease_end"
 	FieldStatus     = "status"
+	// FieldAssetID binds a contract to one property archive. It is not a
+	// configurable field: the form uses a dedicated asset picker.
+	FieldAssetID    = "asset_id"
 	FieldPartyName  = "name"
 	FieldPartyKind  = "kind"
 	FieldPartyIDNo  = "id_number"
@@ -160,20 +168,29 @@ type Asset struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// Contract is one agreement between two parties.
+// Contract is one agreement between two parties. v0.2 makes the third party
+// explicit: AssetID points at the rented property archive, and the lease
+// period is kept separately from the contract's own validity dates.
 type Contract struct {
-	ID         string         `json:"id"`
-	ContractNo string         `json:"contract_no"`
-	Year       int            `json:"year"`
-	Title      string         `json:"title"`
-	Type       string         `json:"type,omitempty"`
-	TemplateID string         `json:"template_id,omitempty"`
-	PartyAID   string         `json:"party_a_id,omitempty"`
-	PartyBID   string         `json:"party_b_id,omitempty"`
-	Status     string         `json:"status"`
-	SignedOn   string         `json:"signed_on,omitempty"`
-	ValidFrom  string         `json:"valid_from,omitempty"`
-	ValidTo    string         `json:"valid_to,omitempty"`
+	ID         string `json:"id"`
+	ContractNo string `json:"contract_no"`
+	Year       int    `json:"year"`
+	Title      string `json:"title"`
+	Type       string `json:"type,omitempty"`
+	TemplateID string `json:"template_id,omitempty"`
+	PartyAID   string `json:"party_a_id,omitempty"`
+	PartyBID   string `json:"party_b_id,omitempty"`
+	// AssetID is empty for historical contracts created before the asset
+	// archive existed; those rows keep displaying and editing normally.
+	AssetID   string `json:"asset_id,omitempty"`
+	Status    string `json:"status"`
+	SignedOn  string `json:"signed_on,omitempty"`
+	ValidFrom string `json:"valid_from,omitempty"`
+	ValidTo   string `json:"valid_to,omitempty"`
+	// LeaseStart / LeaseEnd are the rental period (YYYY-MM-DD). Empty on
+	// historical rows; such contracts are skipped by overlap checks.
+	LeaseStart string         `json:"lease_start,omitempty"`
+	LeaseEnd   string         `json:"lease_end,omitempty"`
 	Amount     float64        `json:"amount"`
 	Data       map[string]any `json:"data"`
 	// SourceContractID records the contract this one was renewed from (B7).
@@ -238,6 +255,7 @@ type ContractDetail struct {
 	Contract   Contract         `json:"contract"`
 	PartyA     *Party           `json:"party_a,omitempty"`
 	PartyB     *Party           `json:"party_b,omitempty"`
+	Asset      *Asset           `json:"asset,omitempty"`
 	Template   *Template        `json:"template,omitempty"`
 	Signatures []Signature      `json:"signatures"`
 	Seals      []Seal           `json:"seals"`

@@ -16,11 +16,14 @@ export interface ContractSeed {
   type?: string;
   party_a_id?: string;
   party_b_id?: string;
+  asset_id?: string;
   template_id?: string;
   amount?: number;
   signed_on?: string;
   valid_from?: string;
   valid_to?: string;
+  lease_start?: string;
+  lease_end?: string;
   status?: string;
   data?: Record<string, unknown>;
 }
@@ -35,11 +38,15 @@ export function renewalSeed(draft: RenewalDraft): ContractSeed {
     type: input.type,
     party_a_id: input.party_a_id ?? "",
     party_b_id: input.party_b_id ?? "",
+    asset_id: input.asset_id ?? "",
     template_id: input.template_id ?? "",
     amount: input.amount ?? 0,
     signed_on: "",
     valid_from: "",
     valid_to: "",
+    // 续签重新约定租期；表单打开时按默认一年带出。
+    lease_start: "",
+    lease_end: "",
     status: "draft",
     data: input.data ?? {},
   };
@@ -104,6 +111,10 @@ export function contractControlValue(
       return seed.valid_from ?? "";
     case "valid_to":
       return seed.valid_to ?? "";
+    case "lease_start":
+      return seed.lease_start ?? "";
+    case "lease_end":
+      return seed.lease_end ?? "";
     case "status":
       return statusLabel(seed.status ?? "");
   }
@@ -137,10 +148,12 @@ export function collectContractInput(
   partyAID: string,
   partyBID: string,
   partyBName: string,
+  assetID: string,
 ): ContractInput {
   const input: ContractInput = {
     data: {},
     party_a_id: partyAID || seed?.party_a_id || "",
+    asset_id: assetID || seed?.asset_id || "",
     template_id: seed?.template_id ?? "",
     year: 0,
     title: "",
@@ -179,6 +192,12 @@ export function collectContractInput(
         break;
       case "valid_to":
         input.valid_to = value;
+        break;
+      case "lease_start":
+        input.lease_start = value;
+        break;
+      case "lease_end":
+        input.lease_end = value;
         break;
       case "status":
         input.status = value as ContractInput["status"];

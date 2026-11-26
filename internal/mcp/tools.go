@@ -160,6 +160,9 @@ func toolDefinitions() []toolDefinition {
 				"type":        stringProp("合同类型"),
 				"party_b_id":  stringProp("相对方（乙方）档案 id"),
 				"party_b":     stringProp("相对方（乙方）名称；档案不存在时自动建档"),
+				"asset_id":    stringProp("租赁房产档案 id（可为空；历史合同兼容）"),
+				"lease_start": dateProp("租赁起租日 YYYY-MM-DD"),
+				"lease_end":   dateProp("租赁到期日 YYYY-MM-DD"),
 				"amount":      numberProp("金额（元），非负"),
 				"template_id": stringProp("模板 id"),
 				"signed_on":   dateProp("签订日期 YYYY-MM-DD"),
@@ -514,6 +517,9 @@ type createContractDraftArgs struct {
 	Type       string         `json:"type,omitempty"`
 	PartyBID   string         `json:"party_b_id,omitempty"`
 	PartyB     string         `json:"party_b,omitempty"`
+	AssetID    string         `json:"asset_id,omitempty"`
+	LeaseStart string         `json:"lease_start,omitempty"`
+	LeaseEnd   string         `json:"lease_end,omitempty"`
 	Amount     float64        `json:"amount,omitempty"`
 	TemplateID string         `json:"template_id,omitempty"`
 	SignedOn   string         `json:"signed_on,omitempty"`
@@ -534,6 +540,9 @@ func (s *Server) toolCreateContractDraft(ctx context.Context, args json.RawMessa
 		"type":        in.Type,
 		"party_b_id":  in.PartyBID,
 		"party_b":     in.PartyB,
+		"asset_id":    in.AssetID,
+		"lease_start": in.LeaseStart,
+		"lease_end":   in.LeaseEnd,
 		"amount":      in.Amount,
 		"template_id": in.TemplateID,
 		"signed_on":   in.SignedOn,

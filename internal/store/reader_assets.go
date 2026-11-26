@@ -9,16 +9,22 @@ import (
 	"github.com/LuSrackhall/tengshou/internal/model"
 )
 
+// assetColumns derives lease_status from contracts: an asset is rented while
+// it has at least one active (生效中且未终止) contract. Expiry alone never
+// releases an asset (te-l0hh0 D4); only an explicit termination/archival of the
+// contract does, which is why status is checked rather than the dates.
 const assetColumns = `id, asset_type, name, address, room_no, area_sqm, note,
-	enabled, created_at, updated_at`
+	enabled, created_at, updated_at,
+	(SELECT COUNT(*) FROM contracts c WHERE c.asset_id = assets.id AND c.status = 'active')`
 
 func scanAsset(sc scanner) (model.Asset, error) {
 	var a model.Asset
 	var area sql.NullFloat64
 	var enabled int
+	var activeContracts int
 	var created, updated string
 	if err := sc.Scan(&a.ID, &a.AssetType, &a.Name, &a.Address, &a.RoomNo, &area,
-		&a.Note, &enabled, &created, &updated); err != nil {
+		&a.Note, &enabled, &created, &updated, &activeContracts); err != nil {
 		return a, err
 	}
 	if area.Valid {
@@ -26,9 +32,10 @@ func scanAsset(sc scanner) (model.Asset, error) {
 		a.AreaSqm = &value
 	}
 	a.Enabled = enabled != 0
-	// 合同→资产联动在后续珠：当前还没有合同能引用资产，一律按空置派生。
-	// 接入后这里换成「存在生效中且未终止的合同即为在租」的查询结果。
 	a.LeaseStatus = model.LeaseStatusVacant
+	if activeContracts > 0 {
+		a.LeaseStatus = model.LeaseStatusRented
+	}
 	a.CreatedAt, a.UpdatedAt = parseTime(created), parseTime(updated)
 	return a, nil
 }

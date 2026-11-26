@@ -69,6 +69,10 @@ export function contractFieldValue(
       return { text: contract.valid_from || "—" };
     case "valid_to":
       return { text: contract.valid_to || "—" };
+    case "lease_start":
+      return { text: contract.lease_start || "—" };
+    case "lease_end":
+      return { text: contract.lease_end || "—" };
     case "status":
       return { badge: contract.status, text: statusLabel(contract.status) };
   }
@@ -93,6 +97,8 @@ export function templateHintCode(field: FieldDefinition): string {
     signed_on: ".Contract.SignedOn",
     valid_from: ".Contract.ValidFrom",
     valid_to: ".Contract.ValidTo",
+    lease_start: ".Contract.LeaseStart",
+    lease_end: ".Contract.LeaseEnd",
     status: ".Contract.Status",
   };
   if (core[field.key]) {

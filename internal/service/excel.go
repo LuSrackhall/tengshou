@@ -273,6 +273,10 @@ func excelValue(field model.FieldDefinition, contract *model.Contract, partyName
 		return contract.ValidFrom
 	case model.FieldValidTo:
 		return contract.ValidTo
+	case model.FieldLeaseStart:
+		return contract.LeaseStart
+	case model.FieldLeaseEnd:
+		return contract.LeaseEnd
 	case model.FieldStatus:
 		return StatusLabel(contract.Status)
 	}
@@ -1041,6 +1045,12 @@ func applyRawField(in *ContractInput, field model.FieldDefinition, raw, existing
 	case model.FieldValidTo:
 		in.ValidTo = raw
 		return nil
+	case model.FieldLeaseStart:
+		in.LeaseStart = raw
+		return nil
+	case model.FieldLeaseEnd:
+		in.LeaseEnd = raw
+		return nil
 	case model.FieldStatus:
 		in.Status = raw
 		return nil
@@ -1062,10 +1072,13 @@ func contractInputFromExisting(c *model.Contract, partyName string) ContractInpu
 		PartyAID:   c.PartyAID,
 		PartyBID:   c.PartyBID,
 		PartyB:     partyName,
+		AssetID:    c.AssetID,
 		Status:     StatusLabel(c.Status),
 		SignedOn:   c.SignedOn,
 		ValidFrom:  c.ValidFrom,
 		ValidTo:    c.ValidTo,
+		LeaseStart: c.LeaseStart,
+		LeaseEnd:   c.LeaseEnd,
 		Amount:     c.Amount,
 		TemplateID: c.TemplateID,
 		Data:       copyData(c.Data),

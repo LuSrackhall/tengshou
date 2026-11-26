@@ -2,6 +2,7 @@ package service
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/LuSrackhall/tengshou/internal/model"
@@ -92,8 +93,9 @@ func TestTemplateMoneyWordsBindings(t *testing.T) {
 // money 字段）可以加 .words；相对方与非金额字段一律拒绝。
 func TestValidateBindingMoneyWords(t *testing.T) {
 	contractFields := map[string]model.FieldDefinition{
-		"rent": {Key: "rent", Label: "月租", Type: model.FieldTypeMoney},
-		"note": {Key: "note", Label: "备注", Type: model.FieldTypeText},
+		"rent":   {Key: "rent", Label: "月租", Type: model.FieldTypeMoney},
+		"note":   {Key: "note", Label: "备注", Type: model.FieldTypeText},
+		"amount": {Key: "amount", Label: "金额", Type: model.FieldTypeMoney, BuiltIn: true},
 	}
 	partyFields := map[string]model.FieldDefinition{
 		"deposit": {Key: "deposit", Label: "押金", Type: model.FieldTypeMoney},
@@ -112,5 +114,14 @@ func TestValidateBindingMoneyWords(t *testing.T) {
 		if err := validateBinding(key, contractFields, partyFields); err == nil {
 			t.Fatalf("%s should be rejected", key)
 		}
+	}
+	// 内置金额绑定大写时，提示必须指向 contract.amount.words；只提示
+	// contract.amount 会让作者改成数字金额绑定（te-czybl F1）。
+	err := validateBinding("contract.data.amount.words", contractFields, partyFields)
+	if err == nil {
+		t.Fatal("contract.data.amount.words should be rejected")
+	}
+	if !strings.Contains(err.Error(), "contract.amount.words") {
+		t.Fatalf("hint should point at contract.amount.words, got: %v", err)
 	}
 }

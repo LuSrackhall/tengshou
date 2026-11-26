@@ -703,7 +703,11 @@ func validateBinding(key string, contractFields, partyFields map[string]model.Fi
 			return fmt.Errorf("只有合同的金额字段可以绑定大写")
 		}
 		if field.BuiltIn {
-			return fmt.Errorf("内置字段请直接使用 %s.%s，不要加 data. 前缀", prefix, dataKey)
+			hintKey := dataKey
+			if words {
+				hintKey += ".words"
+			}
+			return fmt.Errorf("内置字段请直接使用 %s.%s，不要加 data. 前缀", prefix, hintKey)
 		}
 		return nil
 	}

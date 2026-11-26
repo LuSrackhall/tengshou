@@ -46,9 +46,10 @@ function cellValue(contract: Contract, field: FieldDefinition) {
 function cellClass(contract: Contract, field: FieldDefinition): string {
   const value = cellValue(contract, field);
   if (value.badge) {
-    return "";
+    // 状态列同时承载到期提醒徽标：空间紧张时允许换行，避免挤宽整张台账。
+    return field.key === "status" ? "status-cell" : "";
   }
-  return [value.mono ? "mono" : "", value.money ? "money" : "", value.wrap ? "wrap" : ""]
+  return [value.mono ? "mono" : "", value.money ? "money" : "", value.wrap ? "wrap" : "", value.party ? "party-cell" : ""]
     .filter(Boolean)
     .join(" ");
 }

@@ -56,9 +56,11 @@ import { useSignatureDialog } from "../signatures/useSignatureDialog";
 import BatchGenerateDialog from "./BatchGenerateDialog.vue";
 import ContractFormModal from "./ContractFormModal.vue";
 import ContractLedgerTable from "./ContractLedgerTable.vue";
+import LedgerColumnsDialog from "./LedgerColumnsDialog.vue";
 import TerminateContractDialog from "./TerminateContractDialog.vue";
 import { saveDownloadedFile } from "./download";
 import { statusLabel } from "./format";
+import { useLedgerColumns } from "./useLedgerColumns";
 
 type StatusFilter = "" | ContractStatus;
 
@@ -114,7 +116,16 @@ let unsubData: (() => void) | null = null;
 let unsubOpenForm: (() => void) | null = null;
 let unsubBatch: (() => void) | null = null;
 
-const tableFields = computed(() => fields.value.filter((field) => field.in_ledger));
+const {
+  ledgerFields,
+  selectedKeys: ledgerColumnKeys,
+  tableFields,
+  dialogOpen: ledgerColumnsOpen,
+  openDialog: openLedgerColumns,
+  closeDialog: closeLedgerColumns,
+  updateSelected: updateLedgerColumns,
+  restoreDefaults: restoreLedgerColumns,
+} = useLedgerColumns(fields);
 
 const reminders = computed(() => {
   let soon = 0;
@@ -504,7 +515,10 @@ onBeforeUnmount(() => {
     <button type="button" id="importBtn" @click="openExcelImport">导入 Excel</button>
     <button type="button" id="exportLedgerBtn" :title="exportTitle" @click="exportLedger">导出台账</button>
   </div>
-  <div id="contractSummary" class="summary">{{ loaded ? summary : "" }}</div>
+  <div class="ledger-meta">
+    <div id="contractSummary" class="summary">{{ loaded ? summary : "" }}</div>
+    <button type="button" id="ledgerColumnsBtn" @click="openLedgerColumns">列设置</button>
+  </div>
   <ContractLedgerTable
     :contracts="contracts"
     :fields="tableFields"
@@ -543,6 +557,14 @@ onBeforeUnmount(() => {
     :contract="terminateRequest.contract"
     @close="closeTerminate"
     @terminated="onTerminated"
+  />
+  <LedgerColumnsDialog
+    v-if="ledgerColumnsOpen"
+    :fields="ledgerFields"
+    :selected-keys="ledgerColumnKeys"
+    @update:selected-keys="updateLedgerColumns"
+    @restore="restoreLedgerColumns"
+    @close="closeLedgerColumns"
   />
   <BatchGenerateDialog
     v-if="batchRequest"

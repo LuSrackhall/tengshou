@@ -60,6 +60,10 @@ pdfcpu 使用 `api.PDFMultiWatermarkForReadSeeker` + `api.AddWatermarks`：套�
 - 字段绑定键：
   - `contract.<内置键>`：`contract_no`、`year`、`title`、`type`、`party_b`、
     `amount`、`signed_on`、`valid_from`、`valid_to`、`status`；
+  - `contract.amount.words` / `contract.data.<金额字段键>.words`：金额中文大写
+    （如「人民币壹仟伍佰元整」）。表单里每个金额字段都可保存一个手填覆盖
+    （`contract.data.__amount_words__` / `__words__<金额字段键>`），覆盖优先
+    于自动换算；这些保留键不进 Excel 台账，也不新增字段定义；
   - `contract.data.<动态字段键>`：B2 动态字段；
   - `party_a.<内置键>` / `party_b.<内置键>`：`name`、`kind`、`id_number`、
     `phone`、`address`、`note`；

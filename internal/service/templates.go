@@ -514,7 +514,7 @@ func (s *Service) templatePages(tpl model.Template) (string, []overlay.PageSize,
 
 var contractBindableBuiltins = map[string]string{
 	"contract_no": "合同编号", "year": "年度", "title": "合同名称", "type": "合同类型",
-	"party_b": "相对方名称", "amount": "金额", "signed_on": "签订日期",
+	"party_b": "相对方名称", "amount": "金额", "amount.words": "金额（大写）", "signed_on": "签订日期",
 	"valid_from": "生效日期", "valid_to": "到期日期", "status": "状态",
 	"lease_start": "租赁起租日", "lease_end": "租赁到期日",
 	"asset_name": "房产名称", "asset_address": "房产地址",
@@ -685,6 +685,13 @@ func validateBinding(key string, contractFields, partyFields map[string]model.Fi
 		if dataKey == "" {
 			return fmt.Errorf("缺少字段键")
 		}
+		words := false
+		if key, ok := strings.CutSuffix(dataKey, ".words"); ok {
+			dataKey, words = key, true
+			if dataKey == "" {
+				return fmt.Errorf("缺少字段键")
+			}
+		}
 		field, exists := fields[dataKey]
 		if !exists {
 			return fmt.Errorf("字段「%s」不在%s字段中，请先在「字段」页新增", dataKey, label)
@@ -692,8 +699,15 @@ func validateBinding(key string, contractFields, partyFields map[string]model.Fi
 		if field.Type == model.FieldTypeImage {
 			return fmt.Errorf("图片字段「%s」不能作为文字绑定，请改用签名或公章位置", field.Label)
 		}
+		if words && (prefix != "contract" || field.Type != model.FieldTypeMoney) {
+			return fmt.Errorf("只有合同的金额字段可以绑定大写")
+		}
 		if field.BuiltIn {
-			return fmt.Errorf("内置字段请直接使用 %s.%s，不要加 data. 前缀", prefix, dataKey)
+			hintKey := dataKey
+			if words {
+				hintKey += ".words"
+			}
+			return fmt.Errorf("内置字段请直接使用 %s.%s，不要加 data. 前缀", prefix, hintKey)
 		}
 		return nil
 	}
@@ -854,6 +868,12 @@ func (rc *templateRenderContext) contractValue(rest string) string {
 			return ""
 		}
 		return formatMoneyValue(rc.contract.Amount)
+	case "amount.words":
+		// Manual override wins; otherwise render the built-in amount in words.
+		if override := wordsOverride(rc.contract.Data, model.FieldAmount); override != "" {
+			return override
+		}
+		return MoneyWords(rc.contract.Amount)
 	case "signed_on":
 		return chineseDate(rc.contract.SignedOn)
 	case "valid_from":
@@ -888,6 +908,19 @@ func (rc *templateRenderContext) contractValue(rest string) string {
 		return StatusLabel(rc.contract.Status)
 	}
 	if dataKey, ok := strings.CutPrefix(rest, "data."); ok {
+		if fieldKey, ok := strings.CutSuffix(dataKey, ".words"); ok {
+			field, exists := rc.contractFields[fieldKey]
+			if !exists || field.Type != model.FieldTypeMoney {
+				return ""
+			}
+			if override := wordsOverride(rc.contract.Data, fieldKey); override != "" {
+				return override
+			}
+			if value, ok := parseNumber(rawString(rc.contract.Data[fieldKey])); ok {
+				return MoneyWords(value)
+			}
+			return ""
+		}
 		field, exists := rc.contractFields[dataKey]
 		if !exists {
 			return ""

@@ -12,6 +12,7 @@ import type {
   TerminationReason,
 } from "../../api/types";
 import { statusLabel } from "./format";
+import { moneyWordsKey } from "./moneyWords";
 
 /** 表单初值与提交所需的合同片段；Contract 与续签草稿都满足。 */
 export interface ContractSeed {
@@ -144,6 +145,28 @@ export function syncContractValues(
   }
 }
 
+/**
+ * 金额字段的大写覆盖值初始化（te-7c5v1）：编辑/续签时从 seed.data 的保留键
+ * 带出，新建时为空串（自动大写）。与字段值共用 values，提交时一并写回。
+ */
+export function syncWordsValues(
+  values: Record<string, string>,
+  fields: FieldDefinition[],
+  seed: ContractSeed | null,
+): void {
+  for (const field of fields) {
+    if (field.type !== "money") {
+      continue;
+    }
+    const key = moneyWordsKey(field.key);
+    if (key in values) {
+      continue;
+    }
+    const raw = seed?.data ? seed.data[key] : undefined;
+    values[key] = raw === null || raw === undefined ? "" : String(raw);
+  }
+}
+
 /** collectContractInput 的选档/终止扩展：非字段定义驱动的值在这里汇入。 */
 export interface ContractInputExtras {
   partyAID: string;
@@ -178,6 +201,11 @@ export function collectContractInput(
   const data: Record<string, unknown> = {};
   for (const field of fields) {
     const value = (values[field.key] ?? "").trim();
+    if (field.type === "money") {
+      // 金额字段始终提交大写覆盖键（te-7c5v1）：空串表示恢复自动大写，
+      // 由服务端删除保留键；保留键不是字段定义，不新增台账列。
+      data[moneyWordsKey(field.key)] = (values[moneyWordsKey(field.key)] ?? "").trim();
+    }
     if (!field.built_in) {
       data[field.key] = value;
       continue;

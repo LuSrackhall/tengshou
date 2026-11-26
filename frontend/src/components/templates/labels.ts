@@ -36,6 +36,10 @@ function pushGroup(
       ? `${prefix}.${field.key}`
       : `${prefix}.data.${field.key}`;
     options.push({ value: key, label: `${label} · ${field.label}` });
+    // 金额字段额外提供「大写」虚拟绑定（te-7c5v1）；大写只支持合同侧字段。
+    if (prefix === "contract" && field.type === "money") {
+      options.push({ value: `${key}.words`, label: `${label} · ${field.label}（大写）` });
+    }
   }
   if (options.length) {
     groups.push({ label, options });
@@ -112,11 +116,15 @@ export function bindingLabel(
   if (ASSET_BINDING_LABELS[key]) {
     return `资产 · ${ASSET_BINDING_LABELS[key]}`;
   }
-  const prefix = key.split(".")[0] ?? "";
-  const dataKey = key.includes(".data.")
-    ? (key.split(".data.")[1] ?? "")
-    : (key.split(".")[1] ?? "");
+  // 金额大写虚拟绑定（te-7c5v1）：文案按字段名加「（大写）」后缀。
+  const isWords = key.endsWith(".words");
+  const baseKey = isWords ? key.slice(0, -".words".length) : key;
+  const prefix = baseKey.split(".")[0] ?? "";
+  const dataKey = baseKey.includes(".data.")
+    ? (baseKey.split(".data.")[1] ?? "")
+    : (baseKey.split(".")[1] ?? "");
   const list = prefix === "contract" ? fields.contract : fields.party;
   const field = list.find((item) => item.key === dataKey);
-  return `${roleLabel(prefix)} · ${field ? field.label : key}`;
+  const suffix = isWords ? "（大写）" : "";
+  return `${roleLabel(prefix)} · ${field ? `${field.label}${suffix}` : key}`;
 }

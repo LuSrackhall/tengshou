@@ -219,6 +219,7 @@ export async function saveCalibration(
   page: Page,
   count: number,
   frames?: FrameRecorder,
+  expectedVersion = "v2",
 ): Promise<SavedCalibration> {
   await frames?.capture("① 保存前：当前仍是导入生成的 v1", {
     targets: [page.locator("#tplCurrent")],
@@ -232,7 +233,7 @@ export async function saveCalibration(
       response.request().method() === "PUT",
   );
   await page.locator("#tplSaveBtn").click();
-  await expect(page.locator("#tplCurrent")).toContainText("v2", {
+  await expect(page.locator("#tplCurrent")).toContainText(expectedVersion, {
     timeout: 30_000,
   });
   await expect(page.locator("#tplCurrent")).toContainText(`${count} 个位置`);

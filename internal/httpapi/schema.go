@@ -158,6 +158,7 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 					{"source_sha256", "string", "原始文件摘要"},
 					{"pdf_sha256", "string", "模板 PDF 摘要"},
 					{"placements", "array", "PDF 模板标定位置：{id,page,x,y,w,h,type,field,party,seal_mode,seal_id,font_size,align}"},
+					{"mask_field_values", "boolean", "字段值白底遮盖：套印前先在字段框内铺白，遮住模板里的【…】占位符；默认关闭"},
 					{"created_at", "string", "RFC3339 创建时间"},
 					{"updated_at", "string", "RFC3339 更新时间"},
 				},

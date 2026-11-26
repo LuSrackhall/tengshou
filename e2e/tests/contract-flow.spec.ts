@@ -149,6 +149,18 @@ test.describe("场景 A：合同主流程", () => {
       await shot(page, testInfo, "04-甲方与房产档案已新建");
     });
 
+    // 租期默认值的期望：起租日 = 今天，到期日 = 今天+1 年−1 天。在测试内
+    // 独立计算（本地时区），不引用被测实现 lease.ts。
+    const now = new Date();
+    const isoLocal = (d: Date): string =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+        d.getDate(),
+      ).padStart(2, "0")}`;
+    const expectedLeaseStart = isoLocal(now);
+    const leaseEndDate = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
+    leaseEndDate.setDate(leaseEndDate.getDate() - 1);
+    const expectedLeaseEnd = isoLocal(leaseEndDate);
+
     let contractId = "";
     await test.step("界面三方选择建合同并保存", async () => {
       await page.locator('#tabs button[data-tab="contracts"]').click();
@@ -161,7 +173,16 @@ test.describe("场景 A：合同主流程", () => {
       await expect(contractDialog).toBeVisible();
       await expect(contractDialog.locator("#f_contract_status")).toHaveValue("草稿");
       await contractDialog.locator("#f_contract_title").fill(contractTitle);
-      // 甲方：固定单位档案默认带出，可切换。
+      // 甲方：固定单位档案默认带出（本地无最近使用时取第一个单位档案），可切换。
+      await expect(
+        contractDialog.locator("#f_contract_party_a option:checked"),
+      ).toContainText(`${partyAName}（单位）`);
+      await contractDialog
+        .locator("#f_contract_party_a")
+        .selectOption({ label: `${partyName}（个人）` });
+      await expect(
+        contractDialog.locator("#f_contract_party_a option:checked"),
+      ).toContainText(`${partyName}（个人）`);
       await contractDialog
         .locator("#f_contract_party_a")
         .selectOption({ label: `${partyAName}（单位）` });
@@ -181,9 +202,14 @@ test.describe("场景 A：合同主流程", () => {
       await expect(
         contractDialog.locator('.picker-field[data-key="asset"] .picker-selected'),
       ).toContainText("空置");
-      // 租期默认一年，可改；这里显式改成 2026-12-01 至 2027-11-30。
-      await expect(contractDialog.locator("#f_contract_lease_start")).not.toHaveValue("");
-      await expect(contractDialog.locator("#f_contract_lease_end")).not.toHaveValue("");
+      // 租期默认一年：起租日 = 今天，到期日 = 一年后的前一天（含首尾）。
+      // 期望值在测试内独立计算，不引用被测实现（lease.ts）。
+      await expect(contractDialog.locator("#f_contract_lease_start")).toHaveValue(
+        expectedLeaseStart,
+      );
+      await expect(contractDialog.locator("#f_contract_lease_end")).toHaveValue(
+        expectedLeaseEnd,
+      );
       await contractDialog.locator("#f_contract_lease_start").fill("2026-12-01");
       await contractDialog.locator("#f_contract_lease_end").fill("2027-11-30");
       // 三方选定后合同生效，房产应派生为在租。

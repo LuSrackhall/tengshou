@@ -61,8 +61,10 @@ const keyValue = computed<string>({
 
 const isManualKey = computed(() => !isEdit && keyManual.value !== null);
 
+// 预览文案区分来源：自动生成时提示「将自动生成」，手改后（或编辑态）只显示
+// 「字段键：<key>」，点「恢复自动生成」回到自动文案。
 const keyPreviewNote = computed(() =>
-  isEdit ? "字段键：" : "字段键将自动生成：",
+  isEdit || isManualKey.value ? "字段键：" : "字段键将自动生成：",
 );
 
 // 自动生成的键始终合法且不冲突；这里只会在手改后报错。

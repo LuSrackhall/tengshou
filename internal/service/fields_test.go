@@ -105,6 +105,113 @@ func TestBuiltInFieldProtection(t *testing.T) {
 	})
 }
 
+// TestFieldGroupCreateUpdateAndPersist pins the optional form group added for
+// grouped contract forms: the stored value is trimmed, updates are partial
+// (omitting group keeps it), an explicit empty value clears it, and the change
+// log records the before/after.
+func TestFieldGroupCreateUpdateAndPersist(t *testing.T) {
+	svc, rd, _ := openService(t)
+	ctx := context.Background()
+
+	// 存量内置字段没有分组，表单继续按固定规则归组。
+	if builtIn := builtInField(t, rd, model.FieldEntityContract, model.FieldTitle); builtIn.Group != "" {
+		t.Fatalf("built-in field group = %q, want empty", builtIn.Group)
+	}
+
+	group := "  租期  "
+	field, err := svc.CreateField(ctx, service.FieldInput{
+		Entity: model.FieldEntityContract, Key: "grouped_rent", Label: "分组字段",
+		Type: model.FieldTypeText, Group: &group,
+	})
+	if err != nil {
+		t.Fatalf("create grouped field: %v", err)
+	}
+	if field.Group != "租期" {
+		t.Fatalf("created group = %q, want 租期", field.Group)
+	}
+	stored, err := rd.GetFieldDefinition(ctx, field.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Group != "租期" {
+		t.Fatalf("stored group = %q, want 租期", stored.Group)
+	}
+
+	// 部分更新只改名称：未提供的 group 保持不变。
+	updated, err := svc.UpdateField(ctx, field.ID, service.FieldInput{Label: "分组字段（改）"})
+	if err != nil {
+		t.Fatalf("partial update: %v", err)
+	}
+	if updated.Group != "租期" {
+		t.Fatalf("partial update changed group to %q", updated.Group)
+	}
+
+	// 显式更新到自定义分组。
+	custom := "房屋信息"
+	updated, err = svc.UpdateField(ctx, field.ID, service.FieldInput{Group: &custom})
+	if err != nil {
+		t.Fatalf("update group: %v", err)
+	}
+	if updated.Group != "房屋信息" {
+		t.Fatalf("updated group = %q, want 房屋信息", updated.Group)
+	}
+
+	// 变更记录保留分组变更。
+	logs, err := rd.ListChangeLogs(ctx, store.ChangeFilter{
+		Entity: model.ChangeEntityField, EntityID: field.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundGroupChange := false
+	for _, entry := range logs.Items {
+		for _, change := range entry.Changes {
+			if change.Field == "group" && change.Old == "租期" && change.New == "房屋信息" {
+				foundGroupChange = true
+			}
+		}
+	}
+	if !foundGroupChange {
+		t.Fatalf("change log missing group 租期→房屋信息 entry: %+v", logs.Items)
+	}
+
+	// 显式清空 → 未分组。
+	empty := "   "
+	updated, err = svc.UpdateField(ctx, field.ID, service.FieldInput{Group: &empty})
+	if err != nil {
+		t.Fatalf("clear group: %v", err)
+	}
+	if updated.Group != "" {
+		t.Fatalf("cleared group = %q, want empty", updated.Group)
+	}
+
+	// 相对方字段同样可以携带分组（可选支持）。
+	partyGroup := "联系信息"
+	partyField, err := svc.CreateField(ctx, service.FieldInput{
+		Entity: model.FieldEntityParty, Key: "grouped_party", Label: "相对方分组字段",
+		Type: model.FieldTypeText, Group: &partyGroup,
+	})
+	if err != nil {
+		t.Fatalf("create grouped party field: %v", err)
+	}
+	if partyField.Group != "联系信息" {
+		t.Fatalf("party field group = %q, want 联系信息", partyField.Group)
+	}
+
+	// 过长的分组名截断到 20 个字符，避免误粘贴撑爆表单标题。
+	long := strings.Repeat("长", 30)
+	longField, err := svc.CreateField(ctx, service.FieldInput{
+		Entity: model.FieldEntityContract, Key: "grouped_long", Label: "超长分组",
+		Type: model.FieldTypeText, Group: &long,
+	})
+	if err != nil {
+		t.Fatalf("create long group field: %v", err)
+	}
+	if runes := []rune(longField.Group); len(runes) != 20 {
+		t.Fatalf("long group length = %d, want 20", len(runes))
+	}
+}
+
 // TestRuntimeFieldArchiveRestoreAndOrder pins archive/restore visibility and
 // the ascending sort_order rendering that the ledger and forms rely on.
 func TestRuntimeFieldArchiveRestoreAndOrder(t *testing.T) {

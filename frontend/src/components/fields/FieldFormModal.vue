@@ -11,6 +11,8 @@ import { ApiError } from "../../api/client";
 import { createField, updateField } from "../../api/endpoints";
 import type { ApiFieldError, FieldDefinition, FieldEntity, FieldInput, FieldType } from "../../api/types";
 import { errorMessage, refreshAfterWrite, toast } from "../../bridge/app";
+import FormErrors from "../../ui/FormErrors.vue";
+import { CONTRACT_GROUP_PRESETS } from "../contracts/fieldGroups";
 import { FIELD_KEY_PATTERN, generateFieldKey } from "./fieldKey";
 import { FIELD_TYPE_LABELS, USER_FIELD_TYPES } from "./labels";
 
@@ -29,6 +31,13 @@ const emit = defineEmits<{
 
 const isEdit = props.field !== null;
 const isBuiltIn = props.field?.built_in ?? false;
+
+// 分组只用于合同表单（te-bzqhx）；相对方表单不分组，不展示该控件。
+// 内置字段的分组由界面固定，控件只读展示、不提交，避免误导。
+const showGroup = computed(
+  () => (props.field?.entity ?? props.entity) === "contract",
+);
+const group = ref((props.field?.group ?? "").trim());
 
 const label = ref(props.field?.label ?? "");
 const type = ref<FieldType>(props.field?.type ?? "text");
@@ -142,6 +151,10 @@ function buildInput(): FieldInput {
   if (sortRaw !== "") {
     input.sort_order = Number(sortRaw);
   }
+  // 内置字段分组固定、相对方表单不使用分组：省略即保持原值。
+  if (showGroup.value && !isBuiltIn) {
+    input.group = group.value.trim();
+  }
   return input;
 }
 
@@ -205,14 +218,7 @@ onBeforeUnmount(() => {
         </div>
         <div ref="bodyEl" class="modal-body">
           <div>
-            <div v-if="fieldErrors.length" class="form-errors">
-              请修正以下问题：<ul>
-                <li v-for="problem in fieldErrors" :key="problem.field">
-                  {{ problem.label || problem.field }}：{{ problem.message }}
-                </li>
-              </ul>
-            </div>
-            <div v-else-if="errorText" class="form-errors">{{ errorText }}</div>
+            <FormErrors :field-errors="fieldErrors" :error-text="errorText" />
           </div>
           <div class="form-grid">
             <div class="field">
@@ -233,6 +239,25 @@ onBeforeUnmount(() => {
             <div class="field">
               <label for="fieldSort">排序</label>
               <input id="fieldSort" v-model="sort" type="number" placeholder="留空自动排到最后">
+            </div>
+            <div v-if="showGroup" class="field">
+              <label for="fieldGroup">分组</label>
+              <input
+                id="fieldGroup"
+                v-model="group"
+                type="text"
+                list="fieldGroupPresets"
+                placeholder="留空归入「其他约定」"
+                :disabled="isBuiltIn"
+              >
+              <datalist id="fieldGroupPresets">
+                <option v-for="preset in CONTRACT_GROUP_PRESETS" :key="preset" :value="preset" />
+              </datalist>
+              <span class="help">
+                {{ isBuiltIn
+                  ? "内置字段分组固定（基本信息 / 租期 / 租金与押金），不可修改。"
+                  : "合同表单按分组展示；可选预设，也可自定义名称。" }}
+              </span>
             </div>
             <div class="field">
               <label for="fieldDefault">默认值</label>

@@ -68,6 +68,7 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 					{"required", "boolean", "是否必填"},
 					{"default_value", "string", "默认值"},
 					{"options", "array", "单选字段的选项"},
+					{"group", "string", "合同表单分组（如 租期 / 租金与押金）；空表示未分组，按「其他约定」展示；内置字段分组固定"},
 					{"in_ledger", "boolean", "是否出现在应用内台账表格（Excel 列始终由当前字段定义生成）"},
 					{"in_template", "boolean", "是否用于模板占位符"},
 					{"built_in", "boolean", "是否内置字段"},

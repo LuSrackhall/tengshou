@@ -139,6 +139,7 @@ func toolDefinitions() []toolDefinition {
 				},
 				"in_ledger":   boolProp("是否出现在台账与 Excel（默认 true）"),
 				"in_template": boolProp("是否用于模板占位符（默认 true）"),
+				"group":       stringProp("合同表单分组，例如 租期 / 租金与押金；留空归入「其他约定」"),
 				"note":        stringProp("说明"),
 			}, []string{"entity", "key", "label", "type"})),
 		writeTool(toolCreateParty, "新建相对方档案",
@@ -482,6 +483,7 @@ type createFieldArgs struct {
 	Options      []string `json:"options,omitempty"`
 	InLedger     *bool    `json:"in_ledger,omitempty"`
 	InTemplate   *bool    `json:"in_template,omitempty"`
+	Group        *string  `json:"group,omitempty"`
 	Note         *string  `json:"note,omitempty"`
 }
 

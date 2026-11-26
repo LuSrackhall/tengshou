@@ -418,10 +418,10 @@ func TestWriteToolsAndActorAudit(t *testing.T) {
 
 	created := callToolJSON(t, srv, toolCreateField, map[string]any{
 		"entity": "contract", "key": "area_sqm", "label": "平方数", "type": "number",
-		"in_ledger": true, "in_template": true,
+		"in_ledger": true, "in_template": true, "group": "房屋信息",
 	})
 	field := created["item"].(map[string]any)
-	if field["key"] != "area_sqm" || field["built_in"] != false {
+	if field["key"] != "area_sqm" || field["built_in"] != false || field["group"] != "房屋信息" {
 		t.Fatalf("field = %v", field)
 	}
 	fieldID, _ := field["id"].(string)

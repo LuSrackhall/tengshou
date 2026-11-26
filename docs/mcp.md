@@ -263,7 +263,7 @@ false`）。只读工具标注 `readOnlyHint=true`；写工具标注
 
 | 工具 | 主要参数 | 用途 |
 | --- | --- | --- |
-| `tengshou_create_field` | `entity`、`key`、`label`、`type`、`required`、`default_value`、`options`、`in_ledger`、`in_template`、`note` | 新建动态字段，立即用于表单 / Excel / 模板 |
+| `tengshou_create_field` | `entity`、`key`、`label`、`type`、`required`、`default_value`、`options`、`group`、`in_ledger`、`in_template`、`note` | 新建动态字段，立即用于表单 / Excel / 模板；`group` 指定合同表单分组（留空归「其他约定」） |
 | `tengshou_create_party` | `name`、`kind`、`id_number`、`phone`、`address`、`note`、`data` | 新建相对方档案 |
 | `tengshou_create_contract_draft` | `title`、`year`、`type`、`party_b_id` / `party_b`、`amount`、`template_id`、日期、`contract_no`、`data` | 新建合同草稿（状态固定 `draft`） |
 | `tengshou_generate_contract` | `template_id`、`contract_id`、`allow_stale_signature`、`kind` | 套用 PDF 模板生成合同文件；内部先预检，未通过不写记录、不产文件 |

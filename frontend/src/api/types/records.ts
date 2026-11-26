@@ -121,6 +121,8 @@ export interface FieldDefinition {
   required: boolean;
   default_value?: string;
   options?: string[];
+  /** 合同表单分组；空/缺省表示未分组（按「其他约定」渲染）。内置字段由界面固定归组。 */
+  group?: string;
   in_ledger: boolean;
   in_template: boolean;
   built_in: boolean;

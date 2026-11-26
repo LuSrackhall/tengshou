@@ -147,6 +147,18 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
 .form-grid .full { grid-column: 1 / -1; }
+
+/* 合同表单分组（te-bzqhx）：可折叠，默认展开；空组不渲染。 */
+.form-section {
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 0 14px 14px; margin-bottom: 14px; background: var(--card);
+}
+.form-section > summary {
+  cursor: pointer; font-size: 14px; font-weight: 600; color: var(--ink);
+  padding: 12px 0 10px; list-style-position: inside;
+}
+.form-section[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.form-section > .form-grid { margin-top: 2px; }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field > label { font-size: 13px; font-weight: 600; color: var(--muted); }
 .field .req { color: var(--danger); margin-left: 2px; }

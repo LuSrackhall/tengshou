@@ -510,6 +510,69 @@ func TestMigrationAddsContractSourceColumn(t *testing.T) {
 	}
 }
 
+// TestMigrationAddsFieldGroupColumn simulates a database created before the
+// grouped-form migration (schema version 12, no group_name column) and checks
+// the upgrade keeps existing definitions while defaulting their group to empty.
+func TestMigrationAddsFieldGroupColumn(t *testing.T) {
+	st, path := openStore(t)
+	ctx := context.Background()
+	legacy := model.FieldDefinition{
+		Entity: model.FieldEntityContract, Key: "legacy_rent", Label: "旧字段", Type: "text",
+	}
+	if err := st.PutFieldDefinition(ctx, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE field_definitions DROP COLUMN group_name`); err != nil {
+		t.Fatalf("drop group column: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM schema_migrations WHERE version = 13`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	upgraded, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("upgrade v12 database: %v", err)
+	}
+	defer upgraded.Close()
+	if v, _ := upgraded.SchemaVersion(); v != store.LatestSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", v, store.LatestSchemaVersion())
+	}
+	reader := mustReader(t, upgraded)
+	got, err := reader.GetFieldDefinition(ctx, legacy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Label != "旧字段" || got.Group != "" {
+		t.Fatalf("legacy field changed by migration: %+v", got)
+	}
+	// 升级后写入的分组正常持久化；存量行保持未分组。
+	got.Group = "费用与违约"
+	if err := upgraded.PutFieldDefinition(ctx, &got); err != nil {
+		t.Fatal(err)
+	}
+	again, err := reader.GetFieldDefinition(ctx, legacy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Group != "费用与违约" {
+		t.Fatalf("post-upgrade group = %q, want 费用与违约", again.Group)
+	}
+	builtIn, err := reader.GetFieldByKey(ctx, model.FieldEntityContract, model.FieldContractNo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if builtIn.Group != "" {
+		t.Fatalf("built-in field group = %q, want empty", builtIn.Group)
+	}
+}
+
 // TestLatestSuccessfulDocumentUsesInsertionOrder pins the regenerate source to
 // the most recently inserted document. created_at is second-precision, so the
 // ids are chosen to make the old ORDER BY created_at DESC, id DESC pick the

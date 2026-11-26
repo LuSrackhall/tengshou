@@ -44,7 +44,7 @@ func scanFieldDefinition(sc scanner) (model.FieldDefinition, error) {
 	var required, inLedger, inTemplate, builtIn, archived int
 	var optionsJSON, createdAt, updatedAt string
 	if err := sc.Scan(&f.ID, &f.Entity, &f.Key, &f.Label, &f.Type, &required,
-		&f.DefaultValue, &optionsJSON, &inLedger, &inTemplate, &builtIn, &archived,
+		&f.DefaultValue, &optionsJSON, &f.Group, &inLedger, &inTemplate, &builtIn, &archived,
 		&f.SortOrder, &f.Note, &createdAt, &updatedAt); err != nil {
 		return f, err
 	}
@@ -59,7 +59,7 @@ func scanFieldDefinition(sc scanner) (model.FieldDefinition, error) {
 }
 
 const fieldDefinitionColumns = `id, entity, key, label, type, required, default_value,
-	options_json, in_ledger, in_template, built_in, archived, sort_order, note,
+	options_json, group_name, in_ledger, in_template, built_in, archived, sort_order, note,
 	created_at, updated_at`
 
 // ListFieldDefinitions returns definitions for one entity in render order.

@@ -19,11 +19,13 @@ type FieldInput struct {
 	Required     *bool    `json:"required"`
 	DefaultValue *string  `json:"default_value"`
 	Options      []string `json:"options"`
-	InLedger     *bool    `json:"in_ledger"`
-	InTemplate   *bool    `json:"in_template"`
-	SortOrder    *int     `json:"sort_order"`
-	Note         *string  `json:"note"`
-	Archived     *bool    `json:"archived"`
+	// Group 是合同表单分组名；空串表示未分组（表单按「其他约定」展示）。
+	Group      *string `json:"group"`
+	InLedger   *bool   `json:"in_ledger"`
+	InTemplate *bool   `json:"in_template"`
+	SortOrder  *int    `json:"sort_order"`
+	Note       *string `json:"note"`
+	Archived   *bool   `json:"archived"`
 }
 
 // builtInRequired keeps the core identity fields mandatory.
@@ -90,6 +92,7 @@ func (s *Service) CreateField(ctx context.Context, in FieldInput) (model.FieldDe
 		Required:     in.Required != nil && *in.Required,
 		DefaultValue: defaultValue,
 		Options:      options,
+		Group:        cleanGroup(in.Group),
 		InLedger:     in.InLedger == nil || *in.InLedger,
 		InTemplate:   in.InTemplate == nil || *in.InTemplate,
 		SortOrder:    s.defaultSortOrder(ctx, entity, in.SortOrder),
@@ -162,6 +165,9 @@ func (s *Service) UpdateField(ctx context.Context, id string, in FieldInput) (mo
 	if in.InLedger != nil {
 		field.InLedger = *in.InLedger
 	}
+	if in.Group != nil {
+		field.Group = cleanGroup(in.Group)
+	}
 	if in.InTemplate != nil {
 		field.InTemplate = *in.InTemplate
 	}
@@ -206,6 +212,19 @@ func (s *Service) UpdateField(ctx context.Context, id string, in FieldInput) (mo
 func (s *Service) ArchiveField(ctx context.Context, id string) (model.FieldDefinition, error) {
 	archived := true
 	return s.UpdateField(ctx, id, FieldInput{Archived: &archived})
+}
+
+// fieldGroupMaxRunes bounds the optional form section name so a stray paste
+// cannot bloat the field list; the preset names are at most five runes.
+const fieldGroupMaxRunes = 20
+
+// cleanGroup normalizes a user-supplied form group: surrounding whitespace is
+// ignored and empty means "ungrouped" (rendered under 其他约定).
+func cleanGroup(raw *string) string {
+	if raw == nil {
+		return ""
+	}
+	return truncateRunes(strings.TrimSpace(*raw), fieldGroupMaxRunes)
 }
 
 func cleanOptions(fieldType string, raw []string) ([]string, error) {
@@ -311,6 +330,7 @@ func diffFieldDefinitions(before, after model.FieldDefinition) []model.FieldChan
 	add("required", "是否必填", yesNoLabel(before.Required), yesNoLabel(after.Required))
 	add("default_value", "默认值", before.DefaultValue, after.DefaultValue)
 	add("in_ledger", "出现在台账", yesNoLabel(before.InLedger), yesNoLabel(after.InLedger))
+	add("group", "分组", before.Group, after.Group)
 	add("in_template", "出现在模板", yesNoLabel(before.InTemplate), yesNoLabel(after.InTemplate))
 	add("sort_order", "排序", fmt.Sprint(before.SortOrder), fmt.Sprint(after.SortOrder))
 	add("note", "说明", before.Note, after.Note)

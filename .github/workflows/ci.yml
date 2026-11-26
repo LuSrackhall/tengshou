@@ -1,11 +1,31 @@
 name: CI
 
+# 发版流程约束：只对已合入 main 且 main 上 CI 全绿的 commit 打 v* tag。
+# tag run 跳过单测与三端 E2E（同一 commit 已在 main 上验证），只保留
+# 前端构建 + CLI/桌面构建 + 教程 + 发布，把发版墙钟压到 ≤9 分钟
+# （教程的慢速录制是硬底）。
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    # 仅忽略纯文档改动（docs/** 与根级 *.md）；产品代码、脚本、依赖与
+    # workflow 自身（.github/**）都不在忽略列表内，改到必然触发。
+    # main 未启用分支保护、无 required status checks，跳过不会卡合并。
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   workflow_dispatch:
+
+# 同一 ref 的连续 push 用新 run 取代旧 run：
+# - PR：取消进行中的旧 run，避免排队重复跑；
+# - main 与 tag：永不取消，避免 main 校验或发版跑一半被打断。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: write
@@ -13,6 +33,8 @@ permissions:
 jobs:
   test:
     name: 测试（Linux）
+    # tag run 跳过：同 commit 在 main 上单测已全绿；发版只做构建 + 教程 + 发布。
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,10 +129,12 @@ jobs:
   e2e:
     name: E2E 界面测试（${{ matrix.label }}）
     needs: frontend
+    # PR/main 保持全量三端覆盖；tag run 跳过（同 commit 已在 main 验证）。
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ${{ matrix.os }}
     # 三端都安装 Word→PDF 转换器（Linux apt / Windows Chocolatey /
-    # macOS Homebrew cask），安装耗时 2–10 分钟；45 分钟上限只放宽时间，
-    # 不降低任何测试内容。
+    # macOS Homebrew cask），安装耗时 2–10 分钟（浏览器与安装包缓存命中后
+    # 显著缩短）；45 分钟上限只放宽时间，不降低任何测试内容。
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -120,14 +144,17 @@ jobs:
             label: Linux · Chromium
             artifact: linux-chromium
             cli: dist/tengshou-cli
+            pw-dir: ~/.cache/ms-playwright
           - os: windows-latest
             label: Windows · Chromium
             artifact: windows-chromium
             cli: dist/tengshou-cli-windows-amd64.exe
+            pw-dir: ~/AppData/Local/ms-playwright
           - os: macos-15
             label: macOS · WebKit
             artifact: macos-webkit
             cli: dist/tengshou-cli
+            pw-dir: ~/Library/Caches/ms-playwright
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -144,30 +171,179 @@ jobs:
         with:
           name: frontend-dist
           path: internal/httpapi/web/app/dist
-      - name: 安装中文字体与 LibreOffice（Linux）
+      - name: 读取 Playwright 版本（浏览器缓存 key 绑定版本）
+        id: pw-version
+        working-directory: e2e
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: 恢复 Playwright 浏览器缓存
+        id: pw-cache
+        uses: actions/cache/restore@v4
+        # 缓存只用于提速；恢复失败不阻断，playwright install 会补装缺失浏览器。
+        continue-on-error: true
+        with:
+          path: ${{ matrix.pw-dir }}
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+      # LibreOffice 安装包缓存：缓存 key 绑定安装包版本 + runner OS；
+      # 恢复失败、命中损坏或下载失败时一律回退到正常安装，不让 E2E 变红。
+      - name: 更新 apt 索引并解析 LibreOffice 版本（Linux）
+        id: lo-linux
         if: runner.os == 'Linux'
         run: |
+          set -euo pipefail
           sudo apt-get update
+          # Candidate 形如 4:24.2.7-0ubuntu0.24.04.4，去掉 epoch 冒号后作缓存 key。
+          version="$(apt-cache policy libreoffice-writer | awk '/Candidate:/ {print $2}')"
+          version="${version#*:}"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: 解析 LibreOffice 版本（macOS）
+        id: lo-macos
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          version="$(brew info --cask libreoffice --json=v2 | python3 -c 'import json,sys; print(json.load(sys.stdin)["casks"][0]["version"])')"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: 解析 LibreOffice 版本（Windows）
+        id: lo-windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $line = @(choco search libreoffice-fresh --exact --limit-output --no-progress)[0]
+          if (-not $line -or $line -notmatch '\|') { throw "无法解析 libreoffice-fresh 版本" }
+          $version = ($line -split '\|')[1].Trim()
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: 恢复 LibreOffice 安装包缓存（Linux）
+        id: lo-cache-linux
+        if: runner.os == 'Linux'
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/libreoffice-debs
+          key: libreoffice-linux-${{ steps.lo-linux.outputs.version }}
+      - name: 恢复 LibreOffice 安装包缓存（macOS）
+        id: lo-cache-macos
+        if: runner.os == 'macOS'
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          # 安装步骤用独立的 HOMEBREW_CACHE，这里只缓存其中的下载包目录；
+          # Homebrew 下载按内容 sha256 命名，命中损坏时 brew 校验失败会
+          # 自动重新下载，安装仍走正常流程。
+          path: ${{ runner.temp }}/homebrew-cache/downloads
+          key: libreoffice-macos-${{ steps.lo-macos.outputs.version }}
+      - name: 恢复 LibreOffice 安装包缓存（Windows）
+        id: lo-cache-windows
+        if: runner.os == 'Windows'
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/libreoffice-choco
+          key: libreoffice-windows-${{ steps.lo-windows.outputs.version }}
+      - name: 安装中文字体与 LibreOffice（Linux，缓存命中时跳过下载）
+        if: runner.os == 'Linux'
+        env:
+          LO_CACHE_HIT: ${{ steps.lo-cache-linux.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          # 先按 SHA256SUMS 校验恢复的安装包，只把校验通过的包回填 apt 缓存；
+          # 损坏/缺失的包丢弃，apt 会正常联网补装——缓存问题不会让 E2E 变红。
+          cache="$RUNNER_TEMP/libreoffice-debs"
+          if [ -f "$cache/SHA256SUMS" ]; then
+            while read -r digest name; do
+              deb="$cache/$name"
+              if [ -f "$deb" ] && [ "$(sha256sum "$deb" | cut -d' ' -f1)" = "$digest" ]; then
+                sudo cp -f "$deb" /var/cache/apt/archives/
+              else
+                echo "丢弃无效的缓存安装包：$name"
+              fi
+            done < "$cache/SHA256SUMS"
+          fi
           # fonts-noto-cjk 供 LibreOffice 渲染 Word 合同；fonts-arphic-uming
           # （TrueType）继续供 Go PDF 子集化使用。
           sudo apt-get install -y fonts-arphic-uming fonts-noto-cjk libreoffice-writer
           echo "TENGHSHOU_FONT=/usr/share/fonts/truetype/arphic/uming.ttc" >> "$GITHUB_ENV"
-      - name: 安装 LibreOffice（Windows）
+          # 缓存未命中时收集本次下载的安装包（缓存条目不可覆盖，命中后不重传）。
+          if [ "$LO_CACHE_HIT" != "true" ]; then
+            mkdir -p "$cache"
+            shopt -s nullglob
+            debs=(/var/cache/apt/archives/*.deb)
+            if [ "${#debs[@]}" -gt 0 ]; then
+              cp -f "${debs[@]}" "$cache/"
+              ( cd "$cache" && sha256sum ./*.deb > SHA256SUMS )
+            fi
+            shopt -u nullglob
+          fi
+      - name: 安装 LibreOffice（Windows，缓存命中时跳过下载）
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          LO_CACHE_HIT: ${{ steps.lo-cache-windows.outputs.cache-hit }}
+          LO_VERSION: ${{ steps.lo-windows.outputs.version }}
         run: |
-          choco install libreoffice-fresh -y --no-progress
+          $cache = Join-Path $env:RUNNER_TEMP 'libreoffice-choco'
+          # 1) 校验恢复的缓存安装包；清单缺失/不匹配时清空缓存目录，正常下载。
+          $manifest = Join-Path $cache 'SHA256SUMS.txt'
+          if (Test-Path -LiteralPath $manifest) {
+            $ok = $true
+            foreach ($line in Get-Content -LiteralPath $manifest) {
+              $parts = $line -split '  ', 2
+              if ($parts.Count -ne 2) { $ok = $false; break }
+              $file = Join-Path $cache $parts[1]
+              if (-not (Test-Path -LiteralPath $file)) { $ok = $false; break }
+              if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $parts[0]) { $ok = $false; break }
+            }
+            if (-not $ok) {
+              Write-Warning 'LibreOffice 安装包缓存校验失败，清空缓存目录并重新下载。'
+              Remove-Item -Recurse -Force $cache
+            }
+          }
+          # 2) 未命中时下载内部化安装包（nupkg 内嵌 MSI），供本地安装与缓存保存。
+          $nupkg = Get-ChildItem -Path $cache -Filter 'libreoffice-fresh*.nupkg' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $nupkg) {
+            New-Item -ItemType Directory -Force -Path $cache | Out-Null
+            choco download libreoffice-fresh --version=$env:LO_VERSION --internalize --output-directory=$cache --no-progress
+            $nupkg = Get-ChildItem -Path $cache -Filter 'libreoffice-fresh*.nupkg' -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          # 3) 优先从缓存包本地安装；任何失败都回退到正常安装，不让缓存拖红 CI。
+          $installed = $false
+          if ($nupkg) {
+            choco install libreoffice-fresh --version=$env:LO_VERSION --source=$cache --no-progress -y
+            $installed = ($LASTEXITCODE -eq 0)
+            if (-not $installed) { Write-Warning '缓存安装包不可用，回退到正常安装。' }
+          }
+          if (-not $installed) {
+            choco install libreoffice-fresh -y --no-progress
+          }
           # 产品检测路径：internal/doctopdf/libreoffice.go 的 Windows 候选。
           $soffice = Join-Path $env:ProgramFiles 'LibreOffice\program\soffice.exe'
           if (-not (Test-Path -LiteralPath $soffice)) {
             throw "LibreOffice 未安装到产品检测路径：$soffice"
           }
-      - name: 安装 LibreOffice（macOS）
+          # 4) 缓存未命中时写入校验清单，随后由保存步骤打包缓存。
+          if ($env:LO_CACHE_HIT -ne 'true' -and $nupkg) {
+            $lines = Get-ChildItem -Path $cache -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | ForEach-Object {
+              '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash, $_.Name
+            }
+            Set-Content -LiteralPath $manifest -Value $lines -Encoding ascii
+          }
+      - name: 安装 LibreOffice（macOS，缓存命中时跳过下载）
         if: runner.os == 'macOS'
         env:
           # runner 已预装 Homebrew；跳过一次自动更新，把时间留给 cask 安装。
           HOMEBREW_NO_AUTO_UPDATE: "1"
+          # 独立的下载缓存目录，只存放本次安装的安装包，便于整体缓存复用。
+          HOMEBREW_CACHE: ${{ runner.temp }}/homebrew-cache
         run: |
+          # 恢复的 Homebrew 下载缓存命中时跳过下载；
+          # 校验失败时 brew 会自动重新下载，安装仍走正常流程。
           brew install --cask libreoffice
           # 产品检测路径：internal/doctopdf/libreoffice.go 的 macOS 候选。
           test -x "/Applications/LibreOffice.app/Contents/MacOS/soffice"
@@ -178,6 +354,7 @@ jobs:
       - name: 安装 E2E 依赖
         working-directory: e2e
         run: npm ci
+      # install 总会执行：缓存命中的浏览器被跳过，缺失/不完整的自动补装。
       - name: 安装 Playwright 浏览器（Linux · Chromium）
         if: runner.os == 'Linux'
         working-directory: e2e
@@ -190,6 +367,35 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: e2e
         run: npx playwright install webkit
+      # 缓存只在未命中时写入；保存失败不影响结论（并发 job 可能已写同 key）。
+      - name: 保存 Playwright 浏览器缓存
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: ${{ matrix.pw-dir }}
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+      - name: 保存 LibreOffice 安装包缓存（Linux）
+        if: runner.os == 'Linux' && steps.lo-cache-linux.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/libreoffice-debs
+          key: libreoffice-linux-${{ steps.lo-linux.outputs.version }}
+      - name: 保存 LibreOffice 安装包缓存（macOS）
+        if: runner.os == 'macOS' && steps.lo-cache-macos.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/homebrew-cache/downloads
+          key: libreoffice-macos-${{ steps.lo-macos.outputs.version }}
+      - name: 保存 LibreOffice 安装包缓存（Windows）
+        if: runner.os == 'Windows' && steps.lo-cache-windows.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/libreoffice-choco
+          key: libreoffice-windows-${{ steps.lo-windows.outputs.version }}
       - name: 运行 E2E 套件
         working-directory: e2e
         env:
@@ -243,9 +449,43 @@ jobs:
         with:
           name: frontend-dist
           path: internal/httpapi/web/app/dist
+      - name: 读取 Playwright 版本（浏览器缓存 key 绑定版本）
+        id: pw-version
+        working-directory: e2e
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: 恢复 Playwright 浏览器缓存
+        id: pw-cache
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+      - name: 解析 LibreOffice 版本（macOS）
+        id: lo-macos
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          version="$(brew info --cask libreoffice --json=v2 | python3 -c 'import json,sys; print(json.load(sys.stdin)["casks"][0]["version"])')"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: 恢复 LibreOffice 安装包缓存（macOS）
+        id: lo-cache-macos
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          # 安装步骤用独立的 HOMEBREW_CACHE，这里只缓存其中的下载包目录。
+          path: ${{ runner.temp }}/homebrew-cache/downloads
+          key: libreoffice-macos-${{ steps.lo-macos.outputs.version }}
       - name: 安装 LibreOffice（macOS）
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_CACHE: ${{ runner.temp }}/homebrew-cache
         run: |
           brew install --cask libreoffice
           # 产品检测路径：internal/doctopdf/libreoffice.go 的 macOS 候选。
@@ -259,6 +499,21 @@ jobs:
         run: |
           npm ci
           npx playwright install webkit
+      # 与 e2e 矩阵共用同一缓存 key：tag run 填充的缓存供后续 main/PR 使用。
+      - name: 保存 Playwright 浏览器缓存
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+      - name: 保存 LibreOffice 安装包缓存（macOS）
+        if: steps.lo-cache-macos.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/homebrew-cache/downloads
+          key: libreoffice-macos-${{ steps.lo-macos.outputs.version }}
       - name: 生成使用教程（慢速高清录制 + 章节标题卡）
         working-directory: e2e
         env:
@@ -425,7 +680,8 @@ jobs:
   release:
     name: 发布预发布版
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, cli, desktop, tutorial]
+    # tag run 不再等待单测（同 commit 在 main 上已全绿）；三端 E2E 也不在 tag 上运行。
+    needs: [cli, desktop, tutorial]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -61,6 +61,13 @@ func (s *Service) SaveAsset(ctx context.Context, in AssetInput) (model.Asset, []
 	if err := s.st.PutAsset(ctx, &asset); err != nil {
 		return model.Asset{}, nil, err
 	}
+	// 重读持久化行：派生字段（如 lease_status）只在读取路径计算，保存响应
+	// 与后续变更记录必须基于同一份数据，避免两条派生规则漂移。
+	persisted, err := s.rd.GetAsset(ctx, asset.ID)
+	if err != nil {
+		return model.Asset{}, nil, fmt.Errorf("读取保存后的房产档案: %w", err)
+	}
+	asset = persisted
 	action := model.ChangeActionCreate
 	summary := fmt.Sprintf("新建房产档案「%s」", asset.Name)
 	var changes []model.FieldChange
@@ -120,8 +127,6 @@ func (s *Service) buildAsset(ctx context.Context, in AssetInput, existing *model
 	if err := validation.errOrNil(); err != nil {
 		return model.Asset{}, nil, err
 	}
-	// 与读取路径一致：本珠还没有合同能引用资产，保存后一律按空置派生。
-	asset.LeaseStatus = model.LeaseStatusVacant
 	warnings := []string{}
 	if asset.Name != "" {
 		matches, err := s.rd.FindAssetsByName(ctx, asset.Name)

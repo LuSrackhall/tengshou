@@ -107,7 +107,10 @@ test.describe("场景 D：局域网自助建档", () => {
     });
 
     await test.step("出租方档案列表自动出现新档案", async () => {
-      await enrollDialog.getByRole("button", { name: "关闭" }).click();
+      // 手机提交后桌面端轮询会让页脚「取消」翻成「关闭」，与弹窗头部 × 的
+      // aria-label「关闭」重名，按角色名点击会 strict mode 命中两个元素
+      // （Linux Chromium 轮询更快，连续复现）；用头部 × 精确定位。
+      await enrollDialog.locator(".modal-head button.close").click();
       await expect(enrollDialog).toBeHidden();
       const row = page.locator(
         `#partyTable tr[data-id]:has-text("${tenantName}")`,

@@ -270,9 +270,10 @@ func TestAppEnrollRejectsDuplicateIDThenAcceptsCorrection(t *testing.T) {
 	}
 }
 
-// v0.2: the explicit "use archive signature" endpoint must bind the current
-// contract content version, be idempotent for the same version, and refuse
-// parties without an archive signature or outside the contract.
+// v0.2 D3=B: the "use archive signature" endpoint stamps the archive
+// signature as-is (no contract content version), is idempotent across content
+// edits, and refuses parties without an archive signature or outside the
+// contract.
 func TestAppReusePartySignature(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -309,8 +310,9 @@ func TestAppReusePartySignature(t *testing.T) {
 	if item["source"] != model.SignatureSourceArchive {
 		t.Fatalf("reused source = %v", item["source"])
 	}
-	if item["content_sha256"] == nil || item["content_sha256"] == "" {
-		t.Fatalf("reused signature lacks content version: %v", item)
+	// Archive reuse is deliberately not bound to a contract content version.
+	if item["content_sha256"] != nil && item["content_sha256"] != "" {
+		t.Fatalf("reused signature should not bind a content version: %v", item)
 	}
 	if item["contract_id"] != contract.ID || item["party_id"] != party.ID {
 		t.Fatalf("reused signature links = %v", item)
@@ -330,6 +332,24 @@ func TestAppReusePartySignature(t *testing.T) {
 	}
 	if again := decodeAppItem(t, body); again["id"] != firstID {
 		t.Fatalf("reuse should be idempotent: %v vs %s", again["id"], firstID)
+	}
+
+	// Editing the contract content later must not invalidate or duplicate the
+	// reuse row (v0.2 D3=B).
+	if _, _, err := f.service.SaveContract(ctx, service.ContractInput{
+		ID: contract.ID, ContractNo: contract.ContractNo, Year: contract.Year,
+		Title: "复用签名合同（改名）", PartyBID: party.ID, Amount: contract.Amount,
+	}); err != nil {
+		t.Fatalf("update contract: %v", err)
+	}
+	resp, body = f.appRequest(t, http.MethodPost,
+		"/app/api/v1/contracts/"+contract.ID+"/signature-reuse",
+		map[string]any{"party_id": party.ID}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reuse after content change: %d %s", resp.StatusCode, body)
+	}
+	if afterChange := decodeAppItem(t, body); afterChange["id"] != firstID {
+		t.Fatalf("reuse should stay idempotent across content changes: %v vs %s", afterChange["id"], firstID)
 	}
 
 	// A party without an archive signature is refused with a business code.

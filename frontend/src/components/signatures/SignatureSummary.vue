@@ -19,6 +19,18 @@ interface SummaryItem {
   signerName: string;
   capturedAt: string;
   version: string;
+  source: string;
+}
+
+/** 签名来源：档案复用 / 现场手写；旧记录（无 source）不展示。 */
+function sourceLabel(source: string | undefined): string {
+  if (source === "archive") {
+    return "档案复用";
+  }
+  if (source === "lan_qr") {
+    return "现场手写";
+  }
+  return "";
 }
 
 function roleOf(partyID: string | undefined): string {
@@ -38,6 +50,7 @@ const items = computed<SummaryItem[]>(() =>
     signerName: sig.signer_name,
     capturedAt: fmtDate(sig.captured_at),
     version: sig.content_sha256 ? shortDigest(sig.content_sha256) : "",
+    source: sourceLabel(sig.source),
   })),
 );
 
@@ -63,7 +76,7 @@ async function exportOne(id: string): Promise<void> {
     <strong>已采集签名 {{ detail.signatures.length }} 个</strong>
     <ul>
       <li v-for="item in items" :key="item.id">
-        <span class="badge active">{{ item.role }}</span> {{ item.signerName }} · {{ item.capturedAt }}<template v-if="item.version"> · 内容版本 <code>{{ item.version }}</code></template>
+        <span class="badge active">{{ item.role }}</span> {{ item.signerName }} · {{ item.capturedAt }}<template v-if="item.source"> · 来源：{{ item.source }}</template><template v-if="item.version"> · 内容版本 <code>{{ item.version }}</code></template>
         <button type="button" :data-export-signature="item.id" @click="exportOne(item.id)">导出</button>
       </li>
     </ul>

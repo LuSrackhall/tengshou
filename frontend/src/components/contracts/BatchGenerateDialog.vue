@@ -485,7 +485,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="hint">
-            勾选要生成的合同。预检会逐份检查必填字段、相对方档案、签名（含内容版本）与公章，再开始生成。
+            勾选要生成的合同。预检会逐份检查必填字段、相对方档案、签名（现场手写核对内容版本，档案复用直接套印）与公章，再开始生成。
           </div>
           <div id="batchContractList" class="batch-contract-list">
             <label v-for="contract in contracts" :key="contract.id" class="batch-contract-row">

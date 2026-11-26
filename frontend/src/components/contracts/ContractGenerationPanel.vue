@@ -58,9 +58,10 @@ const CHANGE_TEMPLATE_STATUS = "模板版本已更换，请重新预览。";
 
 /** 生成失败时的下一步提示（app.js generationErrorHTML 的 hints）。 */
 const GENERATION_HINTS: Record<string, string> = {
-  missing_signature: "请先在合同行点「扫码签名」采集签名，再预览并生成。",
+  missing_signature:
+    "请先在合同行点「扫码签名」采集手写签名，或在签名人档案已有长期签名时选择「使用租户档案签名」套印，再预览并生成。",
   content_changed:
-    "合同内容在签名后已修改；请重新签名，或确认旧签名仍有效时选择「保留旧签名重出」。",
+    "现场手写签名在合同内容修改后已过期；请重新签名，或确认旧签名仍有效时选择「保留旧签名重出」。",
   missing_field: "请先补全合同或相对方档案中的必填信息。",
   missing_party: "请先为合同补齐相对方档案。",
   missing_asset_record: "请先在合同表单选择房产档案，模板引用了房产信息。",

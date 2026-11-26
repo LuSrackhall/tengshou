@@ -109,11 +109,11 @@ func (s *Service) SaveSignature(ctx context.Context, in SignatureInput) (model.S
 		_ = os.Remove(full)
 		return model.Signature{}, err
 	}
-	summary := fmt.Sprintf("采集手写签名：%s", sig.SignerName)
+	summary := fmt.Sprintf("采集手写签名：%s（来源：现场手写）", sig.SignerName)
 	entity, entityID := "", ""
 	if contract != nil {
 		entity, entityID = model.ChangeEntityContract, contract.ID
-		summary = fmt.Sprintf("采集手写签名：%s（合同 %s）", sig.SignerName, contract.ContractNo)
+		summary = fmt.Sprintf("采集手写签名：%s（合同 %s，来源：现场手写）", sig.SignerName, contract.ContractNo)
 		if sig.ContentSHA256 != "" && len(sig.ContentSHA256) >= 12 {
 			summary += "，内容版本 " + sig.ContentSHA256[:12]
 		}
@@ -126,10 +126,12 @@ func (s *Service) SaveSignature(ctx context.Context, in SignatureInput) (model.S
 	return sig, nil
 }
 
-// ReusePartySignature links a party's archive-level signature to a contract at
-// the contract's current content version. It never copies the image: a new
-// signature row points at the same immutable asset, so the exact file stays
-// pinned by SHA-256 and the change log records the explicit reuse.
+// ReusePartySignature links a party's archive-level signature to a contract.
+// v0.2 D3=B treats the archive signature as directly reusable: the row points
+// at the same immutable asset and deliberately carries no contract content
+// version, so editing the contract later does not invalidate it. Replacing the
+// archive signature afterwards only affects future reuse; rows already linked
+// to contracts and already generated PDFs keep their original asset.
 func (s *Service) ReusePartySignature(ctx context.Context, contractID, partyID string) (model.Signature, error) {
 	contractID = strings.TrimSpace(contractID)
 	partyID = strings.TrimSpace(partyID)
@@ -170,19 +172,16 @@ func (s *Service) ReusePartySignature(ctx context.Context, contractID, partyID s
 	if _, err := os.Stat(full); err != nil {
 		return model.Signature{}, business("missing_asset", "档案签名图片文件缺失，请重新采集")
 	}
-	content, err := ContentSHA256(contract)
-	if err != nil {
-		return model.Signature{}, err
-	}
-	// Idempotent: reuse of the same archive signature for the same contract
-	// content version returns the existing row instead of piling up duplicates.
+	// Idempotent per (contract, party, asset): repeated clicks, including after
+	// the contract content changed, return the existing row instead of piling
+	// up duplicates, because archive reuse is not bound to a content version.
 	existing, err := s.rd.ListSignatures(ctx, model.ListFilter{ContractID: contract.ID, Limit: 500})
 	if err != nil {
 		return model.Signature{}, err
 	}
 	for _, sig := range existing.Items {
 		if sig.PartyID == party.ID && sig.Source == model.SignatureSourceArchive &&
-			sig.ContentSHA256 == content && sig.AssetPath == archive.AssetPath {
+			sig.AssetPath == archive.AssetPath {
 			return sig, nil
 		}
 	}
@@ -192,25 +191,26 @@ func (s *Service) ReusePartySignature(ctx context.Context, contractID, partyID s
 	}
 	now := s.now()
 	sig := model.Signature{
-		ID:            id,
-		PartyID:       party.ID,
-		ContractID:    contract.ID,
-		SignerName:    party.Name,
-		AssetPath:     archive.AssetPath,
-		SHA256:        archive.SHA256,
-		ContentSHA256: content,
-		Source:        model.SignatureSourceArchive,
-		WidthPx:       archive.WidthPx,
-		HeightPx:      archive.HeightPx,
-		CapturedAt:    now,
-		CreatedAt:     now,
+		ID:         id,
+		PartyID:    party.ID,
+		ContractID: contract.ID,
+		SignerName: party.Name,
+		AssetPath:  archive.AssetPath,
+		SHA256:     archive.SHA256,
+		// No ContentSHA256 on purpose: archive reuse applies as-is (直接套印)
+		// and is not tied to one contract content version (v0.2 D3=B).
+		Source:     model.SignatureSourceArchive,
+		WidthPx:    archive.WidthPx,
+		HeightPx:   archive.HeightPx,
+		CapturedAt: now,
+		CreatedAt:  now,
 	}
 	if err := s.st.PutSignature(ctx, &sig); err != nil {
 		return model.Signature{}, err
 	}
 	s.logChange(ctx, model.ChangeEntityContract, contract.ID, model.ChangeActionUpdate,
-		fmt.Sprintf("复用档案签名：%s（合同 %s，内容版本 %s）",
-			party.Name, contract.ContractNo, shortSHA(content)), nil)
+		fmt.Sprintf("复用档案签名：%s（合同 %s，来源：档案复用，直接套印）",
+			party.Name, contract.ContractNo), nil)
 	return sig, nil
 }
 

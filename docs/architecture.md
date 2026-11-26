@@ -179,7 +179,7 @@
 | B2 数据底座 / 动态字段 | 已交付：`field_definitions` + `/app/` + service + xlsx |
 | B3 模板管理 | 已交付：Word → PDF 转换、PDF.js 标定、pdfcpu 套印、版本与影响统计；见 [b3-templates.md](b3-templates.md) |
 | B5 局域网签名页 | 已交付：`internal/sign` + `/sign/<token>` + 一次性令牌；签名关联合同与内容版本，`signaturePath` 模板占位 |
-| B7 续签与档案复用 | 已交付：续签草稿端点 + `contracts.source_contract_id` 溯源 + 档案历史合同；不复制签名，第三层按 D3 不提供；见 [b7-renewal.md](b7-renewal.md) |
+| B7 续签与档案复用 | v0.2 修订 D3=B：续签草稿 + `contracts.source_contract_id` 溯源 + 档案历史合同；档案签名可直接套印（档案复用，来源入生成/变更记录，不绑定内容版本）；见 [b7-renewal.md](b7-renewal.md) |
 | B6 MCP 连接器 | 已交付：桌面客户端内置 `mcp` 子命令（与 `tengshou-cli mcp` 共用 `internal/mcpconn`）+ `internal/mcp`；读 `/api/v1`，写经 `/app/api/v1`，不直接开库；见 [mcp.md](mcp.md) |
 | B9 备份恢复 | `store.Backup` 已有；恢复 = 校验 + 原子替换 + 重启 |
 | B10 Windows 打包 | `tools/tengshoubuild`（三端同一命令，Windows 桌面/CLI + zip）+ CI 产物；补安装器 / 签名 |

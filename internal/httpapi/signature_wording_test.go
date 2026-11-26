@@ -7,6 +7,30 @@ import (
 	"testing"
 )
 
+// TestArchiveSignatureReuseWording pins the v0.2 D3=B copy: the signing dialog
+// offers a direct "use tenant archive signature" action, keeps the
+// "signing facts are confirmed by the user" caliber, and drops the old
+// per-content-version re-confirmation promise that the server no longer
+// enforces.
+func TestArchiveSignatureReuseWording(t *testing.T) {
+	const file = "../../frontend/src/components/signatures/SignatureDialog.vue"
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("read %s: %v", file, err)
+	}
+	text := string(raw)
+	for _, want := range []string{"使用租户档案签名", "签署事实由你自行确认", "档案复用"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("%s must mention %q", file, want)
+		}
+	}
+	for _, stale := range []string{"复用只对当前合同内容版本生效", "合同内容再次修改后需要重新确认"} {
+		if strings.Contains(text, stale) {
+			t.Errorf("%s still promises the removed per-content-version confirmation %q", file, stale)
+		}
+	}
+}
+
 // TestSignatureWordingBoundary keeps the LAN signature copy inside the
 // document-tool boundary: it captures a handwritten signature, never a signing
 // platform promise. The policy document docs/b7-renewal.md is excluded because

@@ -14,7 +14,7 @@ import type { Template } from "./records";
 
 // ---------- 签名资产 ----------
 
-/** 签名来源；目前只有局域网二维码采集。 */
+/** 签名来源：lan_qr 现场手写；archive 档案复用（直接套印，无内容版本）。 */
 export type SignatureSource = "lan_qr" | "archive";
 
 /** 留存的签名图片及元数据（model.Signature）。 */
@@ -48,6 +48,8 @@ export interface DocumentSignatureSnapshot {
   signer_name?: string;
   sha256: string;
   content_sha256?: string;
+  /** 签名来源：现场手写 / 档案复用。 */
+  source?: SignatureSource;
 }
 
 /** 一次 PDF 生成尝试（model.OutputDocument）。 */

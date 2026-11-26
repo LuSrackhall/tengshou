@@ -140,8 +140,8 @@ type reusePartySignatureInput struct {
 }
 
 // handleAppReusePartySignature links a party's archive-level signature to the
-// contract at its current content version. Reuse is explicit (the desktop UI
-// confirms first) and audited in the change log.
+// contract as-is (直接套印, v0.2 D3=B). The desktop UI offers it as a one-click
+// action; the change log records the archive-reuse source.
 func (s *Server) handleAppReusePartySignature(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.appService(w)
 	if !ok {

@@ -1044,8 +1044,9 @@ func (s *Service) loadImageAsset(rel string) (image.Image, error) {
 	return img, nil
 }
 
-// staleSignatureWarnings flags placements whose signature was collected for an
-// older contract content version.
+// staleSignatureWarnings flags placements whose on-site signature was
+// collected for an older contract content version. Archive reuse (v0.2 D3=B)
+// is never stale: it deliberately carries no content version.
 func staleSignatureWarnings(rc *templateRenderContext) []overlay.Warning {
 	if rc == nil || rc.sample {
 		return nil
@@ -1060,7 +1061,8 @@ func staleSignatureWarnings(rc *templateRenderContext) []overlay.Warning {
 			continue
 		}
 		sig, ok := rc.signatureFor(p)
-		if !ok || sig.ContentSHA256 == "" || sig.ContentSHA256 == content {
+		if !ok || sig.Source == model.SignatureSourceArchive ||
+			sig.ContentSHA256 == "" || sig.ContentSHA256 == content {
 			continue
 		}
 		out = append(out, overlay.Warning{

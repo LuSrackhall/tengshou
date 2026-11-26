@@ -54,7 +54,7 @@ func (s *Service) SaveParty(ctx context.Context, in PartyInput) (model.Party, []
 	action := model.ChangeActionCreate
 	summary := fmt.Sprintf("新建相对方档案「%s」", party.Name)
 	if existing == nil && in.Source == "self_enroll" {
-		summary = fmt.Sprintf("租户自助建档「%s」（证件号 %s）", party.Name, maskIDNumber(party.IDNumber))
+		summary = fmt.Sprintf("租户自助建档「%s」（证件号 %s）", party.Name, MaskIDNumber(party.IDNumber))
 	}
 	var changes []model.FieldChange
 	if existing != nil {
@@ -131,15 +131,16 @@ func (s *Service) buildParty(ctx context.Context, in PartyInput, existing *model
 			}
 			warnings = append(warnings,
 				fmt.Sprintf("证件号 %s 已被相对方「%s」（%s）使用；判重以证件号为准，请核对后保存",
-					maskIDNumber(party.IDNumber), m.Name, m.ID))
+					MaskIDNumber(party.IDNumber), m.Name, m.ID))
 		}
 	}
 	return party, warnings, nil
 }
 
-// maskIDNumber keeps a short, human-recognizable prefix for audit summaries
-// without printing the whole identifier.
-func maskIDNumber(idNumber string) string {
+// MaskIDNumber keeps a short, human-recognizable prefix for audit summaries and
+// logs without printing the whole identifier. It is exported because the HTTP
+// layer logs the same masked form.
+func MaskIDNumber(idNumber string) string {
 	idNumber = strings.TrimSpace(idNumber)
 	runes := []rune(idNumber)
 	if len(runes) <= 6 {

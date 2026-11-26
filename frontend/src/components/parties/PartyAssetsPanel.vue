@@ -18,8 +18,9 @@ const props = defineProps<{ party: Party }>();
 const emit = defineEmits<{ updated: [party: Party] }>();
 
 const item = ref<Party>({ ...props.party });
-// 同一路径的图片会被浏览器缓存；上传后用版本号强制重载。
+// 同一路径的图片会被浏览器缓存；上传/采集后用各自的版本号强制重载。
 const photoVer = ref(0);
+const signatureVer = ref(0);
 const busySide = ref<PartyPhotoSide | "">("");
 const showSignature = ref(false);
 const frontInput = ref<HTMLInputElement | null>(null);
@@ -33,6 +34,9 @@ const backUrl = computed(() =>
 );
 const signatureUrl = computed(() =>
   item.value.signature_id ? partySignatureImageUrl(item.value.id) : "",
+);
+const signatureSrc = computed(() =>
+  signatureUrl.value ? `${signatureUrl.value}?v=${signatureVer.value}` : "",
 );
 
 function photoSrc(side: PartyPhotoSide): string {
@@ -80,10 +84,12 @@ async function onFile(side: PartyPhotoSide, event: Event): Promise<void> {
   }
 }
 
-function onSignatureDone(): void {
-  // 重新取一次档案以拿到新的 signature_id（轮询完成事件不带 item）。
-  item.value = { ...item.value, signature_id: "pending" };
-  photoVer.value += 1;
+function onSignatureDone(signatureId: string): void {
+  // 会话完成视图带真实 signature_id；写回档案对象，不再伪造占位值。
+  if (signatureId) {
+    item.value = { ...item.value, signature_id: signatureId };
+  }
+  signatureVer.value += 1;
   showSignature.value = false;
   toast("档案签名已保存");
   refreshAfterWrite().catch((error: unknown) => toast(errorMessage(error), true));
@@ -151,9 +157,9 @@ function onSignatureDone(): void {
         <div class="asset-title">档案签名</div>
         <img
           v-if="signatureUrl"
-          :key="`sig-${photoVer}`"
+          :key="`sig-${signatureVer}`"
           class="asset-signature"
-          :src="`${signatureUrl}?v=${photoVer}`"
+          :src="signatureSrc"
           alt="档案签名"
         >
         <div v-else class="asset-empty">尚未采集</div>

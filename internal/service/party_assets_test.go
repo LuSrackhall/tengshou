@@ -103,6 +103,14 @@ func TestPartyIDPhotoRoundTrip(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("photo perm = %#o, want 0600", info.Mode().Perm())
 	}
+	// The asset directory is private as well.
+	dirInfo, err := os.Stat(filepath.Join(dir, "assets", "party-id-photos"))
+	if err != nil {
+		t.Fatalf("stat photo dir: %v", err)
+	}
+	if dirInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("photo dir perm = %#o, want 0700", dirInfo.Mode().Perm())
+	}
 	data, err := os.ReadFile(full)
 	if err != nil {
 		t.Fatal(err)
@@ -272,5 +280,49 @@ func TestNormalizeIDPhotoRejectsBadInput(t *testing.T) {
 	}
 	if len(photo.JPEG) == 0 || photo.SHA256 == "" {
 		t.Fatalf("normalized photo = %+v", photo)
+	}
+}
+
+// v0.2: every required field of a self-enrollment submission is validated with
+// a Chinese, field-specific message before any archive is created.
+func TestEnrollPartyValidation(t *testing.T) {
+	svc, _, _ := openService(t)
+	svc.SetDataDir(t.TempDir())
+	ctx := context.Background()
+	sigPNG := testPNG(t, 12, 6)
+	sum := sha256.Sum256(sigPNG)
+	base := func() service.EnrollPartyInput {
+		return service.EnrollPartyInput{
+			Name:            "待补全",
+			IDNumber:        "330102198001019999",
+			Phone:           "13800001111",
+			IDFront:         testPNG(t, 20, 12),
+			IDBack:          testPNG(t, 20, 12),
+			SignaturePNG:    sigPNG,
+			SignatureSHA256: hex.EncodeToString(sum[:]),
+			SignatureWidth:  12,
+			SignatureHeight: 6,
+		}
+	}
+	cases := []struct {
+		name   string
+		want   string
+		mutate func(*service.EnrollPartyInput)
+	}{
+		{"姓名缺失", "姓名", func(in *service.EnrollPartyInput) { in.Name = "  " }},
+		{"证件号缺失", "证件号", func(in *service.EnrollPartyInput) { in.IDNumber = "" }},
+		{"证件照正面缺失", "证件照正面", func(in *service.EnrollPartyInput) { in.IDFront = nil }},
+		{"证件照反面缺失", "证件照反面", func(in *service.EnrollPartyInput) { in.IDBack = nil }},
+		{"手写签名缺失", "手写签名", func(in *service.EnrollPartyInput) { in.SignaturePNG = nil }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := base()
+			tc.mutate(&in)
+			_, err := svc.EnrollParty(ctx, in)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("EnrollParty error = %v, want message containing %q", err, tc.want)
+			}
+		})
 	}
 }

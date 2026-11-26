@@ -131,7 +131,83 @@ test.describe("场景 D：局域网自助建档", () => {
       await expect(archiveDialog.locator('img[alt="证件照反面"]')).toBeVisible();
       await expect(archiveDialog.locator('img[alt="档案签名"]')).toBeVisible();
       await shot(page, testInfo, "05-档案详情中的证件照与签名");
+    });
+
+    const archiveDialog = page.getByRole("dialog").filter({
+      has: page.getByRole("heading", { name: `编辑相对方 · ${tenantName}` }),
+    });
+
+    await test.step("档案页可更换证件照", async () => {
+      await archiveDialog
+        .locator('input[aria-label="选择证件照正面"]')
+        .setInputFiles({
+          name: "front-replaced.png",
+          mimeType: "image/png",
+          buffer: ONE_PIXEL_PNG,
+        });
+      await expect(page.locator("#toast")).toContainText("证件照正面已保存");
+      await expect(archiveDialog.locator('img[alt="证件照正面"]')).toBeVisible();
+      await shot(page, testInfo, "06-证件照已更换");
+    });
+
+    await test.step("档案页扫码重新采集签名", async () => {
+      await archiveDialog.getByRole("button", { name: "重新采集" }).click();
+      const signDialog = page.getByRole("dialog").filter({
+        has: page.getByRole("heading", { name: `档案签名 · ${tenantName}` }),
+      });
+      await expect(signDialog).toBeVisible();
+      await expect(signDialog.locator("#partySignQrImg")).toBeVisible({
+        timeout: 15_000,
+      });
+      const signUrlText =
+        (await signDialog.locator(".sign-url").textContent())?.trim() ?? "";
+      expect(signUrlText).toContain("/sign/");
+      const signToken = signUrlText.split("/sign/")[1] ?? "";
+      expect(signToken).toHaveLength(64);
+
+      const signPhone = await context.newPage();
+      const signPhoneErrors = trackConsoleErrors(signPhone);
+      const response = await signPhone.goto(`${app.baseURL}/sign/${signToken}`, {
+        waitUntil: "domcontentloaded",
+      });
+      expect(response?.status()).toBe(200);
+      await expect(signPhone.locator("#signCard")).toBeVisible();
+
+      const pad = signPhone.locator("#pad");
+      await pad.scrollIntoViewIfNeeded();
+      const padBox = await pad.boundingBox();
+      expect(padBox).not.toBeNull();
+      if (padBox) {
+        const startX = padBox.x + 40;
+        const endX = padBox.x + padBox.width - 40;
+        const midY = padBox.y + padBox.height / 2;
+        await signPhone.mouse.move(startX, midY);
+        await signPhone.mouse.down();
+        for (let i = 1; i <= 24; i += 1) {
+          const x = startX + ((endX - startX) * i) / 24;
+          const y = midY + Math.sin(i / 1.7) * (padBox.height / 5);
+          await signPhone.mouse.move(x, y, { steps: 3 });
+        }
+        await signPhone.mouse.up();
+      }
+      await expect(signPhone.locator("#submitBtn")).toBeEnabled();
+      await signPhone.locator("#submitBtn").click();
+      await expect(
+        signPhone.getByRole("heading", { name: "签名已提交" }),
+      ).toBeVisible({ timeout: 20_000 });
+
+      // 电脑端 2 秒轮询拿到完成状态后关闭对话框并刷新签名图片。
+      await expect(signDialog).toBeHidden({ timeout: 20_000 });
+      await expect(page.locator("#toast")).toContainText("档案签名已保存");
+      await expect(archiveDialog.locator('img[alt="档案签名"]')).toBeVisible();
+      await shot(page, testInfo, "07-档案签名已重新采集");
+      expect(signPhoneErrors).toEqual([]);
+      await signPhone.close();
+    });
+
+    await test.step("关闭档案页", async () => {
       await archiveDialog.getByRole("button", { name: "取消" }).click();
+      await expect(archiveDialog).toBeHidden();
     });
 
     expect(phoneErrors).toEqual([]);

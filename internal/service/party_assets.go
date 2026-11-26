@@ -279,7 +279,7 @@ func (s *Service) EnrollParty(ctx context.Context, in EnrollPartyInput) (model.P
 	}
 	if len(matches) > 0 {
 		return model.Party{}, business("duplicate_id_number",
-			"证件号 %s 已有档案（%s）；请联系出租方处理，不能重复建档", maskIDNumber(idNumber), matches[0].Name)
+			"证件号 %s 已有档案（%s）；请联系出租方处理，不能重复建档", MaskIDNumber(idNumber), matches[0].Name)
 	}
 	front, err := NormalizeIDPhoto(in.IDFront)
 	if err != nil {

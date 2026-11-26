@@ -218,3 +218,101 @@ test.describe("场景 A：合同主流程", () => {
     ).toEqual([]);
   });
 });
+
+// 场景 A2：存量档案缺证件号的一次性补录提示（v0.2 需求 1）。
+//
+// 业务含义：合同录入按名称自动建立的档案可以没有证件号（保持旧流程），但选中
+// 这类档案时要提示一次补录；同一浏览器对同一档案只提示一次，补录后长期有效。
+test.describe("场景 A2：缺证件号档案的补录提示", () => {
+  test("合同表单选中无证件号档案时只提示一次，刷新后不再提示", async ({
+    app,
+    page,
+  }, testInfo) => {
+    const consoleErrors = trackConsoleErrors(page);
+    const stamp = Date.now().toString(36);
+    const partyName = `E2E 无证件号 ${stamp}`;
+    const contractTitle = `E2E 补录提示合同 ${stamp}`;
+    const toast = page.locator("#toast");
+
+    await test.step("新建引用新名称的合同（按名称自动建档，无证件号）", async () => {
+      await page.goto(`${app.baseURL}/app/`, { waitUntil: "domcontentloaded" });
+      await page.locator('#tabs button[data-tab="contracts"]').click();
+      await expect(page.locator("#view-contracts")).toHaveClass(/active/);
+      await page.locator("#newContractBtn").click();
+      const dialog = page
+        .getByRole("dialog")
+        .filter({ has: page.getByRole("heading", { name: "新建合同", exact: true }) });
+      await expect(dialog).toBeVisible();
+      await dialog.locator("#f_contract_title").fill(contractTitle);
+      await dialog.locator("#f_contract_party_b").fill(partyName);
+      await dialog.getByRole("button", { name: "保存", exact: true }).click();
+      await expect(dialog).toBeHidden();
+      await expect(
+        page.locator(`#contractTable tr[data-id]:has-text("${contractTitle}")`),
+      ).toBeVisible();
+      // 等「已新建相对方档案」提示结束后再打开合同，避免一次性补录提示
+      // 被这条保存提示覆盖（真实用户也不会在 350ms 内点开）。
+      await expect(toast).toContainText("已新建相对方档案");
+      await expect(toast).not.toHaveClass(/show/, { timeout: 10_000 });
+      await shot(page, testInfo, "01-合同已用无证件号档案建立");
+    });
+
+    let contractId = "";
+    await test.step("打开合同即提示补录并记录去重标记", async () => {
+      const row = page.locator(
+        `#contractTable tr[data-id]:has-text("${contractTitle}")`,
+      );
+      contractId = (await row.getAttribute("data-id")) ?? "";
+      expect(contractId).not.toBe("");
+      await row.click();
+      const dialog = page
+        .getByRole("dialog")
+        .filter({ has: page.getByRole("heading", { name: /编辑合同/ }) });
+      await expect(dialog).toBeVisible();
+      await expect(toast).toHaveClass(/show/, { timeout: 10_000 });
+      await expect(toast).toContainText("还没有证件号");
+      // 去重按档案 id 落在 localStorage，同一浏览器只有一条标记。
+      const marked = await page.evaluate(
+        () =>
+          Object.keys(localStorage).filter((key) =>
+            key.startsWith("tengshou:party-id-backfill:"),
+          ).length,
+      );
+      expect(marked).toBe(1);
+      await shot(page, testInfo, "02-补录提示出现");
+      // 等提示自然消失，避免把残留 toast 误判为第二次提示。
+      await expect(toast).not.toHaveClass(/show/, { timeout: 15_000 });
+      await dialog.getByRole("button", { name: "取消" }).click();
+      await expect(dialog).toBeHidden();
+    });
+
+    await test.step("刷新并再次打开同一合同：不再重复提示", async () => {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('#tabs button[data-tab="contracts"]').click();
+      await expect(page.locator("#view-contracts")).toHaveClass(/active/);
+      const row = page.locator(`#contractTable tr[data-id="${contractId}"]`);
+      await expect(row).toBeVisible();
+      await row.click();
+      const dialog = page
+        .getByRole("dialog")
+        .filter({ has: page.getByRole("heading", { name: /编辑合同/ }) });
+      await expect(dialog).toBeVisible();
+      // 给 watcher 的 immediate 回调留出时间：不应再出现补录提示。
+      await page.waitForTimeout(1200);
+      const secondPrompt = await toast.evaluate(
+        (el) =>
+          el.classList.contains("show") &&
+          (el.textContent ?? "").includes("还没有证件号"),
+      );
+      expect(secondPrompt).toBe(false);
+      await shot(page, testInfo, "03-再次打开不再提示");
+      await dialog.getByRole("button", { name: "取消" }).click();
+      await expect(dialog).toBeHidden();
+    });
+
+    expect(
+      consoleErrors,
+      `浏览器控制台出现错误：\n${consoleErrors.join("\n")}`,
+    ).toEqual([]);
+  });
+});

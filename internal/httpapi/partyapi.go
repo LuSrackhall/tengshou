@@ -161,7 +161,7 @@ func (s *Server) handleAppCancelEnrollSession(w http.ResponseWriter, r *http.Req
 	if _, ok := s.appService(w); !ok {
 		return
 	}
-	cancelled := s.sign.Cancel(r.PathValue("id"))
+	cancelled := s.sign.CancelKind(r.PathValue("id"), sign.KindEnroll)
 	writeJSON(w, http.StatusOK, map[string]any{"cancelled": cancelled})
 }
 
@@ -330,9 +330,12 @@ func (s *Server) handleEnrollSubmit(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "normalize enrollment signature", err)
 		return
 	}
-	sess, err := s.sign.Claim(token)
+	_, err = s.sign.ClaimKind(token, sign.KindEnroll)
 	switch {
 	case err == nil:
+	case errors.Is(err, sign.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "自助建档链接无效")
+		return
 	case errors.Is(err, sign.ErrExpired):
 		writeError(w, http.StatusGone, "enroll_expired", "自助建档链接已过期，请在电脑上重新生成二维码")
 		return
@@ -343,11 +346,6 @@ func (s *Server) handleEnrollSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "enroll_busy", "正在提交，请稍候")
 		return
 	default:
-		writeError(w, http.StatusGone, "enroll_expired", "自助建档链接已失效，请在电脑上重新生成二维码")
-		return
-	}
-	if sess.Kind != sign.KindEnroll {
-		s.sign.Release(token)
 		writeError(w, http.StatusGone, "enroll_expired", "自助建档链接已失效，请在电脑上重新生成二维码")
 		return
 	}
@@ -377,7 +375,7 @@ func (s *Server) handleEnrollSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sign.Complete(token, party.SignatureID, "", 0, 0)
 	if logger := s.opts.Logger; logger != nil {
-		logger.Info("party self-enrolled", "party", party.ID, "id_number", maskIDLog(party.IDNumber))
+		logger.Info("party self-enrolled", "party", party.ID, "id_number", service.MaskIDNumber(party.IDNumber))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"state": "completed",
@@ -387,13 +385,4 @@ func (s *Server) handleEnrollSubmit(w http.ResponseWriter, r *http.Request) {
 			"created_at": party.CreatedAt.Format(time.RFC3339),
 		},
 	})
-}
-
-// maskIDLog keeps audit logs free of full identity numbers.
-func maskIDLog(idNumber string) string {
-	runes := []rune(strings.TrimSpace(idNumber))
-	if len(runes) <= 6 {
-		return string(runes)
-	}
-	return string(runes[:4]) + strings.Repeat("*", len(runes)-8) + string(runes[len(runes)-4:])
 }

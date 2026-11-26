@@ -131,7 +131,7 @@ func (s *Server) handleAppCancelSignatureSession(w http.ResponseWriter, r *http.
 	if _, ok := s.appService(w); !ok {
 		return
 	}
-	cancelled := s.sign.Cancel(r.PathValue("id"))
+	cancelled := s.sign.CancelKind(r.PathValue("id"), sign.KindSignature)
 	writeJSON(w, http.StatusOK, map[string]any{"cancelled": cancelled})
 }
 
@@ -183,7 +183,9 @@ func (s *Server) handleAppSignatureQR(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(png)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(png)
-} // signSessionView is the app-API shape of a session. The one-time token is
+}
+
+// signSessionView is the app-API shape of a session. The one-time token is
 // deliberately absent: only the QR/URL carries it.
 func (s *Server) signSessionView(sess sign.Session) map[string]any {
 	item := map[string]any{
@@ -229,7 +231,7 @@ func (s *Server) handleSignPage(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	data := signPageData{State: sign.StateExpired, Expired: true}
 	if sign.ValidToken(token) {
-		if sess, err := s.sign.Get(token); err == nil {
+		if sess, err := s.sign.GetKind(token, sign.KindSignature); err == nil {
 			data.SignerName = sess.SignerName
 			data.ContractNo = sess.ContractNo
 			data.ContractTitle = sess.ContractTitle
@@ -273,7 +275,7 @@ func (s *Server) handleSignStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "签名链接无效")
 		return
 	}
-	sess, err := s.sign.Get(token)
+	sess, err := s.sign.GetKind(token, sign.KindSignature)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "签名链接已失效，请在电脑上重新生成二维码")
 		return
@@ -329,9 +331,12 @@ func (s *Server) handleSignSubmit(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "normalize signature", err)
 		return
 	}
-	sess, err := s.sign.Claim(token)
+	sess, err := s.sign.ClaimKind(token, sign.KindSignature)
 	switch {
 	case err == nil:
+	case errors.Is(err, sign.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "签名链接无效")
+		return
 	case errors.Is(err, sign.ErrExpired):
 		writeError(w, http.StatusGone, "sign_expired", "签名链接已过期，请在电脑上重新生成二维码")
 		return

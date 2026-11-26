@@ -72,7 +72,7 @@ function onToggleSelect(id: string): void {
     <table id="contractTable" class="data-table">
       <template v-if="loaded">
         <tbody v-if="!fields.length">
-          <tr><td class="empty">没有可显示的台账字段，请先在「字段」页新增字段。</td></tr>
+          <tr><td class="empty">没有可显示的台账列，可在「列设置」勾选列，或先在「字段」页新增字段。</td></tr>
         </tbody>
         <template v-else>
           <thead>

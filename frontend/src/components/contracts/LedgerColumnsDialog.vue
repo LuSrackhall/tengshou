@@ -20,7 +20,14 @@ const emit = defineEmits<{
 
 const hint = ref("");
 
-const checked = computed(() => new Set(props.selectedKeys));
+// 本机偏好可能残留已不在台账字段里的旧键：勾选与「至少保留一列」计数
+// 都只看当前字段，避免旧键让最后一列被取消后台账变空表。
+const checked = computed(
+  () =>
+    new Set(
+      props.selectedKeys.filter((key) => props.fields.some((field) => field.key === key)),
+    ),
+);
 
 function toggle(field: FieldDefinition, event: Event): void {
   const input = event.target as HTMLInputElement;

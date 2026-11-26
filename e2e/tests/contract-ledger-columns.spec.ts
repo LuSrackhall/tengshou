@@ -42,16 +42,34 @@ const KEY_COLUMNS: Array<{ key: string; label: string }> = [
   { key: "status", label: "状态" },
 ];
 
+/** 同一 worker 的合同表单分组用例使用同一组字段键（共享服务与数据目录）。 */
+async function existingFieldKeys(page: Page, app: AppHandle): Promise<Set<string>> {
+  const response = await page.request.get(
+    `${app.baseURL}/app/api/v1/fields?entity=contract&archived=1`,
+    { headers: API_HEADERS },
+  );
+  expect(response.ok(), "读取合同字段列表失败").toBeTruthy();
+  const payload = (await response.json()) as { items?: Array<{ key: string }> };
+  return new Set((payload.items ?? []).map((field) => field.key));
+}
+
 async function seedField(
   page: Page,
   app: AppHandle,
   field: { key: string; label: string },
+  existing: Set<string>,
 ): Promise<void> {
+  if (existing.has(field.key)) {
+    // 字段已存在（另一用例先建过）时直接复用，避免重复建字段 409 让套件
+    // 结果依赖用例调度顺序；本用例只依赖这些字段存在且默认不进台账列。
+    return;
+  }
   const response = await page.request.post(`${app.baseURL}/app/api/v1/fields`, {
     headers: API_HEADERS,
     data: { entity: "contract", type: "text", key: field.key, label: field.label },
   });
   expect(response.ok(), `新建字段 ${field.label} 失败`).toBeTruthy();
+  existing.add(field.key);
 }
 
 async function seedParty(
@@ -115,8 +133,9 @@ test.describe("合同台账列设置", () => {
   }, testInfo) => {
     const consoleErrors = trackConsoleErrors(page);
     const stamp = Date.now().toString(36);
+    const existingFields = await existingFieldKeys(page, app);
     for (const field of RENTAL_FIELDS) {
-      await seedField(page, app, field);
+      await seedField(page, app, field, existingFields);
     }
     const tenantName = `E2E 列设置租户 ${stamp}`;
     const tenant = await seedParty(page, app, tenantName);
@@ -230,6 +249,30 @@ test.describe("合同台账列设置", () => {
         expect(await tableOverflow(page), "恢复默认后台账仍应无横向溢出").toBeLessThanOrEqual(1);
       });
 
+      await test.step("至少保留一列：最后一列不可取消", async () => {
+        const dialog = await openColumnSettings(page);
+        const keyCheckboxes = KEY_COLUMNS.map((column) =>
+          dialog.locator(`[data-column-key="${column.key}"]`),
+        );
+        // 取消除合同编号外的 9 个关键列后，台账只剩合同编号一列。
+        for (const checkbox of keyCheckboxes.slice(1)) {
+          await checkbox.uncheck();
+        }
+        await expect(header(page, "合同编号")).toBeVisible();
+        await expect(header(page, "状态")).toHaveCount(0);
+        // 取消最后一列被拦下：复选框保持勾选并提示「至少保留一列」。
+        // 用 click 而非 uncheck：uncheck 会断言控件变为未勾选，而守卫会恢复勾选。
+        await keyCheckboxes[0]!.click();
+        await expect(dialog.locator(".ledger-column-hint")).toHaveText("至少保留一列");
+        await expect(keyCheckboxes[0]!).toBeChecked();
+        await dialog.locator("#restoreLedgerColumnsBtn").click();
+        for (const column of KEY_COLUMNS) {
+          await expect(dialog.locator(`[data-column-key="${column.key}"]`)).toBeChecked();
+        }
+        await dialog.getByRole("button", { name: "完成" }).click();
+        await expect(dialog).toBeHidden();
+      });
+
       await test.step("未勾选的字段仍在合同编辑表单中", async () => {
         await page.locator(`#contractTable tr[data-id="${contract.id}"]`).click();
         const dialog = page
@@ -240,6 +283,45 @@ test.describe("合同台账列设置", () => {
         await expect(dialog.locator('[data-key="house_area"]')).toBeVisible();
         await page.keyboard.press("Escape");
         await expect(dialog).toBeHidden();
+      });
+
+      await test.step("关键词搜索与状态筛选无回归", async () => {
+        await page.locator("#contractSearch").fill(stamp);
+        await expect(page.locator("#contractSummary")).toContainText(`搜索「${stamp}」`);
+        await expect(page.locator("#contractTable tr[data-id]")).toHaveCount(2);
+        await page.locator("#statusFilter").selectOption("draft");
+        await expect(page.locator("#contractSummary")).toContainText("状态：草稿");
+        await expect(page.locator("#contractTable tr[data-id]")).toHaveCount(0);
+        await page.locator("#statusFilter").selectOption("active");
+        await expect(page.locator("#contractTable tr[data-id]")).toHaveCount(2);
+        await page.locator("#contractSearch").fill("");
+        await page.locator("#statusFilter").selectOption("");
+        await expect(page.locator("#contractSummary")).not.toContainText("搜索");
+      });
+
+      await test.step("批量勾选与批量生成入口无回归", async () => {
+        const batchButton = page.locator("#batchGenerateBtn");
+        await expect(batchButton).toBeDisabled();
+        await page.locator(`input[data-select="${contract.id}"]`).check();
+        await expect(batchButton).toBeEnabled();
+        await expect(batchButton).toHaveText("批量生成 PDF（1）");
+        const visibleRows = await page.locator("#contractTable tr[data-id]").count();
+        await page.locator("#contractSelectAll").check();
+        await expect(batchButton).toHaveText(`批量生成 PDF（${visibleRows}）`);
+        await page.locator("#contractSelectAll").uncheck();
+        await expect(batchButton).toBeDisabled();
+      });
+
+      await test.step("行删除仍可从台账完成", async () => {
+        page.once("dialog", (dialog) => dialog.accept());
+        const row = page.locator(`#contractTable tr[data-id="${expiring.id}"]`);
+        await row.locator('button[data-action="delete"]').click();
+        await expect(row).toHaveCount(0);
+        await expect(page.locator("#toast")).toContainText("合同已删除");
+        const index = createdContracts.indexOf(expiring.id);
+        if (index >= 0) {
+          createdContracts.splice(index, 1);
+        }
       });
 
       expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);

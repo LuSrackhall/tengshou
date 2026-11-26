@@ -95,6 +95,27 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
 
 .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+
+/* 台账列设置（te-iuns4）：全部 in_ledger 字段的勾选网格；只影响本机显示。 */
+.ledger-column-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 16px; }
+.ledger-column-hint { margin: 10px 0 0; color: var(--warn); font-size: 13px; }
+
+/* 合同台账摘要行：左侧统计、右侧「列设置」，避免工具栏再挤出一行。 */
+.ledger-meta { display: flex; align-items: center; gap: 12px; margin: 2px 0 12px; }
+.ledger-meta .summary { margin: 0; flex: 1; }
+.ledger-meta button { min-height: 32px; padding: 4px 12px; font-size: 13px; }
+
+/* 合同台账（te-iuns4）：默认 10 个关键列 + 行操作在 1440 宽屏内放下；动态列
+   由列设置按需开启。表格略紧凑但保留全部关键信息，相对方名称允许换行，
+   避免长名字把「状态/操作」挤出屏幕。 */
+#contractTable { font-size: 13px; }
+#contractTable thead th { font-size: 12px; }
+#contractTable th, #contractTable td { padding: 9px 6px; }
+#contractTable td.wrap { min-width: 120px; }
+#contractTable td.party-cell { white-space: normal; min-width: 96px; }
+#contractTable td.status-cell { white-space: normal; }
+#contractTable .actions { gap: 4px; }
+#contractTable .actions button { min-height: 28px; padding: 3px 6px; font-size: 12.5px; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 760px; }
 .data-table th, .data-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: nowrap; }
 .data-table thead th { position: sticky; top: 0; background: var(--card); color: var(--muted); font-size: 12.5px; letter-spacing: .04em; z-index: 1; }
@@ -108,7 +129,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
 .money { font-variant-numeric: tabular-nums; }
 
-.badge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); color: var(--muted); }
+.badge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
 .badge.active, .badge.create { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-soft); }
 .badge.draft, .badge.update { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: var(--warn-soft); }
 .badge.archived, .badge.unchanged { color: var(--muted); }

@@ -388,10 +388,22 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           const created = await createContract(page, partyAId, frames);
           contractId = created.contractId;
           contractNo = created.contractNo;
+          // 教程分镜：台账默认关键列与「列设置」入口（te-iuns4）。
+          await page.locator("#ledgerColumnsBtn").click();
+          const columnsDialog = page
+            .getByRole("dialog")
+            .filter({ has: page.getByRole("heading", { name: "台账列设置" }) });
+          await expect(columnsDialog).toBeVisible();
+          await frames.capture(
+            "⑤ 台账默认显示 10 个关键列，摘要行右侧「列设置」可增减列",
+            { region: columnsDialog },
+          );
+          await columnsDialog.getByRole("button", { name: "完成" }).click();
+          await expect(columnsDialog).toBeHidden();
           return (
             `合同 ${contractNo}「${CONTRACT_TITLE}」已保存为草稿；` +
             `甲方=${created.detail.party_a?.name}，相对方=${created.detail.party_b?.name}，` +
-            "金额 160,000.00 元。"
+            "金额 160,000.00 元。台账默认显示 10 个关键列，列设置弹层可增减列。"
           );
         },
       );

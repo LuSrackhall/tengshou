@@ -42,6 +42,8 @@ export interface ContractCellValue {
   mono?: boolean;
   money?: boolean;
   wrap?: boolean;
+  /** 相对方名称：台账里允许换行，避免长名字挤掉其他列。 */
+  party?: boolean;
   badge?: string;
 }
 
@@ -60,7 +62,7 @@ export function contractFieldValue(
     case "type":
       return { text: contract.type || "—" };
     case "party_b":
-      return { text: partyName(parties, contract.party_b_id) || "—" };
+      return { text: partyName(parties, contract.party_b_id) || "—", party: true };
     case "amount":
       return { text: money(contract.amount), money: true };
     case "signed_on":

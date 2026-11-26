@@ -46,9 +46,10 @@ function cellValue(contract: Contract, field: FieldDefinition) {
 function cellClass(contract: Contract, field: FieldDefinition): string {
   const value = cellValue(contract, field);
   if (value.badge) {
-    return "";
+    // 状态列同时承载到期提醒徽标：空间紧张时允许换行，避免挤宽整张台账。
+    return field.key === "status" ? "status-cell" : "";
   }
-  return [value.mono ? "mono" : "", value.money ? "money" : "", value.wrap ? "wrap" : ""]
+  return [value.mono ? "mono" : "", value.money ? "money" : "", value.wrap ? "wrap" : "", value.party ? "party-cell" : ""]
     .filter(Boolean)
     .join(" ");
 }
@@ -71,7 +72,7 @@ function onToggleSelect(id: string): void {
     <table id="contractTable" class="data-table">
       <template v-if="loaded">
         <tbody v-if="!fields.length">
-          <tr><td class="empty">没有可显示的台账字段，请先在「字段」页新增字段。</td></tr>
+          <tr><td class="empty">没有可显示的台账列，可在「列设置」勾选列，或先在「字段」页新增字段。</td></tr>
         </tbody>
         <template v-else>
           <thead>

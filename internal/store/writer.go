@@ -205,8 +205,8 @@ func (s *Store) PutTemplate(ctx context.Context, t *model.Template) error {
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO templates (id, name, version, kind, html, variables_json, is_active,
 			source_path, pdf_path, mapping_json, page_count, converter,
-			source_sha256, pdf_sha256, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			source_sha256, pdf_sha256, mask_field_values, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			name = excluded.name, version = excluded.version, kind = excluded.kind,
 			html = excluded.html,
@@ -214,10 +214,12 @@ func (s *Store) PutTemplate(ctx context.Context, t *model.Template) error {
 			source_path = excluded.source_path, pdf_path = excluded.pdf_path,
 			mapping_json = excluded.mapping_json, page_count = excluded.page_count,
 			converter = excluded.converter, source_sha256 = excluded.source_sha256,
-			pdf_sha256 = excluded.pdf_sha256, updated_at = excluded.updated_at`,
+			pdf_sha256 = excluded.pdf_sha256, mask_field_values = excluded.mask_field_values,
+			updated_at = excluded.updated_at`,
 		t.ID, t.Name, t.Version, t.Kind, t.HTML, string(vars), boolInt(t.IsActive),
 		t.SourcePath, t.PDFPath, string(mapping), t.PageCount, t.Converter,
-		t.SourceSHA256, t.PDFSHA256, formatTime(t.CreatedAt), formatTime(t.UpdatedAt))
+		t.SourceSHA256, t.PDFSHA256, boolInt(t.MaskFieldValues),
+		formatTime(t.CreatedAt), formatTime(t.UpdatedAt))
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return fmt.Errorf("%w: %s v%d", ErrDuplicateTemplateVersion, t.Name, t.Version)

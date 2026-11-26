@@ -573,6 +573,63 @@ func TestMigrationAddsFieldGroupColumn(t *testing.T) {
 	}
 }
 
+// TestMigrationAddsTemplateMaskColumn simulates a database created before the
+// white-mask migration (schema version 13, no mask_field_values column) and
+// checks existing template rows default to off and the flag persists after the
+// upgrade.
+func TestMigrationAddsTemplateMaskColumn(t *testing.T) {
+	st, path := openStore(t)
+	ctx := context.Background()
+	legacy := model.Template{
+		Name: "旧模板", Version: 1, Kind: model.TemplateKindPDF, IsActive: true,
+		PDFPath: "templates/pdf/legacy/template.pdf", PageCount: 1,
+	}
+	if err := st.PutTemplate(ctx, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE templates DROP COLUMN mask_field_values`); err != nil {
+		t.Fatalf("drop mask column: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM schema_migrations WHERE version = 14`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	upgraded, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("upgrade v13 database: %v", err)
+	}
+	defer upgraded.Close()
+	if v, _ := upgraded.SchemaVersion(); v != store.LatestSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", v, store.LatestSchemaVersion())
+	}
+	reader := mustReader(t, upgraded)
+	got, err := reader.GetTemplate(ctx, legacy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MaskFieldValues {
+		t.Fatal("legacy template should default the mask flag to off")
+	}
+	got.MaskFieldValues = true
+	if err := upgraded.PutTemplate(ctx, &got); err != nil {
+		t.Fatal(err)
+	}
+	again, err := reader.GetTemplate(ctx, legacy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.MaskFieldValues {
+		t.Fatal("mask flag did not persist after the upgrade")
+	}
+}
+
 // TestLatestSuccessfulDocumentUsesInsertionOrder pins the regenerate source to
 // the most recently inserted document. created_at is second-precision, so the
 // ids are chosen to make the old ORDER BY created_at DESC, id DESC pick the

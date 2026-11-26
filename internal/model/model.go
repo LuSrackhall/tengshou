@@ -430,8 +430,12 @@ type Template struct {
 	PDFSHA256    string `json:"pdf_sha256,omitempty"`
 	// Placements holds the calibrated boxes for PDF templates.
 	Placements []Placement `json:"placements,omitempty"`
-	CreatedAt  time.Time   `json:"created_at"`
-	UpdatedAt  time.Time   `json:"updated_at"`
+	// MaskFieldValues fills each field placement box with white before the
+	// value is drawn, covering 【…】 placeholders left in the template. Default
+	// false keeps the template artwork untouched.
+	MaskFieldValues bool      `json:"mask_field_values"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Output document kinds (B4): initial generation and re-output after a

@@ -8,6 +8,7 @@ import type {
   FieldsByEntityResponse,
   OverlayWarning,
   Placement,
+  PlacementOverlap,
   Seal,
 } from "../../api/types";
 import { bindingLabel, fieldOptionGroups, sealOptionLabel } from "./labels";
@@ -16,6 +17,7 @@ import type {
   CheckView,
   GeneratedResult,
 } from "./types";
+import type { PlaceholderScanView } from "./usePlaceholderScan";
 
 const props = defineProps<{
   placements: Placement[];
@@ -29,6 +31,12 @@ const props = defineProps<{
   contractId: string;
   usageText: string;
   check: CheckView;
+  /** 模板文字中的【…】/下划线占位符提示（只提示，不阻断）。 */
+  placeholderScan: PlaceholderScanView;
+  /** 字段值白底遮盖开关（随模板版本保存）。 */
+  maskFieldValues: boolean;
+  /** 最近一次保存返回的公章/签名框与字段框重叠提醒。 */
+  overlaps: PlacementOverlap[];
   previewStatusText: string;
   previewStatusClass: string;
   canGenerate: boolean;
@@ -44,6 +52,7 @@ const emit = defineEmits<{
   "update-font-size": [id: string, value: number];
   "update-align": [id: string, value: string];
   "update:contractId": [id: string];
+  "update:maskFieldValues": [value: boolean];
   "preview-sample": [];
   "preview-contract": [];
   generate: [];
@@ -64,6 +73,16 @@ const fieldGroups = computed(() => fieldOptionGroups(props.fields));
 const selected = computed<Placement | null>(
   () => props.placements.find((item) => item.id === props.selectedId) ?? null,
 );
+
+/** 有重叠提醒的位置 id（公章/签名与字段两端都标出来）。 */
+const overlapIds = computed<Set<string>>(() => {
+  const ids = new Set<string>();
+  for (const overlap of props.overlaps) {
+    ids.add(overlap.a);
+    ids.add(overlap.b);
+  }
+  return ids;
+});
 
 const checkClass = computed(() => {
   switch (props.check.kind) {
@@ -142,6 +161,13 @@ function onAlign(event: Event): void {
 function onContractChange(event: Event): void {
   emit("update:contractId", (event.target as HTMLSelectElement).value);
 }
+
+function onMaskChange(event: Event): void {
+  emit(
+    "update:maskFieldValues",
+    (event.target as HTMLInputElement).checked,
+  );
+}
 </script>
 
 <template>
@@ -206,6 +232,23 @@ function onContractChange(event: Event): void {
       <span class="help">添加后拖动框到目标位置，右下角可缩放大小。每次保存都会生成新版本。</span>
     </div>
 
+    <template v-if="placeholderScan.kind === 'ready' && placeholderScan.scan.total > 0">
+      <h3>占位符提示</h3>
+      <div class="tpl-hint">
+        <p>
+          模板文字里发现 {{ placeholderScan.scan.total }} 个疑似占位符（【…】{{ placeholderScan.scan.bracketCount }} 个、连续下划线 {{ placeholderScan.scan.underscoreCount }} 个）。
+          套印文字会直接盖在模板上：请为每个占位符预留足够空白，或把字段框标在占位符上并开启下方「字段值白底遮盖」。
+        </p>
+        <ul>
+          <li v-for="example in placeholderScan.scan.examples" :key="example">{{ example }}</li>
+        </ul>
+        <p class="tpl-hint-note">仅提示，不影响保存、预览与生成。</p>
+      </div>
+    </template>
+    <p v-else-if="placeholderScan.kind === 'error'" class="tpl-status">
+      模板文字扫描失败：{{ placeholderScan.text }}（不影响标定与生成）
+    </p>
+
     <h3>位置列表</h3>
     <div id="tplPlacementList" class="tpl-list">
       <div v-if="!placements.length" class="tpl-list-empty">
@@ -215,11 +258,19 @@ function onContractChange(event: Event): void {
         v-for="placement in placements"
         :key="placement.id"
         class="tpl-list-item"
-        :class="{ selected: placement.id === selectedId }"
+        :class="{
+          selected: placement.id === selectedId,
+          overlap: overlapIds.has(placement.id),
+        }"
         :data-id="placement.id"
         @click="emit('select', placement.id)"
       >
         <span class="grow">{{ labelOf(placement) }}</span>
+        <span
+          v-if="overlapIds.has(placement.id)"
+          class="tpl-overlap-badge"
+          title="与字段框或公章/签名框重叠"
+        >⚠</span>
         <span class="tpl-kind">第 {{ placement.page }} 页</span>
         <button
           type="button"
@@ -231,6 +282,25 @@ function onContractChange(event: Event): void {
         </button>
       </div>
     </div>
+
+    <template v-if="overlaps.length">
+      <h3>重叠提醒</h3>
+      <div class="tpl-warnings">
+        <div
+          v-for="overlap in overlaps"
+          :key="`${overlap.a}-${overlap.b}`"
+          class="tpl-warning tpl-overlap"
+          role="button"
+          tabindex="0"
+          :title="`第 ${overlap.page} 页：点击定位到公章/签名框`"
+          @click="emit('select', overlap.a)"
+          @keydown.enter="emit('select', overlap.a)"
+        >
+          {{ overlap.message }}（点击定位）
+        </div>
+      </div>
+      <p class="tpl-hint-note">重叠只提示，不阻止保存；可移动框后再次保存。</p>
+    </template>
 
     <div id="tplSelectedPanel">
       <div v-if="!selected" class="tpl-status">
@@ -301,6 +371,16 @@ function onContractChange(event: Event): void {
       <template v-else-if="check.kind === 'error'">{{ check.text }}</template>
       <template v-else>正在检查字段绑定…</template>
     </div>
+    <label class="tpl-mask-toggle">
+      <input
+        type="checkbox"
+        id="tplMaskFieldValues"
+        :checked="maskFieldValues"
+        @change="onMaskChange"
+      >
+      字段值白底遮盖（遮住模板里的【】占位符）
+    </label>
+    <p class="tpl-hint-note">开启后每个字段值先垫白色矩形再写字；改动需保存为新版本后生效。</p>
     <div class="field">
       <label for="tplContract">合同</label>
       <select id="tplContract" :value="contractId" @change="onContractChange">

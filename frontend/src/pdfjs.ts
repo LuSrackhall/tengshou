@@ -16,6 +16,17 @@ export interface PdfRenderTask {
   cancel(): void;
 }
 
+export interface PdfTextItem {
+  /** 文本片段；pdf.js 也可能返回不含文本的伪项。 */
+  str?: string;
+  /** 该片段后是否意味着换行。 */
+  hasEOL?: boolean;
+}
+
+export interface PdfTextContent {
+  items: PdfTextItem[];
+}
+
 export interface PdfPage {
   getViewport(params: { scale: number }): PdfViewport;
   render(params: {
@@ -23,6 +34,8 @@ export interface PdfPage {
     viewport: PdfViewport;
     transform?: number[] | null;
   }): PdfRenderTask;
+  /** 提取该页文字（模板占位符扫描使用；不触发渲染）。 */
+  getTextContent(): Promise<PdfTextContent>;
 }
 
 export interface PdfDocument {

@@ -12,7 +12,7 @@ import {
   type ComponentPublicInstance,
 } from "vue";
 import { saveTemplateMapping as saveTemplateMappingRequest } from "../../api/endpoints";
-import type { Template } from "../../api/types";
+import type { PlacementOverlap, Template } from "../../api/types";
 import {
   errorMessage,
   refreshAfterWrite,
@@ -22,6 +22,7 @@ import {
 import { useEditorData } from "./editorData";
 import { mappingPlacements } from "./placements";
 import { usePlacementEditing } from "./usePlacementEditing";
+import { usePlaceholderScan } from "./usePlaceholderScan";
 import { useTemplatePdf } from "./useTemplatePdf";
 import { useTemplatePreviewGenerate } from "./useTemplatePreviewGenerate";
 
@@ -60,6 +61,12 @@ export function useTemplateEditor(
   } = useEditorData(() => templateItem.value.id);
 
   const pdf = useTemplatePdf(() => props.template.id);
+
+  // 模板文字里的【…】/下划线占位符提示（只提示，不阻断）。
+  const placeholderScan = usePlaceholderScan();
+  // 字段值白底遮盖开关：随模板版本保存；最近一次保存返回的重叠提醒。
+  const maskFieldValues = ref(props.template.mask_field_values ?? false);
+  const overlaps = ref<PlacementOverlap[]>([]);
 
   // 预览/生成/下载：预览前若有改动会先走保存接线。
   const actions = useTemplatePreviewGenerate({
@@ -127,7 +134,18 @@ export function useTemplateEditor(
 
   function markDirty(): void {
     dirty.value = true;
+    // 标定变了，上一次保存返回的重叠提醒已不适用。
+    overlaps.value = [];
     actions.invalidatePreview();
+  }
+
+  /** 白底遮盖开关：改动即置脏，保存时随标定一起生成新版本。 */
+  function setMaskFieldValues(value: boolean): void {
+    if (maskFieldValues.value === value) {
+      return;
+    }
+    maskFieldValues.value = value;
+    markDirty();
   }
 
   /** 模板根节点通过 :ref 回调交给编辑器（选中列表项时滚动定位用）。 */
@@ -145,10 +163,13 @@ export function useTemplateEditor(
     try {
       const response = await saveTemplateMappingRequest(templateItem.value.id, {
         placements: mappingPlacements(editing.placements.value),
+        mask_field_values: maskFieldValues.value,
       });
       const item = response.item;
       templateItem.value = item;
+      maskFieldValues.value = item.mask_field_values ?? false;
       editing.resetPlacements(item.placements);
+      overlaps.value = response.overlaps ?? [];
       dirty.value = false;
       actions.invalidatePreview();
       await refreshAfterWrite();
@@ -189,7 +210,12 @@ export function useTemplateEditor(
     document.addEventListener("keydown", onKeydown);
     initializeEditorData();
     void pdf.load().then(() => {
-      if (!disposed && !actionStarted && props.initialAction) {
+      if (disposed) {
+        return;
+      }
+      // 占位符扫描与初始动作互不阻塞；失败只在侧栏提示。
+      void placeholderScan.scan(pdf.pdfDoc.value);
+      if (!actionStarted && props.initialAction) {
         actionStarted = true;
         actions.runInitialAction(props.initialAction).catch(labelError);
       }
@@ -224,6 +250,10 @@ export function useTemplateEditor(
     currentText,
     previewStatus,
     canGenerate,
+    placeholderScan: placeholderScan.view,
+    maskFieldValues,
+    setMaskFieldValues,
+    overlaps,
     warnings: actions.warnings,
     result: actions.result,
     previewOverlay: actions.previewOverlay,

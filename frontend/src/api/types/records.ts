@@ -197,6 +197,8 @@ export interface Template {
   source_sha256?: string;
   pdf_sha256?: string;
   placements?: Placement[];
+  /** 字段值白底遮盖：套印文字前先在标定框内铺白，遮住模板里的【】占位符。 */
+  mask_field_values?: boolean;
   created_at: ISODateTime;
   updated_at: ISODateTime;
 }

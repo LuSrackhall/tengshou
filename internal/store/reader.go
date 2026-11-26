@@ -543,11 +543,11 @@ func (r *Reader) listDocumentsForContract(ctx context.Context, contractID string
 // literal keeps the scan order identical to GetTemplate, which includes html.
 const templateColumns = `id, name, version, kind, '', variables_json, is_active,
 	source_path, pdf_path, mapping_json, page_count, converter,
-	source_sha256, pdf_sha256, created_at, updated_at`
+	source_sha256, pdf_sha256, mask_field_values, created_at, updated_at`
 
 const templateColumnsFull = `id, name, version, kind, html, variables_json, is_active,
 	source_path, pdf_path, mapping_json, page_count, converter,
-	source_sha256, pdf_sha256, created_at, updated_at`
+	source_sha256, pdf_sha256, mask_field_values, created_at, updated_at`
 
 // ListTemplates returns template metadata (HTML omitted).
 func (r *Reader) ListTemplates(ctx context.Context, f model.ListFilter) (model.List[model.Template], error) {
@@ -589,10 +589,10 @@ func scanTemplate(sc scanner) (model.Template, error) {
 	var t model.Template
 	var kind, variablesJSON, sourcePath, pdfPath, mappingJSON, converter string
 	var sourceSHA, pdfSHA, createdAt, updatedAt string
-	var active int
+	var active, maskFieldValues int
 	if err := sc.Scan(&t.ID, &t.Name, &t.Version, &kind, &t.HTML, &variablesJSON, &active,
 		&sourcePath, &pdfPath, &mappingJSON, &t.PageCount, &converter,
-		&sourceSHA, &pdfSHA, &createdAt, &updatedAt); err != nil {
+		&sourceSHA, &pdfSHA, &maskFieldValues, &createdAt, &updatedAt); err != nil {
 		return t, err
 	}
 	t.Kind, t.SourcePath, t.PDFPath = kind, sourcePath, pdfPath
@@ -600,6 +600,7 @@ func scanTemplate(sc scanner) (model.Template, error) {
 	t.Variables = parseJSONStrings(variablesJSON)
 	t.Placements = parsePlacements(mappingJSON)
 	t.IsActive = active != 0
+	t.MaskFieldValues = maskFieldValues != 0
 	t.CreatedAt, t.UpdatedAt = parseTime(createdAt), parseTime(updatedAt)
 	return t, nil
 }

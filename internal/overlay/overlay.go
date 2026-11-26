@@ -105,6 +105,10 @@ type Options struct {
 	// Placeholder draws a light box where a signature or seal is missing.
 	// Preview uses it; final generation leaves the gap empty.
 	Placeholder bool
+	// MaskFieldValues fills each field box with white before the value is
+	// drawn, covering 【…】 placeholders left in the template artwork. Off by
+	// default so existing templates render exactly as before.
+	MaskFieldValues bool
 }
 
 // Warning describes a non-fatal issue found while filling a placement.
@@ -265,6 +269,12 @@ func drawText(ctx *canvas.Context, size PageSize, p model.Placement, opts Option
 	// Draw top-down inside the box; the first baseline sits one ascent below
 	// the box top.
 	baseline := y + h - ascent
+	if opts.MaskFieldValues {
+		// 白底遮盖：先铺满标定框，再写字，用来盖住模板里保留的【…】占位符。
+		ctx.SetFillColor(color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		ctx.DrawPath(x, y, canvas.Rectangle(w, h))
+		ctx.SetFill(nil)
+	}
 	align := strings.TrimSpace(strings.ToLower(p.Align))
 	for i, line := range lines {
 		if float64(i)*lineHeight > h+0.01 {

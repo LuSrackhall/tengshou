@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
@@ -252,6 +253,68 @@ func assertStamped(t *testing.T, path string, pages int) {
 	}
 	if _, found := root.Find("OCProperties"); !found {
 		t.Fatal("stamped pdf has no optional-content properties")
+	}
+}
+
+// te-rccn0：MaskFieldValues 在每个字段框内先铺白底再写字，用来遮住模板里的
+// 【…】占位符；默认关闭时输出保持原样。
+func TestBuildMaskFieldValues(t *testing.T) {
+	family := testFont(t)
+	pages := []PageSize{{Width: testPageW, Height: testPageH}}
+	placements := []model.Placement{
+		{ID: "name", Page: 1, X: 100, Y: 200, W: 200, H: 24, Type: model.PlacementField, Field: "contract.data.name"},
+	}
+	resolver := testResolver{text: map[string]string{"contract.data.name": "【姓名】张三"}}
+	build := func(mask bool) Result {
+		res, err := Build(Options{
+			Pages:           pages,
+			Placements:      placements,
+			Font:            family,
+			Resolver:        resolver,
+			MaskFieldValues: mask,
+		})
+		if err != nil {
+			t.Fatalf("build mask=%v: %v", mask, err)
+		}
+		return res
+	}
+	plain := build(false)
+	masked := build(true)
+	if len(plain.Warnings) != 0 || len(masked.Warnings) != 0 {
+		t.Fatalf("warnings plain=%#v masked=%#v", plain.Warnings, masked.Warnings)
+	}
+	if bytes.Equal(plain.PDF, masked.PDF) {
+		t.Fatal("mask output should differ from the default overlay")
+	}
+
+	dir := t.TempDir()
+	content := func(name string, pdfBytes []byte) string {
+		path := filepath.Join(dir, name+".pdf")
+		if err := os.WriteFile(path, pdfBytes, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := api.ExtractContentFile(path, dir, nil, nil); err != nil {
+			t.Fatalf("extract content %s: %v", name, err)
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, name+"_Content_page_1.txt"))
+		if err != nil {
+			t.Fatalf("read content %s: %v", name, err)
+		}
+		return string(raw)
+	}
+	plainContent := content("plain", plain.PDF)
+	maskedContent := content("masked", masked.PDF)
+	// canvas writes grayscale white fill as `1 g` before the rectangle path.
+	if strings.Contains(plainContent, " 1 g ") {
+		t.Fatalf("default overlay should not paint white:\n%s", plainContent)
+	}
+	if !strings.Contains(maskedContent, " 1 g ") {
+		t.Fatalf("masked overlay should paint a white rectangle:\n%s", maskedContent)
+	}
+	for _, want := range []string{"【姓名】张三"} {
+		if !strings.Contains(extractText(t, filepath.Join(dir, "masked.pdf")), want) {
+			t.Fatalf("masked overlay lost the value %q", want)
+		}
 	}
 }
 

@@ -38,6 +38,19 @@ export interface TemplateCheck {
   ok: boolean;
 }
 
+/**
+ * 公章/签名框与字段框重叠超过阈值的提醒（service.PlacementOverlap）。
+ * a 是公章/签名位置 id，b 是字段位置 id；保存不阻断。
+ */
+export interface PlacementOverlap {
+  page: number;
+  a: string;
+  b: string;
+  /** 交集面积 / 较小框面积，0–1。 */
+  ratio: number;
+  message: string;
+}
+
 // ---------- 导入 / 保存模板 ----------
 
 /**
@@ -48,6 +61,8 @@ export interface TemplateMutationResponse {
   item: Template;
   usage: TemplateUsage;
   warnings: string[];
+  /** 保存标定时发现的公章/签名框与字段框重叠提醒；只提示，不影响保存。 */
+  overlaps?: PlacementOverlap[];
 }
 
 // ---------- 预览 ----------

@@ -84,6 +84,9 @@ type TemplateImportInput struct {
 type TemplateSaveInput struct {
 	Placements []model.Placement `json:"placements"`
 	IsActive   *bool             `json:"is_active"`
+	// MaskFieldValues toggles the white background behind field values for the
+	// new version. Nil keeps the current template's setting.
+	MaskFieldValues *bool `json:"mask_field_values"`
 }
 
 // TemplateImportResult is returned after importing or re-saving a template.
@@ -91,6 +94,9 @@ type TemplateImportResult struct {
 	Template model.Template      `json:"template"`
 	Usage    model.TemplateUsage `json:"usage"`
 	Warnings []string            `json:"warnings"`
+	// Overlaps lists seal/signature boxes covering field boxes beyond the
+	// warning threshold; the save still succeeds.
+	Overlaps []PlacementOverlap `json:"overlaps,omitempty"`
 }
 
 // TemplatePreviewInput selects the data used for a preview.
@@ -325,6 +331,7 @@ func (s *Service) SaveTemplateMapping(ctx context.Context, id string, in Templat
 	if err != nil {
 		return TemplateImportResult{}, err
 	}
+	overlaps := placementOverlaps(placements)
 	maxVersion, err := s.rd.MaxTemplateVersion(ctx, current.Name)
 	if err != nil {
 		return TemplateImportResult{}, err
@@ -340,6 +347,9 @@ func (s *Service) SaveTemplateMapping(ctx context.Context, id string, in Templat
 	if in.IsActive != nil {
 		next.IsActive = *in.IsActive
 	}
+	if in.MaskFieldValues != nil {
+		next.MaskFieldValues = *in.MaskFieldValues
+	}
 	if next.ID, err = model.NewID("tpl"); err != nil {
 		return TemplateImportResult{}, err
 	}
@@ -354,6 +364,11 @@ func (s *Service) SaveTemplateMapping(ctx context.Context, id string, in Templat
 	s.logChange(ctx, model.ChangeEntityTemplate, next.ID, model.ChangeActionUpdate,
 		fmt.Sprintf("保存模板「%s」v%d 的标定位置（%d 个）", next.Name, next.Version, len(placements)), nil)
 	warnings := []string{}
+	if len(overlaps) > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"有 %d 处公章/签名框与字段框重叠超过 %.0f%%，已保存但文字可能压字，请在位置列表的重叠提醒中检查。",
+			len(overlaps), overlapRatioThreshold*100))
+	}
 	usage, err := s.rd.TemplateUsage(ctx, next.ID)
 	if err != nil {
 		return TemplateImportResult{}, err
@@ -367,7 +382,7 @@ func (s *Service) SaveTemplateMapping(ctx context.Context, id string, in Templat
 		warnings = append(warnings, fmt.Sprintf(
 			"该模板系列已生成 %d 份 PDF，历史文件不会被改写。", usage.Documents))
 	}
-	return TemplateImportResult{Template: next, Usage: usage, Warnings: warnings}, nil
+	return TemplateImportResult{Template: next, Usage: usage, Warnings: warnings, Overlaps: overlaps}, nil
 }
 
 // DeleteTemplateVersion removes an unreferenced template version and its
@@ -448,11 +463,12 @@ func (s *Service) PreviewTemplate(ctx context.Context, id string, in TemplatePre
 		return TemplatePreviewResult{}, err
 	}
 	built, err := overlay.Build(overlay.Options{
-		Pages:       pages,
-		Placements:  placements,
-		Font:        family,
-		Resolver:    &templateResolver{rc: rc},
-		Placeholder: true,
+		Pages:           pages,
+		Placements:      placements,
+		Font:            family,
+		Resolver:        &templateResolver{rc: rc},
+		Placeholder:     true,
+		MaskFieldValues: tpl.MaskFieldValues,
 	})
 	if err != nil {
 		return TemplatePreviewResult{}, business("preview_failed", "生成预览失败：%s", err.Error())
@@ -474,11 +490,13 @@ func (s *Service) PreviewTemplate(ctx context.Context, id string, in TemplatePre
 }
 
 // templatePreviewSHA is the digest a generate request must echo. It covers the
-// template version, the calibrated mapping and either the contract content or
-// the fixed sample marker, so any change forces a fresh preview.
+// template version, the mask toggle, the calibrated mapping and either the
+// contract content or the fixed sample marker, so any change forces a fresh
+// preview.
 func templatePreviewSHA(tpl model.Template, rc *templateRenderContext) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "tengshou.template.preview.v1\nid=%s\nversion=%d\n", tpl.ID, tpl.Version)
+	fmt.Fprintf(h, "tengshou.template.preview.v1\nid=%s\nversion=%d\nmask=%t\n",
+		tpl.ID, tpl.Version, tpl.MaskFieldValues)
 	if rc != nil && rc.sample {
 		fmt.Fprint(h, "sample\n")
 	} else if rc != nil {

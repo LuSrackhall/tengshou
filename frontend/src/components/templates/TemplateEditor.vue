@@ -39,6 +39,10 @@ const {
   currentText,
   previewStatus,
   canGenerate,
+  placeholderScan,
+  maskFieldValues,
+  setMaskFieldValues,
+  overlaps,
   warnings,
   result,
   previewOverlay,
@@ -123,12 +127,16 @@ const {
                 :contracts-loaded="contractsLoaded"
                 :usage-text="usageText"
                 :check="check"
+                :placeholder-scan="placeholderScan"
+                :mask-field-values="maskFieldValues"
+                :overlaps="overlaps"
                 :preview-status-text="previewStatus.text"
                 :preview-status-class="previewStatus.cls"
                 :can-generate="canGenerate"
                 :warnings="warnings"
                 :result="result"
                 @update:contractId="contractId = $event"
+                @update:maskFieldValues="setMaskFieldValues"
                 @add="addPlacement"
                 @select="selectPlacement($event, true)"
                 @remove="removePlacement"

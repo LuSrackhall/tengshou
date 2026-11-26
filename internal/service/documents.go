@@ -522,6 +522,12 @@ func (s *Service) preflightRenderContext(rc *templateRenderContext) (*generation
 			Code: "missing_party", Message: "模板引用了甲方信息，但合同没有甲方档案",
 		})
 	}
+	if templateUsesAsset(rc.template) && rc.asset == nil {
+		pf.issues = append(pf.issues, PreflightIssue{
+			Code:    "missing_asset_record",
+			Message: "模板引用了房产信息，但合同没有选择房产档案，请先在合同表单选择",
+		})
+	}
 
 	contractFields, err := s.rd.ListFieldDefinitions(rc.ctx, model.FieldEntityContract, false)
 	if err != nil {
@@ -870,6 +876,18 @@ func templateUsesParty(tpl model.Template, role string) bool {
 			if p.Party == role {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// templateUsesAsset reports whether any field placement binds contract.asset_*
+// values, which need a selected property archive.
+func templateUsesAsset(tpl model.Template) bool {
+	for _, p := range tpl.Placements {
+		if p.Type == model.PlacementField &&
+			strings.HasPrefix(strings.TrimSpace(p.Field), "contract.asset_") {
+			return true
 		}
 	}
 	return false

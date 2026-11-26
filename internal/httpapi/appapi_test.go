@@ -375,3 +375,58 @@ func TestAppExcelRoundTripEndpoints(t *testing.T) {
 		t.Fatalf("keep_system contract = %+v err=%v", contract, err)
 	}
 }
+
+// te-thrth：合同三方选择（甲方/租户/房产）与租赁起止日期的应用接口链路。
+func TestAppContractAssetAndLease(t *testing.T) {
+	f := newFixture(t)
+	resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/assets", map[string]any{
+		"name": "幸福里 501", "address": "幸福路 1 号", "room_no": "501",
+	}, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("create asset: %d %s", resp.StatusCode, body)
+	}
+	asset := decodeAppItem(t, body)
+	assetID, _ := asset["id"].(string)
+	if assetID == "" {
+		t.Fatalf("asset id missing: %s", body)
+	}
+
+	resp, body = f.appRequest(t, http.MethodPost, "/app/api/v1/contracts", map[string]any{
+		"year": 2026, "title": "幸福里租赁合同", "party_b_id": f.partyBID,
+		"asset_id": assetID, "lease_start": "2026-01-01", "lease_end": "2026-12-31",
+		"status": "active", "data": map[string]any{},
+	}, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("create contract: %d %s", resp.StatusCode, body)
+	}
+	contract := decodeAppItem(t, body)
+	if contract["asset_id"] != assetID || contract["lease_start"] != "2026-01-01" ||
+		contract["lease_end"] != "2026-12-31" {
+		t.Fatalf("contract asset/lease = %+v", contract)
+	}
+
+	resp, body = f.get(t, "/app/api/v1/assets/"+assetID, false)
+	if resp.StatusCode != 200 || !strings.Contains(string(body), `"lease_status":"rented"`) {
+		t.Fatalf("asset lease status: %d %s", resp.StatusCode, body)
+	}
+	resp, body = f.get(t, "/app/api/v1/contracts/"+contract["id"].(string), false)
+	if resp.StatusCode != 200 || !strings.Contains(string(body), `"asset":{"id":"`+assetID+`"`) {
+		t.Fatalf("contract detail asset: %d %s", resp.StatusCode, body)
+	}
+
+	// 租期重叠只提示，不阻断保存。
+	resp, body = f.appRequest(t, http.MethodPost, "/app/api/v1/contracts", map[string]any{
+		"year": 2026, "title": "幸福里租赁合同（重复）", "party_b_id": f.partyBID,
+		"asset_id": assetID, "lease_start": "2026-06-01", "lease_end": "2027-05-31",
+		"data": map[string]any{},
+	}, nil)
+	if resp.StatusCode != 200 || !strings.Contains(string(body), "租期与合同") {
+		t.Fatalf("overlap warning: %d %s", resp.StatusCode, body)
+	}
+
+	// 被合同引用的房产不能删除（in_use → 409）。
+	resp, body = f.appRequest(t, http.MethodDelete, "/app/api/v1/assets/"+assetID, nil, nil)
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "不能删除") {
+		t.Fatalf("delete referenced asset: %d %s", resp.StatusCode, body)
+	}
+}

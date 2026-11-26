@@ -516,6 +516,9 @@ var contractBindableBuiltins = map[string]string{
 	"contract_no": "合同编号", "year": "年度", "title": "合同名称", "type": "合同类型",
 	"party_b": "相对方名称", "amount": "金额", "signed_on": "签订日期",
 	"valid_from": "生效日期", "valid_to": "到期日期", "status": "状态",
+	"lease_start": "租赁起租日", "lease_end": "租赁到期日",
+	"asset_name": "房产名称", "asset_address": "房产地址",
+	"asset_room_no": "房号", "asset_area": "面积（㎡）",
 }
 
 var partyBindableBuiltins = map[string]string{
@@ -726,6 +729,7 @@ type templateRenderContext struct {
 	contract       model.Contract
 	partyA         *model.Party
 	partyB         *model.Party
+	asset          *model.Asset
 	signatures     []model.Signature
 	seals          []model.Seal
 	attachedSeals  []model.Seal
@@ -753,6 +757,7 @@ func (s *Service) loadTemplateContext(ctx context.Context, tpl model.Template, c
 		}
 		rc.contract = contract
 		rc.partyA, rc.partyB = s.sampleParties(ctx)
+		rc.asset = sampleAsset()
 		sig, ok, err := s.sampleSignature(ctx)
 		if err != nil {
 			return nil, err
@@ -779,6 +784,7 @@ func (s *Service) loadTemplateContext(ctx context.Context, tpl model.Template, c
 	}
 	rc.contract = detail.Contract
 	rc.partyA, rc.partyB = detail.PartyA, detail.PartyB
+	rc.asset = detail.Asset
 	rc.signatures = detail.Signatures
 	allSeals, attached, err := s.SealsForContract(ctx, detail.Contract)
 	if err != nil {
@@ -854,6 +860,30 @@ func (rc *templateRenderContext) contractValue(rest string) string {
 		return chineseDate(rc.contract.ValidFrom)
 	case "valid_to":
 		return chineseDate(rc.contract.ValidTo)
+	case "lease_start":
+		return chineseDate(rc.contract.LeaseStart)
+	case "lease_end":
+		return chineseDate(rc.contract.LeaseEnd)
+	case "asset_name":
+		if rc.asset != nil {
+			return rc.asset.Name
+		}
+		return ""
+	case "asset_address":
+		if rc.asset != nil {
+			return rc.asset.Address
+		}
+		return ""
+	case "asset_room_no":
+		if rc.asset != nil {
+			return rc.asset.RoomNo
+		}
+		return ""
+	case "asset_area":
+		if rc.asset != nil && rc.asset.AreaSqm != nil {
+			return strconv.FormatFloat(*rc.asset.AreaSqm, 'f', -1, 64)
+		}
+		return ""
 	case "status":
 		return StatusLabel(rc.contract.Status)
 	}
@@ -1171,9 +1201,22 @@ func (s *Service) sampleContract(ctx context.Context) (model.Contract, error) {
 		SignedOn:   "2026-01-01",
 		ValidFrom:  "2026-02-01",
 		ValidTo:    "2027-01-31",
+		AssetID:    "sample-asset",
+		LeaseStart: "2026-02-01",
+		LeaseEnd:   "2027-01-31",
 		Amount:     12000,
 		Data:       data,
 	}, nil
+}
+
+// sampleAsset supplies placeholder values for asset bindings in previews.
+func sampleAsset() *model.Asset {
+	area := 88.5
+	return &model.Asset{
+		ID: "sample-asset", AssetType: model.AssetTypeHouse,
+		Name: "示例房产", Address: "示例路 3 号", RoomNo: "2 单元 501",
+		AreaSqm: &area, Enabled: true, LeaseStatus: model.LeaseStatusVacant,
+	}
 }
 
 func (s *Service) sampleParties(ctx context.Context) (*model.Party, *model.Party) {

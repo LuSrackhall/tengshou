@@ -60,6 +60,7 @@ func (s *Service) RenewalDraft(ctx context.Context, contractID string) (RenewalD
 		PartyAID:         source.PartyAID,
 		PartyBID:         source.PartyBID,
 		PartyB:           s.partyName(ctx, source.PartyBID),
+		AssetID:          source.AssetID,
 		Status:           model.ContractDraft,
 		Amount:           source.Amount,
 		TemplateID:       source.TemplateID,
@@ -76,6 +77,7 @@ func (s *Service) RenewalDraft(ctx context.Context, contractID string) (RenewalD
 		{model.FieldType, input.Type},
 		{"party_a_id", input.PartyAID},
 		{"party_b_id", input.PartyBID},
+		{model.FieldAssetID, input.AssetID},
 		{"template_id", input.TemplateID},
 	} {
 		if strings.TrimSpace(item.value) != "" {

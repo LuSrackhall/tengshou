@@ -63,6 +63,7 @@ const GENERATION_HINTS: Record<string, string> = {
     "合同内容在签名后已修改；请重新签名，或确认旧签名仍有效时选择「保留旧签名重出」。",
   missing_field: "请先补全合同或相对方档案中的必填信息。",
   missing_party: "请先为合同补齐相对方档案。",
+  missing_asset_record: "请先在合同表单选择房产档案，模板引用了房产信息。",
   missing_seal: "请先在「公章」页导入或关联公章图片。",
   preview_required: "请先重新预览，再生成。",
 };

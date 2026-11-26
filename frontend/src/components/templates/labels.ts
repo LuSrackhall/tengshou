@@ -42,12 +42,30 @@ function pushGroup(
   }
 }
 
-/** 字段下拉分组：合同 / 甲方 / 乙方；顺序与 optgroup 输出一致。 */
+/** 资产档案不在字段定义里：合同正文可直接引用房产占位符。 */
+const ASSET_OPTIONS: FieldOption[] = [
+  { value: "contract.asset_name", label: "资产 · 房产名称" },
+  { value: "contract.asset_address", label: "资产 · 房产地址" },
+  { value: "contract.asset_room_no", label: "资产 · 房号" },
+  { value: "contract.asset_area", label: "资产 · 面积（㎡）" },
+];
+
+const ASSET_BINDING_LABELS: Record<string, string> = {
+  "contract.asset_name": "房产名称",
+  "contract.asset_address": "房产地址",
+  "contract.asset_room_no": "房号",
+  "contract.asset_area": "面积（㎡）",
+};
+
+/** 字段下拉分组：合同 / 甲方 / 乙方 / 资产；顺序与 optgroup 输出一致。 */
 export function fieldOptionGroups(
   fields: FieldsByEntityResponse,
 ): FieldOptionGroup[] {
   const groups: FieldOptionGroup[] = [];
   pushGroup(groups, "合同", fields.contract, "contract");
+  if (ASSET_OPTIONS.length) {
+    groups.push({ label: "资产", options: ASSET_OPTIONS });
+  }
   pushGroup(groups, "甲方", fields.party, "party_a");
   pushGroup(groups, "乙方", fields.party, "party_b");
   return groups;
@@ -91,6 +109,9 @@ export function bindingLabel(
     return `公章 · 合同关联/单位公章${party}`;
   }
   const key = placement.field ?? "";
+  if (ASSET_BINDING_LABELS[key]) {
+    return `资产 · ${ASSET_BINDING_LABELS[key]}`;
+  }
   const prefix = key.split(".")[0] ?? "";
   const dataKey = key.includes(".data.")
     ? (key.split(".data.")[1] ?? "")

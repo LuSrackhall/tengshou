@@ -11,7 +11,7 @@ import { repoRoot } from "./support/app";
 import { shot, trackConsoleErrors } from "./support/ui";
 
 test.describe("场景 A：合同主流程", () => {
-  test("导入模板 → 新建字段 → 新建档案 → 新建合同草稿 → 预检 → 生成并下载 PDF", async ({
+  test("导入模板 → 新建字段 → 新建三方档案 → 三方选合同 → 预检 → 生成并下载 PDF", async ({
     app,
     page,
   }, testInfo) => {
@@ -21,6 +21,8 @@ test.describe("场景 A：合同主流程", () => {
     const fieldLabel = `E2E 平方数 ${stamp}`;
     const fieldKey = `e2e_area_${stamp}`;
     const partyName = `E2E 相对方 ${stamp}`;
+    const partyAName = `E2E 甲方单位 ${stamp}`;
+    const assetName = `E2E 房产 ${stamp}`;
     const contractTitle = `E2E 房屋租赁合同 ${stamp}`;
 
     await test.step("打开发布形态界面", async () => {
@@ -113,8 +115,42 @@ test.describe("场景 A：合同主流程", () => {
       await shot(page, testInfo, "04-档案已新建");
     });
 
+    await test.step("界面新建甲方（单位）与租赁房产档案", async () => {
+      await page.locator('#tabs button[data-tab="parties"]').click();
+      await page.locator("#newPartyBtn").click();
+      const partyADialog = page
+        .getByRole("dialog")
+        .filter({ has: page.getByRole("heading", { name: "新建相对方", exact: true }) });
+      await expect(partyADialog).toBeVisible();
+      await partyADialog.locator("#f_party_kind").selectOption("单位");
+      await partyADialog.locator("#f_party_name").fill(partyAName);
+      await partyADialog.locator("#f_party_id_number").fill(`E2EA${stamp}`);
+      await partyADialog.getByRole("button", { name: "保存", exact: true }).click();
+      await expect(partyADialog).toBeHidden();
+      await expect(
+        page.locator(`#partyTable tr[data-id]:has-text("${partyAName}")`),
+      ).toBeVisible();
+
+      await page.locator('#tabs button[data-tab="assets"]').click();
+      await expect(page.locator("#view-assets")).toHaveClass(/active/);
+      await page.locator("#newAssetBtn").click();
+      const assetDialog = page
+        .getByRole("dialog")
+        .filter({ has: page.getByRole("heading", { name: "新建房产", exact: true }) });
+      await expect(assetDialog).toBeVisible();
+      await assetDialog.locator("#f_asset_name").fill(assetName);
+      await assetDialog.locator("#f_asset_address").fill("E2E 幸福路 1 号");
+      await assetDialog.locator("#f_asset_room_no").fill("501");
+      await assetDialog.getByRole("button", { name: "保存", exact: true }).click();
+      await expect(assetDialog).toBeHidden();
+      await expect(
+        page.locator(`#assetTable tr[data-id]:has-text("${assetName}")`),
+      ).toBeVisible();
+      await shot(page, testInfo, "04-甲方与房产档案已新建");
+    });
+
     let contractId = "";
-    await test.step("界面新建合同并保存草稿", async () => {
+    await test.step("界面三方选择建合同并保存", async () => {
       await page.locator('#tabs button[data-tab="contracts"]').click();
       await expect(page.locator("#view-contracts")).toHaveClass(/active/);
       await page.locator("#newContractBtn").click();
@@ -125,7 +161,33 @@ test.describe("场景 A：合同主流程", () => {
       await expect(contractDialog).toBeVisible();
       await expect(contractDialog.locator("#f_contract_status")).toHaveValue("草稿");
       await contractDialog.locator("#f_contract_title").fill(contractTitle);
+      // 甲方：固定单位档案默认带出，可切换。
+      await contractDialog
+        .locator("#f_contract_party_a")
+        .selectOption({ label: `${partyAName}（单位）` });
+      // 乙方：从租户档案搜索选择，选中即带出证件号。
       await contractDialog.locator("#f_contract_party_b").fill(partyName);
+      await contractDialog
+        .locator(`#partyBPickerList button[data-party-id]:has-text("${partyName}")`)
+        .click();
+      await expect(
+        contractDialog.locator('.picker-field[data-key="party_b"] .picker-selected'),
+      ).toContainText(`E2E${stamp}`);
+      // 资产：从房产档案选择；在租/空置标记来自后端派生。
+      await contractDialog.locator("#f_contract_asset").fill(assetName);
+      await contractDialog
+        .locator(`#assetPickerList button[data-asset-id]:has-text("${assetName}")`)
+        .click();
+      await expect(
+        contractDialog.locator('.picker-field[data-key="asset"] .picker-selected'),
+      ).toContainText("空置");
+      // 租期默认一年，可改；这里显式改成 2026-12-01 至 2027-11-30。
+      await expect(contractDialog.locator("#f_contract_lease_start")).not.toHaveValue("");
+      await expect(contractDialog.locator("#f_contract_lease_end")).not.toHaveValue("");
+      await contractDialog.locator("#f_contract_lease_start").fill("2026-12-01");
+      await contractDialog.locator("#f_contract_lease_end").fill("2027-11-30");
+      // 三方选定后合同生效，房产应派生为在租。
+      await contractDialog.locator("#f_contract_status").selectOption("生效");
       await contractDialog
         .getByRole("button", { name: "保存", exact: true })
         .click();
@@ -137,7 +199,20 @@ test.describe("场景 A：合同主流程", () => {
       await expect(contractRow).toBeVisible();
       contractId = (await contractRow.getAttribute("data-id")) ?? "";
       expect(contractId).not.toBe("");
-      await shot(page, testInfo, "05-合同已保存为草稿");
+      const detail = (await (
+        await page.request.get(
+          `${app.baseURL}/app/api/v1/contracts/${contractId}`,
+        )
+      ).json()) as {
+        contract: { asset_id?: string; lease_start?: string; lease_end?: string };
+        asset?: { name: string; lease_status: string };
+      };
+      expect(detail.contract.asset_id ?? "").not.toBe("");
+      expect(detail.contract.lease_start).toBe("2026-12-01");
+      expect(detail.contract.lease_end).toBe("2027-11-30");
+      expect(detail.asset?.name).toBe(assetName);
+      expect(detail.asset?.lease_status).toBe("rented");
+      await shot(page, testInfo, "05-三方合同已保存且房产在租");
     });
 
     await test.step("预检通过（服务端就绪检查）", async () => {
@@ -235,25 +310,26 @@ test.describe("场景 A2：缺证件号档案的补录提示", () => {
     const toast = page.locator("#toast");
 
     await test.step("新建引用新名称的合同（按名称自动建档，无证件号）", async () => {
+      // 名称为新建档的兼容路径仍在服务端（Excel/接口），用接口造出
+      // 「有档案但无证件号」的存量形态，再从界面选中它验证补录提示。
+      const response = await page.request.post(
+        `${app.baseURL}/app/api/v1/contracts`,
+        {
+          headers: { "X-Tengshou-App": "1" },
+          data: {
+            year: new Date().getFullYear(),
+            title: contractTitle,
+            party_b: partyName,
+          },
+        },
+      );
+      expect(response.ok()).toBeTruthy();
       await page.goto(`${app.baseURL}/app/`, { waitUntil: "domcontentloaded" });
       await page.locator('#tabs button[data-tab="contracts"]').click();
       await expect(page.locator("#view-contracts")).toHaveClass(/active/);
-      await page.locator("#newContractBtn").click();
-      const dialog = page
-        .getByRole("dialog")
-        .filter({ has: page.getByRole("heading", { name: "新建合同", exact: true }) });
-      await expect(dialog).toBeVisible();
-      await dialog.locator("#f_contract_title").fill(contractTitle);
-      await dialog.locator("#f_contract_party_b").fill(partyName);
-      await dialog.getByRole("button", { name: "保存", exact: true }).click();
-      await expect(dialog).toBeHidden();
       await expect(
         page.locator(`#contractTable tr[data-id]:has-text("${contractTitle}")`),
       ).toBeVisible();
-      // 等「已新建相对方档案」提示结束后再打开合同，避免一次性补录提示
-      // 被这条保存提示覆盖（真实用户也不会在 350ms 内点开）。
-      await expect(toast).toContainText("已新建相对方档案");
-      await expect(toast).not.toHaveClass(/show/, { timeout: 10_000 });
       await shot(page, testInfo, "01-合同已用无证件号档案建立");
     });
 

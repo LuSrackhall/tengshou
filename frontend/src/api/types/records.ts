@@ -8,6 +8,7 @@
 // 字段名与 Go JSON tag 完全一致；omitempty 的字段在这里是可选属性。
 
 import type { ISODateTime } from "./common";
+import type { Asset } from "./assets";
 import type { OutputDocument, Signature } from "./documents";
 
 // ---------- 相对方 ----------
@@ -51,11 +52,16 @@ export interface Contract {
   template_id?: string;
   party_a_id?: string;
   party_b_id?: string;
+  /** 租赁房产档案 id；v0.2 之前的历史合同可为空。 */
+  asset_id?: string;
   status: ContractStatus;
   /** 日期均为 YYYY-MM-DD。 */
   signed_on?: string;
   valid_from?: string;
   valid_to?: string;
+  /** 租赁起止日；与合同自身生效/到期日期分开，驱动房产占用。 */
+  lease_start?: string;
+  lease_end?: string;
   amount: number;
   /** 用户自定义字段的值，键为字段定义的 key。 */
   data: Record<string, unknown>;
@@ -70,6 +76,8 @@ export interface ContractDetail {
   contract: Contract;
   party_a?: Party;
   party_b?: Party;
+  /** 租赁房产档案（历史合同为空）。 */
+  asset?: Asset;
   template?: Template;
   signatures: Signature[];
   seals: Seal[];

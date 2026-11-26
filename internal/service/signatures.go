@@ -256,17 +256,22 @@ func (s *Service) ExportSignature(ctx context.Context, id string) ([]byte, strin
 // excluded so the digest changes only when the contract content changes.
 func ContentSHA256(c model.Contract) (string, error) {
 	payload := struct {
-		ID         string         `json:"id"`
-		ContractNo string         `json:"contract_no"`
-		Year       int            `json:"year"`
-		Title      string         `json:"title"`
-		Type       string         `json:"type"`
-		PartyAID   string         `json:"party_a_id"`
-		PartyBID   string         `json:"party_b_id"`
-		Status     string         `json:"status"`
-		SignedOn   string         `json:"signed_on"`
-		ValidFrom  string         `json:"valid_from"`
-		ValidTo    string         `json:"valid_to"`
+		ID         string `json:"id"`
+		ContractNo string `json:"contract_no"`
+		Year       int    `json:"year"`
+		Title      string `json:"title"`
+		Type       string `json:"type"`
+		PartyAID   string `json:"party_a_id"`
+		PartyBID   string `json:"party_b_id"`
+		Status     string `json:"status"`
+		SignedOn   string `json:"signed_on"`
+		ValidFrom  string `json:"valid_from"`
+		ValidTo    string `json:"valid_to"`
+		// Lease/asset fields use omitempty so historical contracts (all empty)
+		// keep their pre-v0.2 digest and retained signatures stay valid.
+		LeaseStart string         `json:"lease_start,omitempty"`
+		LeaseEnd   string         `json:"lease_end,omitempty"`
+		AssetID    string         `json:"asset_id,omitempty"`
 		Amount     float64        `json:"amount"`
 		Data       map[string]any `json:"data"`
 	}{
@@ -281,6 +286,9 @@ func ContentSHA256(c model.Contract) (string, error) {
 		SignedOn:   c.SignedOn,
 		ValidFrom:  c.ValidFrom,
 		ValidTo:    c.ValidTo,
+		LeaseStart: c.LeaseStart,
+		LeaseEnd:   c.LeaseEnd,
+		AssetID:    c.AssetID,
 		Amount:     c.Amount,
 		Data:       nonNilData(c.Data),
 	}

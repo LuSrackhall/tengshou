@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// 合同新建/编辑弹窗（阶段 1 迁移）：DOM 结构与存量 app.js openContractForm /
-// openContractCreateForm 一致（modal-backdrop / modal wide / form-grid /
-// renewal-banner / audit-host 类名不变），含动态字段、相对方 datalist、
-// 续签草稿与来源横幅、删除确认、422 逐字段错误。
+// 合同新建/编辑弹窗（阶段 1 迁移 + v0.2 三方选择）：甲方档案默认带出、
+// 乙方从租户档案选择（搜索/最近使用/快速新建）、租赁房产从房产档案选择，
+// 租期默认一年；其余字段仍由动态字段定义驱动，422 逐字段错误与续签草稿
+// 语义不变。
 //
 // 跨域：扫码签名与签名摘要已迁到 Vue——摘要由 components/signatures 的
 // SignatureSummary 在本组件内渲染，扫码签名对话框由合同台账岛打开。
@@ -19,6 +19,7 @@ import {
 } from "../../api/endpoints";
 import type {
   ApiFieldError,
+  Asset,
   Contract,
   ContractDetail,
   FieldDefinition,
@@ -35,9 +36,12 @@ import {
 } from "../../bridge/app";
 import SealSummary from "../seals/SealSummary.vue";
 import SignatureSummary from "../signatures/SignatureSummary.vue";
+import AssetPicker from "./AssetPicker.vue";
 import ContractAuditHistory from "./ContractAuditHistory.vue";
 import ContractFieldControl from "./ContractFieldControl.vue";
 import ContractGenerationPanel from "./ContractGenerationPanel.vue";
+import PartyBPicker from "./PartyBPicker.vue";
+import { defaultPartyAID, oneYearLeaseEnd, rememberPartyA, todayISO } from "./lease";
 import { isAgentActor, kindLabel } from "../../ui/format";
 import { partyName } from "./format";
 import {
@@ -55,6 +59,7 @@ const props = defineProps<{
   partyB: PartyRef | null;
   fields: FieldDefinition[];
   parties: Party[];
+  assets: Asset[];
   currentYear: number | null;
   focusGenerate: boolean;
 }>();
@@ -87,18 +92,63 @@ const seed = computed<ContractSeed | null>(() => {
   return null;
 });
 
-const partyAID = ref(
-  props.mode === "edit"
-    ? props.contract?.party_a_id ?? ""
-    : props.renewal?.input.party_a_id ?? "",
+const createdParties = ref<Party[]>([]);
+const createdAssets = ref<Asset[]>([]);
+
+function dedupeByID<T extends { id: string }>(items: Array<T | null | undefined>): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    if (item && !seen.has(item.id)) {
+      seen.add(item.id);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+const allParties = computed(() =>
+  dedupeByID([...props.parties, ...createdParties.value, props.detail?.party_b, props.detail?.party_a]),
 );
+
+const allAssets = computed(() =>
+  dedupeByID([...props.assets, ...createdAssets.value, props.detail?.asset]),
+);
+
+function initialPartyAID(): string {
+  if (props.mode === "edit") {
+    return props.contract?.party_a_id ?? "";
+  }
+  if (props.renewal) {
+    return props.renewal.input.party_a_id ?? "";
+  }
+  return defaultPartyAID(props.parties);
+}
+
+const partyAID = ref(initialPartyAID());
+
+// 甲方固定档案默认带出；档案异步到达时补一次默认值，用户已选择不覆盖。
+watch(
+  () => props.parties,
+  (parties) => {
+    if (props.mode === "create" && !props.renewal && !partyAID.value) {
+      partyAID.value = defaultPartyAID(parties);
+    }
+  },
+);
+
+watch(partyAID, (id) => {
+  if (props.mode === "create" && !props.renewal) {
+    rememberPartyA(id);
+  }
+});
 
 /** 编辑时甲方档案不在列表（已删除 / 列表截断）也显示可读名称。 */
 const partyALabel = computed(() => {
   if (!partyAID.value) {
     return "";
   }
-  const party = props.parties.find((item) => item.id === partyAID.value);
+  const party = allParties.value.find((item) => item.id === partyAID.value);
   if (party) {
     return `${party.name}（${kindLabel(party.kind)}）`;
   }
@@ -109,7 +159,7 @@ const partyAInList = computed(() =>
   props.parties.some((item) => item.id === partyAID.value),
 );
 
-const partyBID = computed(() => {
+function initialPartyBID(): string {
   if (props.mode === "edit") {
     return props.detail?.party_b?.id ?? props.contract?.party_b_id ?? "";
   }
@@ -117,9 +167,15 @@ const partyBID = computed(() => {
     return props.renewal.input.party_b_id ?? "";
   }
   return props.partyB?.id ?? "";
-});
+}
+
+const partyBID = ref(initialPartyBID());
 
 const partyBName = computed(() => {
+  const party = allParties.value.find((item) => item.id === partyBID.value);
+  if (party) {
+    return party.name;
+  }
   if (props.mode === "edit") {
     return (
       props.detail?.party_b?.name ??
@@ -135,16 +191,20 @@ const partyBName = computed(() => {
   return props.partyB?.name ?? "";
 });
 
+watch(
+  partyBName,
+  (name) => {
+    values.party_b = name;
+  },
+  { immediate: true },
+);
+
 // v0.2：选中（或打开）缺少证件号的存量档案时提示一次补录；补录后永久有效，
 // 同一档案在同一浏览器只提示一次，不打断合同录入。
 watch(
-  [partyBName, () => props.parties],
+  [partyBID, () => props.parties],
   () => {
-    const name = partyBName.value.trim();
-    if (!name) {
-      return;
-    }
-    const match = props.parties.find((item) => item.name.trim() === name);
+    const match = allParties.value.find((item) => item.id === partyBID.value);
     if (!match || (match.id_number ?? "").trim() !== "") {
       return;
     }
@@ -165,6 +225,18 @@ watch(
   { immediate: true },
 );
 
+function initialAssetID(): string {
+  if (props.mode === "edit") {
+    return props.contract?.asset_id ?? props.detail?.asset?.id ?? "";
+  }
+  if (props.renewal) {
+    return props.renewal.input.asset_id ?? "";
+  }
+  return "";
+}
+
+const assetID = ref(initialAssetID());
+
 const title = computed(() => {
   if (props.mode === "edit" && props.contract) {
     return `编辑合同 · ${props.contract.contract_no}`;
@@ -178,7 +250,48 @@ const title = computed(() => {
 const reusedCount = computed(() => props.renewal?.reused?.length ?? 0);
 const renewalAlreadyClosed = computed(() => renewalSourceMissing.value && !renewalSource.value);
 
+/** 乙方选择器替代内置 party_b 输入框，其余字段仍由字段定义驱动。 */
+const contractFields = computed(() =>
+  props.fields.filter((field) => field.key !== "party_b"),
+);
+
 syncContractValues(values, props.fields, seed.value, partyBName.value, props.currentYear);
+
+// 租期默认一年：新建（含续签）时带出今天 → 一年后的前一天，用户可改。
+const leaseAutoEnd = ref("");
+function applyLeaseDefaults(): void {
+  if (props.mode !== "create" || !("lease_start" in values) || values.lease_start) {
+    return;
+  }
+  values.lease_start = todayISO();
+  values.lease_end = oneYearLeaseEnd(values.lease_start);
+  leaseAutoEnd.value = values.lease_end;
+}
+applyLeaseDefaults();
+
+function setFieldValue(key: string, value: string): void {
+  if (key === "lease_start") {
+    const previousAuto = leaseAutoEnd.value;
+    values.lease_start = value;
+    if (!values.lease_end || values.lease_end === previousAuto) {
+      values.lease_end = value ? oneYearLeaseEnd(value) : "";
+      leaseAutoEnd.value = values.lease_end;
+    }
+    return;
+  }
+  if (key === "lease_end") {
+    leaseAutoEnd.value = "";
+  }
+  values[key] = value;
+}
+
+function onPartyCreated(party: Party): void {
+  createdParties.value = [party, ...createdParties.value];
+}
+
+function onAssetCreated(asset: Asset): void {
+  createdAssets.value = [asset, ...createdAssets.value];
+}
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
@@ -228,6 +341,7 @@ async function submit(): Promise<void> {
     partyAID.value,
     partyBID.value,
     partyBName.value,
+    assetID.value,
   );
   try {
     if (props.mode === "edit" && props.contract) {
@@ -396,10 +510,6 @@ onBeforeUnmount(() => {
             <SealSummary :seals="detail.seals" />
           </div>
 
-          <datalist id="partyNameList">
-            <option v-for="party in parties" :key="party.id" :value="party.name"></option>
-          </datalist>
-
           <div class="form-grid">
             <div class="field">
               <label for="f_contract_party_a">甲方（本方）</label>
@@ -410,15 +520,27 @@ onBeforeUnmount(() => {
                   {{ party.name }}（{{ kindLabel(party.kind) }}）
                 </option>
               </select>
-              <span class="help">本方（采购方）档案；模板里的甲方名称、证件号与甲方公章按此档案取用。</span>
+              <span class="help">本方档案默认带出，可切换；模板里的甲方名称、证件号与甲方公章按此档案取用。</span>
             </div>
+            <PartyBPicker
+              v-model="partyBID"
+              :parties="allParties"
+              :fallback="detail?.party_b ?? null"
+              @created="onPartyCreated"
+            />
+            <AssetPicker
+              v-model="assetID"
+              :assets="allAssets"
+              :fallback="detail?.asset ?? null"
+              @created="onAssetCreated"
+            />
             <ContractFieldControl
-              v-for="field in fields"
+              v-for="field in contractFields"
               :key="field.key"
               :field="field"
               :model-value="values[field.key] ?? ''"
               :readonly="mode === 'edit' && field.key === 'contract_no'"
-              @update:model-value="values[field.key] = $event"
+              @update:model-value="setFieldValue(field.key, $event)"
             />
           </div>
 

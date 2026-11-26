@@ -197,6 +197,11 @@ export async function createContract(
       ],
     },
   );
+  await dialog
+    .locator(
+      `#partyBPickerList button[data-party-id]:has-text("${CONTRACT_VALUES.partyB}")`,
+    )
+    .click();
   await dialog.locator("#f_contract_amount").fill(CONTRACT_VALUES.amount);
   await dialog.locator("#f_contract_signed_on").fill(CONTRACT_VALUES.signedOn);
   await dialog.locator("#f_contract_valid_from").fill(CONTRACT_VALUES.validFrom);

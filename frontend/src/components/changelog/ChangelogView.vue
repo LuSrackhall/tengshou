@@ -147,6 +147,7 @@ onBeforeUnmount(() => {
       <option value="seal">公章</option>
       <option value="template">模板</option>
       <option value="party">相对方</option>
+      <option value="asset">房产</option>
       <option value="field">字段</option>
       <option value="settings">设置</option>
     </select>

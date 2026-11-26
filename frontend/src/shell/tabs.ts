@@ -21,6 +21,7 @@ export const TABS: readonly TabDefinition[] = [
   { id: "templates", label: "模板" },
   { id: "seals", label: "公章" },
   { id: "parties", label: "相对方档案" },
+  { id: "assets", label: "房产档案" },
   { id: "fields", label: "字段" },
   { id: "changelog", label: "变更记录" },
   { id: "data", label: "数据安全" },

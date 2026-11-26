@@ -39,6 +39,8 @@ func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 			"/app/api/v1/fields/{id}/archive",
 			"/app/api/v1/parties",
 			"/app/api/v1/parties/{id}",
+			"/app/api/v1/assets",
+			"/app/api/v1/assets/{id}",
 			"/app/api/v1/contracts",
 			"/app/api/v1/contracts/years",
 			"/app/api/v1/contracts/{id}",

@@ -16,6 +16,7 @@
 // 禁止用 any 兜底：动态字段值用 Record<string, unknown>；确需例外时
 // 必须在调用点写明原因。
 
+export type * from "./types/assets";
 export type * from "./types/bootstrap";
 export type * from "./types/common";
 export type * from "./types/documents";

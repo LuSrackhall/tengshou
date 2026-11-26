@@ -9,6 +9,7 @@ frontend/src/api/
   endpoints/
     onboarding.ts      bootstrap / onboarding / events
     records.ts         fields / parties / contracts / changelog
+    assets.ts          assets（房产档案）
     seals.ts           seals
     imports.ts         excel 导入导出
     templates.ts       templates / generation / batch / documents / converters
@@ -16,6 +17,7 @@ frontend/src/api/
     system.ts          mcp / backup / integrity
   types.ts             契约类型 barrel（统一从 `api/types` 引入）
   types/
+    assets.ts          Asset / AssetType / LeaseStatus
     bootstrap.ts       Bootstrap
     common.ts          List / 错误信封 / Stats / ChangeLog / 查询基类
     documents.ts       Signature / OutputDocument / Preflight / Batch
@@ -96,19 +98,20 @@ async function load(): Promise<void> {
 | `types/bootstrap.ts` | `internal/httpapi/appapi.go`（handleAppBootstrap）、`internal/model/model.go`（Stats/YearCount）、`internal/httpapi/onboarding.go` |
 | `types/common.ts` | `internal/model/model.go`（List/Stats/YearCount/ChangeLog/FieldChange）、`internal/httpapi/handlers.go`（writeError/filter）、`internal/service/service.go`（FieldError/ValidationErrors） |
 | `types/records.ts` | `internal/model/model.go`（Party/Contract/FieldDefinition/Seal/Placement/Template/TemplateUsage/ContractDetail） |
+| `types/assets.ts` | `internal/model/model.go`（Asset/AssetTypeHouse/LeaseStatus*） |
 | `types/documents.ts` | `internal/model/model.go`（Signature/OutputDocument/DocumentSignatureSnapshot）、`internal/overlay/overlay.go`（Warning）、`internal/service/documents.go`（Preflight/Batch） |
 | `types/imports.ts` | `internal/service/excel.go`、`internal/httpapi/appapi.go`（importRequest） |
 | `types/onboarding.ts` | `internal/httpapi/onboarding.go`、`internal/service/onboarding.go` |
 | `types/settings.ts` | `internal/httpapi/appapi.go`（MCP）、`internal/service/backup.go`、`internal/backup/backup.go`、`internal/httpapi/backupapi.go` |
 | `types/signing.ts` | `internal/sign/session.go`、`internal/httpapi/signapi.go` |
 | `types/templates.ts` | `internal/service/onboarding.go`（TemplateCheck）、`internal/service/templates.go`、`internal/doctopdf/convert.go`、`internal/httpapi/templateapi.go` |
-| `types/requests.ts` | `internal/service/parties.go`、`contracts.go`、`fields.go`、`seals.go`、`renewal.go`、`internal/httpapi/templateapi.go`、`appapi.go`（filter） |
+| `types/requests.ts` | `internal/service/parties.go`、`assets.go`、`contracts.go`、`fields.go`、`seals.go`、`renewal.go`、`internal/httpapi/templateapi.go`、`appapi.go`（filter） |
 
 ## 端点覆盖清单
 
-`internal/httpapi/server.go` 的 `routes()` 注册了 66 条 `/app/api/v1`
+`internal/httpapi/server.go` 的 `routes()` 注册了 71 条 `/app/api/v1`
 路由（`PUT` 与 `POST /settings/mcp` 共用同一个 handler）。客户端覆盖其中
-阶段 1 各域需要的 65 条：
+阶段 1 各域需要的 70 条：
 
 | 域 | 端点函数 | HTTP 路由 |
 | --- | --- | --- |
@@ -117,6 +120,7 @@ async function load(): Promise<void> {
 | 事件流 | `eventsUrl` | GET `/events`（SSE） |
 | 字段 | `listFields`、`listFieldsForEntity`、`createField`、`updateField`、`archiveField` | GET/POST `/fields`；PUT `/fields/{id}`；POST `/fields/{id}/archive` |
 | 相对方 | `listParties`、`getParty`、`createParty`、`updateParty`、`deleteParty` | GET/POST `/parties`；GET/PUT/DELETE `/parties/{id}` |
+| 房产 | `listAssets`、`getAsset`、`createAsset`、`updateAsset`、`deleteAsset` | GET/POST `/assets`；GET/PUT/DELETE `/assets/{id}` |
 | 合同 | `listContracts`、`getContract`、`createContract`、`updateContract`、`deleteContract`、`getContractYears`、`getRenewalDraft` | GET/POST `/contracts`；GET/PUT/DELETE `/contracts/{id}`；GET `/contracts/years`；GET `/contracts/{id}/renewal-draft` |
 | 变更记录 | `listChangelog` | GET `/changelog` |
 | 公章 | `listSeals`、`getSeal`、`importSeal`、`updateSeal`、`replaceSealImage`、`deleteSeal`、`getSealContracts`、`attachSeal`、`detachSeal`、`sealImageUrl` | GET/POST `/seals`；GET/PUT/DELETE `/seals/{id}`；GET `/seals/{id}/image`、`/contracts`；POST `/seals/{id}/replace`、`/attach`、`/detach` |

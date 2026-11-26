@@ -79,6 +79,7 @@ export type CheckStatus = "ok" | "warn" | "error";
 export const CHANGE_ENTITIES = [
   "contract",
   "party",
+  "asset",
   "field",
   "seal",
   "template",

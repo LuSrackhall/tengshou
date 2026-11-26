@@ -18,6 +18,19 @@ const (
 	PartyOrganization = "organization"
 )
 
+// Asset kinds. v0.2 only supports houses; the discriminator lets later
+// versions add other rental objects (parking spots, equipment) with their own
+// fields and validation without touching contracts or payments.
+const AssetTypeHouse = "house"
+
+// Asset lease statuses are derived from contracts and never stored: an asset
+// is rented while it has an effective, non-terminated contract, and vacant
+// otherwise. Contract expiry alone does not release an asset (te-l0hh0 D4).
+const (
+	LeaseStatusRented = "rented"
+	LeaseStatusVacant = "vacant"
+)
+
 // Contract statuses.
 const (
 	ContractDraft    = "draft"
@@ -73,6 +86,7 @@ const (
 const (
 	ChangeEntityContract  = "contract"
 	ChangeEntityParty     = "party"
+	ChangeEntityAsset     = "asset"
 	ChangeEntityField     = "field"
 	ChangeEntitySeal      = "seal"
 	ChangeEntityTemplate  = "template"
@@ -104,6 +118,29 @@ type Party struct {
 	Data      map[string]any `json:"data"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+// Asset is one rentable property record (v0.2: houses only). The minimal
+// fields follow te-l0hh0 D1: name, address, room number, area and note.
+// Contracts and payments will reference only the asset id and lease period,
+// never house-specific fields. LeaseStatus is derived at read time from the
+// contracts that reference the asset; it is not persisted, so a stopped or
+// expired contract can never leave a stale "rented" flag behind.
+type Asset struct {
+	ID        string   `json:"id"`
+	AssetType string   `json:"asset_type"`
+	Name      string   `json:"name"`
+	Address   string   `json:"address,omitempty"`
+	RoomNo    string   `json:"room_no,omitempty"`
+	AreaSqm   *float64 `json:"area_sqm,omitempty"`
+	Note      string   `json:"note,omitempty"`
+	Enabled   bool     `json:"enabled"`
+	// LeaseStatus is rented or vacant. It is derived from contracts; the
+	// contract→asset link lands in a follow-up bead, so until then every asset
+	// is vacant (no contract can reference it yet).
+	LeaseStatus string    `json:"lease_status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Contract is one agreement between two parties.

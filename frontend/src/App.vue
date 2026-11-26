@@ -10,6 +10,7 @@ import { getBootstrap } from "./api/endpoints";
 import type { Bootstrap } from "./api/types";
 import { errorMessage, subscribeDataChanged, toast } from "./bridge/app";
 import LiveStatusBadge from "./components/LiveStatusBadge.vue";
+import AssetsView from "./components/assets/AssetsView.vue";
 import ChangelogView from "./components/changelog/ChangelogView.vue";
 import ContractsView from "./components/contracts/ContractsView.vue";
 import DataSecurityView from "./components/data/DataSecurityView.vue";
@@ -135,6 +136,10 @@ onBeforeUnmount(() => {
 
     <section id="view-parties" class="view" :class="{ active: currentTab === 'parties' }" aria-label="相对方档案">
       <PartiesView />
+    </section>
+
+    <section id="view-assets" class="view" :class="{ active: currentTab === 'assets' }" aria-label="房产档案">
+      <AssetsView />
     </section>
 
     <section id="view-fields" class="view" :class="{ active: currentTab === 'fields' }" aria-label="字段管理">

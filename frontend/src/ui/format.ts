@@ -6,6 +6,7 @@ import type { ChangeLog, FieldDefinition, PartyKind } from "../api/types";
 export const ENTITY_LABELS: Record<string, string> = {
   contract: "合同",
   party: "相对方",
+  asset: "房产",
   field: "字段",
   seal: "公章",
   template: "模板",

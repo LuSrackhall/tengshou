@@ -2,6 +2,7 @@
 //
 // 来源（与 Go 侧逐字段核对）：
 //   internal/service/parties.go     PartyInput
+//   internal/service/assets.go      AssetInput
 //   internal/service/contracts.go   ContractInput
 //   internal/service/fields.go      FieldInput（更新是部分更新）
 //   internal/service/seals.go       SealInput
@@ -21,6 +22,7 @@ import type {
   YearCount,
 } from "./common";
 import type { DocumentKind, DocumentStatus } from "./documents";
+import type { AssetType } from "./assets";
 import type {
   ContractStatus,
   FieldDefinition,
@@ -43,6 +45,21 @@ export interface PartyInput {
   address?: string;
   note?: string;
   data?: Record<string, unknown>;
+}
+
+// ---------- 房产 ----------
+
+/** AssetInput：保存房产档案（新建/更新共用）；area_sqm 不传表示清空面积。 */
+export interface AssetInput {
+  id?: string;
+  asset_type?: AssetType;
+  name: string;
+  address?: string;
+  room_no?: string;
+  area_sqm?: number;
+  note?: string;
+  /** 不传时保持原启用状态（停用/启用是显式动作）。 */
+  enabled?: boolean;
 }
 
 // ---------- 合同 ----------
@@ -201,6 +218,12 @@ export interface BatchGenerateInput {
 // ---------- 查询参数 ----------
 
 export type PartiesQuery = ListQuery;
+
+export type AssetStatusFilter = "enabled" | "disabled";
+
+export type AssetsQuery = ListQuery & {
+  status?: AssetStatusFilter;
+};
 
 export type ContractsQuery = ListQuery & {
   year?: number;

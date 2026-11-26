@@ -42,14 +42,23 @@ func (s *Store) PutParty(ctx context.Context, p *model.Party) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO parties (id, kind, name, id_number, phone, address, note, data_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO parties (id, kind, name, id_number, phone, address, note, data_json,
+			id_front_path, id_front_sha256, id_back_path, id_back_sha256,
+			signature_asset_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			kind = excluded.kind, name = excluded.name, id_number = excluded.id_number,
 			phone = excluded.phone, address = excluded.address, note = excluded.note,
-			data_json = excluded.data_json, updated_at = excluded.updated_at`,
+			data_json = excluded.data_json,
+			id_front_path = excluded.id_front_path,
+			id_front_sha256 = excluded.id_front_sha256,
+			id_back_path = excluded.id_back_path,
+			id_back_sha256 = excluded.id_back_sha256,
+			signature_asset_id = excluded.signature_asset_id,
+			updated_at = excluded.updated_at`,
 		p.ID, p.Kind, p.Name, p.IDNumber, p.Phone, p.Address, p.Note, string(data),
-		formatTime(p.CreatedAt), formatTime(p.UpdatedAt))
+		p.IDFrontPath, p.IDFrontSHA256, p.IDBackPath, p.IDBackSHA256,
+		p.SignatureID, formatTime(p.CreatedAt), formatTime(p.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("put party: %w", err)
 	}

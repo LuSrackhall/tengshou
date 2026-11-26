@@ -20,7 +20,9 @@ import {
 } from "../client";
 import type {
   CreateSignatureSessionInput,
+  EnrollSession,
   ItemResponse,
+  Signature,
   SignatureSession,
   SignatureSessionCancelResponse,
 } from "../types";
@@ -62,4 +64,61 @@ export function exportSignature(
   options: RequestOptions = {},
 ): Promise<DownloadedFile> {
   return postFile(`/signatures/${enc(id)}/export`, { confirm: true }, options);
+}
+
+/**
+ * POST /parties/{id}/signature-sessions：为相对方档案采集长期复用的
+ * 手写签名（手机扫码页 /sign/{token}）。
+ */
+export function createPartySignatureSession(
+  partyId: string,
+  options: RequestOptions = {},
+): Promise<ItemResponse<SignatureSession>> {
+  return post(`/parties/${enc(partyId)}/signature-sessions`, {}, options);
+}
+
+/**
+ * POST /contracts/{id}/signature-reuse：显式复用档案签名到当前合同内容版本。
+ * 服务端记入变更记录；同一内容版本重复调用是幂等的。
+ */
+export function reusePartySignature(
+  contractId: string,
+  partyId: string,
+  options: RequestOptions = {},
+): Promise<ItemResponse<Signature>> {
+  return post(
+    `/contracts/${enc(contractId)}/signature-reuse`,
+    { party_id: partyId },
+    options,
+  );
+}
+
+// ---------- v0.2 局域网自助建档 ----------
+
+/** POST /enroll-sessions：生成自助建档二维码会话。 */
+export function createEnrollSession(
+  options: RequestOptions = {},
+): Promise<ItemResponse<EnrollSession>> {
+  return post("/enroll-sessions", {}, options);
+}
+
+/** GET /enroll-sessions/{id}：轮询自助建档提交状态。 */
+export function getEnrollSession(
+  id: string,
+  options: RequestOptions = {},
+): Promise<ItemResponse<EnrollSession>> {
+  return get(`/enroll-sessions/${enc(id)}`, options);
+}
+
+/** DELETE /enroll-sessions/{id}：取消未完成的自助建档会话。 */
+export function cancelEnrollSession(
+  id: string,
+  options: RequestOptions = {},
+): Promise<SignatureSessionCancelResponse> {
+  return del(`/enroll-sessions/${enc(id)}`, options);
+}
+
+/** 自助建档会话二维码 PNG 地址；index 对应 urls 里的网卡地址。 */
+export function enrollSessionQrUrl(id: string, index = 0): string {
+  return apiUrl(`/enroll-sessions/${enc(id)}/qr.png`, { index });
 }

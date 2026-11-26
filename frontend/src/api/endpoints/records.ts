@@ -7,6 +7,7 @@
 //   GET /changelog
 
 import {
+  apiUrl,
   del,
   encodePathSegment,
   get,
@@ -35,6 +36,7 @@ import type {
   PartiesQuery,
   Party,
   PartyInput,
+  PartyPhotoSide,
   RenewalDraft,
 } from "../types";
 
@@ -125,6 +127,29 @@ export function deleteParty(
   options: RequestOptions = {},
 ): Promise<DeletedResponse> {
   return del(`/parties/${enc(id)}`, options);
+}
+
+/**
+ * POST /parties/{id}/id-photos/{side}：上传或更换证件照（正面/反面）。
+ * image 为 data URL；服务端压缩为 JPEG 后存入数据目录。
+ */
+export function uploadPartyIDPhoto(
+  id: string,
+  side: PartyPhotoSide,
+  image: string,
+  options: RequestOptions = {},
+): Promise<ItemResponse<Party>> {
+  return post(`/parties/${enc(id)}/id-photos/${side}`, { image }, options);
+}
+
+/** GET /parties/{id}/id-photos/{side}：证件照图片地址（服务端校验摘要）。 */
+export function partyIDPhotoUrl(id: string, side: PartyPhotoSide): string {
+  return apiUrl(`/parties/${enc(id)}/id-photos/${side}`);
+}
+
+/** GET /parties/{id}/signature：档案级签名 PNG 地址。 */
+export function partySignatureImageUrl(id: string): string {
+  return apiUrl(`/parties/${enc(id)}/signature`);
 }
 
 // ---------- 合同 ----------

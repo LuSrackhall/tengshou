@@ -317,3 +317,69 @@ func TestSignatureSessionValidationAndLANRequirement(t *testing.T) {
 		t.Fatalf("public submit: %d %s", public.Code, public.Body.String())
 	}
 }
+
+// v0.2: signature and enrollment sessions share the one-time token model but
+// each endpoint validates its own session kind, so a token from one flow can
+// neither render, submit, nor cancel in the other.
+func TestSessionKindSeparation(t *testing.T) {
+	f := newFixtureWithOptions(t, fixtureOptions{allowLAN: true, lanHosts: []string{"192.168.1.50"}})
+
+	resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/enroll-sessions", nil, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create enroll session: %d %s", resp.StatusCode, body)
+	}
+	enrollSession := decodeAppItem(t, body)
+	enrollID, _ := enrollSession["id"].(string)
+	enrollToken := tokenForPath(t, enrollSession, "/enroll/")
+
+	// The signature phone surface refuses an enrollment token.
+	page := signRaw(t, f, http.MethodGet, "/sign/"+enrollToken, nil, "192.168.1.23:5000", nil)
+	if page.Code != http.StatusGone {
+		t.Fatalf("enroll token on sign page = %d %s", page.Code, page.Body.String())
+	}
+	status := signRaw(t, f, http.MethodGet, "/sign/"+enrollToken+"/status", nil, "192.168.1.23:5000", nil)
+	if status.Code != http.StatusNotFound || errorCode(t, status) != "not_found" {
+		t.Fatalf("enroll token on sign status = %d %s", status.Code, status.Body.String())
+	}
+	submit := submitSignature(t, f, enrollToken, signatureDataURL(t, false), "192.168.1.23:5000")
+	if submit.Code != http.StatusNotFound || errorCode(t, submit) != "not_found" {
+		t.Fatalf("enroll token on sign submit = %d %s", submit.Code, submit.Body.String())
+	}
+	// The refused submit did not claim the enrollment session.
+	enrollStatus := signRaw(t, f, http.MethodGet, "/enroll/"+enrollToken+"/status", nil, "192.168.1.23:5000", nil)
+	if enrollStatus.Code != http.StatusOK || !strings.Contains(enrollStatus.Body.String(), `"pending"`) {
+		t.Fatalf("enroll session after cross-kind submit = %d %s", enrollStatus.Code, enrollStatus.Body.String())
+	}
+	// The signature cancel endpoint refuses the enrollment session.
+	resp, body = f.appRequest(t, http.MethodDelete, "/app/api/v1/signature-sessions/"+enrollID, nil, nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"cancelled":false`) {
+		t.Fatalf("signature cancel on enroll session = %d %s", resp.StatusCode, body)
+	}
+
+	// Symmetrically, the enrollment surface refuses a signature token.
+	signSession := createSignSession(t, f, map[string]any{"contract_id": f.contractID})
+	signID, _ := signSession["id"].(string)
+	signToken := tokenFromURL(t, signSession)
+	enrollPage := signRaw(t, f, http.MethodGet, "/enroll/"+signToken, nil, "192.168.1.23:5000", nil)
+	if enrollPage.Code != http.StatusGone {
+		t.Fatalf("sign token on enroll page = %d %s", enrollPage.Code, enrollPage.Body.String())
+	}
+	enrollStatus = signRaw(t, f, http.MethodGet, "/enroll/"+signToken+"/status", nil, "192.168.1.23:5000", nil)
+	if enrollStatus.Code != http.StatusNotFound {
+		t.Fatalf("sign token on enroll status = %d %s", enrollStatus.Code, enrollStatus.Body.String())
+	}
+	resp, body = f.appRequest(t, http.MethodDelete, "/app/api/v1/enroll-sessions/"+signID, nil, nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"cancelled":false`) {
+		t.Fatalf("enroll cancel on signature session = %d %s", resp.StatusCode, body)
+	}
+
+	// Both sessions stayed usable: their own endpoints can cancel them.
+	resp, body = f.appRequest(t, http.MethodDelete, "/app/api/v1/enroll-sessions/"+enrollID, nil, nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"cancelled":true`) {
+		t.Fatalf("enroll cancel = %d %s", resp.StatusCode, body)
+	}
+	resp, body = f.appRequest(t, http.MethodDelete, "/app/api/v1/signature-sessions/"+signID, nil, nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"cancelled":true`) {
+		t.Fatalf("signature cancel = %d %s", resp.StatusCode, body)
+	}
+}

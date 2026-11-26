@@ -25,6 +25,14 @@ const (
 	StateExpired    = "expired"
 )
 
+// Session kinds. Signature sessions capture a signature for a contract or a
+// party archive; enroll sessions let a tenant fill a complete archive on a
+// phone over the LAN.
+const (
+	KindSignature = "signature"
+	KindEnroll    = "enroll"
+)
+
 var (
 	// ErrNotFound means the token or session id is unknown (never issued,
 	// cancelled, or already purged).
@@ -42,6 +50,7 @@ var (
 // submit.
 type Session struct {
 	ID              string
+	Kind            string
 	ContractID      string
 	ContractNo      string
 	ContractTitle   string
@@ -61,6 +70,8 @@ type Session struct {
 
 // CreateInput describes a new capture session.
 type CreateInput struct {
+	// Kind selects the phone page: signature (default) or enroll.
+	Kind          string
 	ContractID    string
 	ContractNo    string
 	ContractTitle string
@@ -119,6 +130,7 @@ func (m *Manager) Create(in CreateInput) (Session, string, error) {
 	}
 	s := &Session{
 		ID:            id,
+		Kind:          kindOrDefault(in.Kind),
 		ContractID:    in.ContractID,
 		ContractNo:    in.ContractNo,
 		ContractTitle: in.ContractTitle,
@@ -148,11 +160,20 @@ func (m *Manager) Get(token string) (Session, error) {
 	if !ok {
 		return Session{}, ErrNotFound
 	}
-	copy := *s
-	if copy.State != StateCompleted && !m.now().Before(copy.ExpiresAt) {
-		copy.State = StateExpired
+	return m.copyLocked(s), nil
+}
+
+// GetKind is Get restricted to one session kind: a token issued for another
+// flow is reported as not found so a phone page never renders the wrong
+// capture form.
+func (m *Manager) GetKind(token, kind string) (Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.byToken[token]
+	if !ok || s.Kind != kind {
+		return Session{}, ErrNotFound
 	}
-	return copy, nil
+	return m.copyLocked(s), nil
 }
 
 // GetByID returns a copy of the session for id.
@@ -163,11 +184,15 @@ func (m *Manager) GetByID(id string) (Session, error) {
 	if !ok {
 		return Session{}, ErrNotFound
 	}
+	return m.copyLocked(s), nil
+}
+
+func (m *Manager) copyLocked(s *Session) Session {
 	copy := *s
 	if copy.State != StateCompleted && !m.now().Before(copy.ExpiresAt) {
 		copy.State = StateExpired
 	}
-	return copy, nil
+	return copy
 }
 
 // Claim atomically moves a pending session to submitting. Only one caller can
@@ -180,6 +205,24 @@ func (m *Manager) Claim(token string) (Session, error) {
 	if !ok {
 		return Session{}, ErrNotFound
 	}
+	return m.claimLocked(s)
+}
+
+// ClaimKind is Claim restricted to one session kind: a token issued for another
+// flow is reported as not found and its state is left untouched. Each phone
+// surface claims only its own kind, so signature and enrollment submissions
+// cannot consume each other's tokens.
+func (m *Manager) ClaimKind(token, kind string) (Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.byToken[token]
+	if !ok || s.Kind != kind {
+		return Session{}, ErrNotFound
+	}
+	return m.claimLocked(s)
+}
+
+func (m *Manager) claimLocked(s *Session) (Session, error) {
 	switch s.State {
 	case StateCompleted:
 		return *s, ErrConsumed
@@ -224,7 +267,26 @@ func (m *Manager) Cancel(id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.byID[id]
-	if !ok || s.State == StateCompleted {
+	if !ok {
+		return false
+	}
+	return m.cancelLocked(s)
+}
+
+// CancelKind is Cancel restricted to one session kind, so the signature and
+// enrollment cancel endpoints cannot cancel each other's sessions.
+func (m *Manager) CancelKind(id, kind string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.byID[id]
+	if !ok || s.Kind != kind {
+		return false
+	}
+	return m.cancelLocked(s)
+}
+
+func (m *Manager) cancelLocked(s *Session) bool {
+	if s.State == StateCompleted {
 		return false
 	}
 	for token, candidate := range m.byToken {
@@ -233,7 +295,7 @@ func (m *Manager) Cancel(id string) bool {
 			break
 		}
 	}
-	delete(m.byID, id)
+	delete(m.byID, s.ID)
 	return true
 }
 
@@ -246,6 +308,15 @@ func (m *Manager) purgeLocked(now time.Time) {
 			delete(m.byToken, token)
 			delete(m.byID, s.ID)
 		}
+	}
+}
+
+func kindOrDefault(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case KindEnroll:
+		return KindEnroll
+	default:
+		return KindSignature
 	}
 }
 

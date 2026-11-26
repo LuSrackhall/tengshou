@@ -63,12 +63,17 @@ func parseJSONStrings(raw string) []string {
 func scanParty(sc scanner) (model.Party, error) {
 	var p model.Party
 	var kind, name, idNumber, phone, address, note, dataJSON, createdAt, updatedAt string
+	var idFrontPath, idFrontSHA, idBackPath, idBackSHA, signatureID string
 	if err := sc.Scan(&p.ID, &kind, &name, &idNumber, &phone, &address, &note,
-		&dataJSON, &createdAt, &updatedAt); err != nil {
+		&dataJSON, &idFrontPath, &idFrontSHA, &idBackPath, &idBackSHA,
+		&signatureID, &createdAt, &updatedAt); err != nil {
 		return p, err
 	}
 	p.Kind, p.Name, p.IDNumber, p.Phone, p.Address, p.Note = kind, name, idNumber, phone, address, note
 	p.Data = parseJSONMap(dataJSON)
+	p.IDFrontPath, p.IDFrontSHA256 = idFrontPath, idFrontSHA
+	p.IDBackPath, p.IDBackSHA256 = idBackPath, idBackSHA
+	p.SignatureID = signatureID
 	p.CreatedAt, p.UpdatedAt = parseTime(createdAt), parseTime(updatedAt)
 	return p, nil
 }
@@ -234,7 +239,8 @@ func (r *Reader) ListParties(ctx context.Context, f model.ListFilter) (model.Lis
 }
 
 const partyColumns = `id, kind, name, id_number, phone, address, note,
-	data_json, created_at, updated_at`
+	data_json, id_front_path, id_front_sha256, id_back_path, id_back_sha256,
+	signature_asset_id, created_at, updated_at`
 
 // GetParty returns one party by id.
 func (r *Reader) GetParty(ctx context.Context, id string) (model.Party, error) {
@@ -367,6 +373,31 @@ func (r *Reader) FindSimilarContracts(ctx context.Context, partyBID string, year
 func (r *Reader) FindPartiesByName(ctx context.Context, name string) ([]model.Party, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+partyColumns+` FROM parties WHERE trim(name) = ? ORDER BY created_at, id`, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Party{}
+	for rows.Next() {
+		p, err := scanParty(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// FindPartiesByIDNumber returns parties whose trimmed ID number equals
+// idNumber. An empty idNumber matches nothing: blank IDs are not duplicates of
+// each other (old archives are allowed to stay unbackfilled).
+func (r *Reader) FindPartiesByIDNumber(ctx context.Context, idNumber string) ([]model.Party, error) {
+	idNumber = strings.TrimSpace(idNumber)
+	if idNumber == "" {
+		return []model.Party{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+partyColumns+` FROM parties WHERE trim(id_number) = ? ORDER BY created_at, id`, idNumber)
 	if err != nil {
 		return nil, err
 	}

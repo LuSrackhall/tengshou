@@ -41,10 +41,17 @@ func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 			"/app/api/v1/parties/{id}",
 			"/app/api/v1/assets",
 			"/app/api/v1/assets/{id}",
+			"/app/api/v1/parties/{id}/id-photos/{side}",
+			"/app/api/v1/parties/{id}/signature",
+			"/app/api/v1/parties/{id}/signature-sessions",
+			"/app/api/v1/enroll-sessions",
+			"/app/api/v1/enroll-sessions/{id}",
+			"/app/api/v1/enroll-sessions/{id}/qr.png",
 			"/app/api/v1/contracts",
 			"/app/api/v1/contracts/years",
 			"/app/api/v1/contracts/{id}",
 			"/app/api/v1/contracts/{id}/renewal-draft",
+			"/app/api/v1/contracts/{id}/signature-reuse",
 			"/app/api/v1/changelog",
 			"/app/api/v1/seals",
 			"/app/api/v1/seals/{id}",
@@ -232,6 +239,11 @@ func (s *Server) handleAppSaveParty(w http.ResponseWriter, r *http.Request) {
 	}
 	if id := strings.TrimSpace(r.PathValue("id")); id != "" {
 		in.ID = id
+	} else {
+		// v0.2: the archive UI requires an ID number when creating a new
+		// party. Internal bulk paths (Excel import, contract auto-create)
+		// bypass this HTTP surface and may still start without one.
+		in.RequireIDNumber = true
 	}
 	party, warnings, err := svc.SaveParty(r.Context(), in)
 	if err != nil {
@@ -822,7 +834,8 @@ func (s *Server) writeServiceError(w http.ResponseWriter, msg string, err error)
 		case "not_found":
 			status = http.StatusNotFound
 		case "conflict", "immutable", "in_use", "duplicate", "ambiguous_party",
-			"preview_required", "missing_asset", "invalid_template", "content_changed":
+			"preview_required", "missing_asset", "invalid_template", "content_changed",
+			"duplicate_id_number":
 			status = http.StatusConflict
 		case "import_errors", "converter_unavailable", "convert_failed",
 			"invalid_pdf", "invalid_kind", "too_many_placements",

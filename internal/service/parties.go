@@ -20,6 +20,14 @@ type PartyInput struct {
 	Address  string         `json:"address"`
 	Note     string         `json:"note"`
 	Data     map[string]any `json:"data"`
+	// RequireIDNumber enforces the v0.2 rule "new archives must have an ID
+	// number". The archive HTTP surface sets it when creating; bulk paths
+	// (Excel import, contracts auto-creating a placeholder archive) leave it
+	// off so old workflows keep working and the ID can be backfilled later.
+	RequireIDNumber bool `json:"-"`
+	// Source overrides the audit summary for special creation channels such as
+	// the LAN self-enrollment page.
+	Source string `json:"-"`
 }
 
 // SaveParty creates or updates a counterparty. It returns non-blocking
@@ -45,6 +53,9 @@ func (s *Service) SaveParty(ctx context.Context, in PartyInput) (model.Party, []
 	}
 	action := model.ChangeActionCreate
 	summary := fmt.Sprintf("新建相对方档案「%s」", party.Name)
+	if existing == nil && in.Source == "self_enroll" {
+		summary = fmt.Sprintf("租户自助建档「%s」（证件号 %s）", party.Name, MaskIDNumber(party.IDNumber))
+	}
 	var changes []model.FieldChange
 	if existing != nil {
 		action = model.ChangeActionUpdate
@@ -83,6 +94,9 @@ func (s *Service) buildParty(ctx context.Context, in PartyInput, existing *model
 		validation.add(model.FieldPartyKind, "类型", "只能是 个人 / 单位")
 	}
 	party.IDNumber = truncateRunes(strings.TrimSpace(in.IDNumber), 120)
+	if existing == nil && in.RequireIDNumber && party.IDNumber == "" {
+		validation.add(model.FieldPartyIDNo, "证件号", "新建档案必须填写证件号")
+	}
 	party.Phone = truncateRunes(strings.TrimSpace(in.Phone), 120)
 	party.Address = truncateRunes(strings.TrimSpace(in.Address), 300)
 	party.Note = strings.TrimSpace(in.Note)
@@ -106,7 +120,33 @@ func (s *Service) buildParty(ctx context.Context, in PartyInput, existing *model
 					party.Name, m.ID))
 		}
 	}
+	if party.IDNumber != "" {
+		matches, err := s.rd.FindPartiesByIDNumber(ctx, party.IDNumber)
+		if err != nil {
+			return model.Party{}, nil, err
+		}
+		for _, m := range matches {
+			if existing != nil && m.ID == existing.ID {
+				continue
+			}
+			warnings = append(warnings,
+				fmt.Sprintf("证件号 %s 已被相对方「%s」（%s）使用；判重以证件号为准，请核对后保存",
+					MaskIDNumber(party.IDNumber), m.Name, m.ID))
+		}
+	}
 	return party, warnings, nil
+}
+
+// MaskIDNumber keeps a short, human-recognizable prefix for audit summaries and
+// logs without printing the whole identifier. It is exported because the HTTP
+// layer logs the same masked form.
+func MaskIDNumber(idNumber string) string {
+	idNumber = strings.TrimSpace(idNumber)
+	runes := []rune(idNumber)
+	if len(runes) <= 6 {
+		return idNumber
+	}
+	return string(runes[:4]) + strings.Repeat("*", len(runes)-8) + string(runes[len(runes)-4:])
 }
 
 // DeleteParty removes an unreferenced counterparty record.

@@ -21,6 +21,8 @@ export type SignatureSessionState =
  */
 export interface SignatureSession {
   id: string;
+  /** signature（默认）或 enroll；旧版服务可能省略。 */
+  kind?: "signature" | "enroll";
   state: SignatureSessionState;
   contract_id: string;
   contract_no: string;
@@ -58,4 +60,22 @@ export interface CreateSignatureSessionInput {
 /** DELETE /signature-sessions/{id} 的响应。 */
 export interface SignatureSessionCancelResponse {
   cancelled: boolean;
+}
+
+/**
+ * v0.2 局域网自助建档会话（enrollSessionView）。手机端在 /enroll/{token}
+ * 填写姓名、证件号、证件照正反面与手写签名，提交即建档。
+ */
+export interface EnrollSession {
+  id: string;
+  kind: "enroll";
+  state: SignatureSessionState;
+  urls: string[];
+  /** urls 的第一个地址（urls 非空时才有）。 */
+  url?: string;
+  /** 二维码 PNG 的相对地址，可直接作为 img.src。 */
+  qr_url: string;
+  created_at: ISODateTime;
+  expires_at: ISODateTime;
+  completed_at?: ISODateTime;
 }

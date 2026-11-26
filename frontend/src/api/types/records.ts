@@ -24,9 +24,19 @@ export interface Party {
   note?: string;
   /** 用户自定义字段的值，键为字段定义的 key。 */
   data: Record<string, unknown>;
+  /** v0.2 档案升级：证件照（压缩后的 JPG）相对数据目录的路径与摘要。 */
+  id_front_path?: string;
+  id_front_sha256?: string;
+  id_back_path?: string;
+  id_back_sha256?: string;
+  /** 档案级签名资产 id；一次采集后可复用于后续合同（需显式确认）。 */
+  signature_id?: string;
   created_at: ISODateTime;
   updated_at: ISODateTime;
 }
+
+/** 证件照面别（对应 Go model.PartyPhotoFront / PartyPhotoBack）。 */
+export type PartyPhotoSide = "front" | "back";
 
 // ---------- 合同 ----------
 

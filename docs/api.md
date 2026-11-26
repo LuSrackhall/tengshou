@@ -62,7 +62,7 @@ X-Api-Token: <token>
 | GET | `/api/v1/stats` | 各类记录数量 |
 | GET | `/api/v1/fields?entity=contract\|party` | 字段定义（运行时新增字段立即可见） |
 | GET | `/api/v1/parties?q=&limit=&offset=` | 相对方列表（按姓名 / 证件号 / 电话搜索） |
-| GET | `/api/v1/parties/{id}` | 相对方详情 |
+| GET | `/api/v1/parties/{id}` | 相对方详情（含证件照路径与档案级签名 id） |
 | GET | `/api/v1/contracts?q=&status=&year=&party_id=&limit=&offset=` | 合同列表；`year` 省略即跨年查询；`party_id` 按相对方（甲方或乙方）过滤 |
 | GET | `/api/v1/contracts/{id}` | 合同详情（相对方、签名、公章关联、模板版本、PDF 记录） |
 | GET | `/api/v1/templates?q=&limit=&offset=` | 模板版本列表（不含 HTML 正文；PDF 模板含 kind / 页数 / 位置映射元数据） |
@@ -136,6 +136,23 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 签名会话响应中的 `urls` 是手机可访问的局域网签名页地址，`qr_url` 是二维码
 PNG。二维码中的一次性 token 只出现在 URL 里，不出现在 JSON 响应中。
 
+v0.2 租户档案升级新增（同样仅限回环的应用写入面）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/app/api/v1/parties/{id}/id-photos/{front\|back}` | 上传/更换证件照（`{"image": "<data URL>"}`，服务端压缩为 JPEG） |
+| GET | `/app/api/v1/parties/{id}/id-photos/{front\|back}` | 读取证件照（校验摘要后返回图片） |
+| GET | `/app/api/v1/parties/{id}/signature` | 读取档案级签名 PNG |
+| POST | `/app/api/v1/parties/{id}/signature-sessions` | 为档案采集长期复用的手写签名（局域网扫码） |
+| POST | `/app/api/v1/enroll-sessions` | 生成租户自助建档二维码会话 |
+| GET | `/app/api/v1/enroll-sessions/{id}` | 轮询自助建档状态 |
+| DELETE | `/app/api/v1/enroll-sessions/{id}` | 取消自助建档会话 |
+
+新建档案（`POST /app/api/v1/parties`）必须提供 `id_number`；存量档案允许为空，
+在档案页补录后长期有效。自助建档的手机页是 `/enroll/<token>`，与 `/sign/<token>`
+同样是 LAN only、一次性令牌；提交内容为姓名、证件号、证件照正反面与手写签名，
+证件号已存在时返回 `duplicate_id_number`（409）并提示联系出租方。
+
 ## 稳定性
 
 - 字段只增不改名；删除或改名会提升 `schema` 版本。
@@ -148,6 +165,8 @@ PNG。二维码中的一次性 token 只出现在 URL 里，不出现在 JSON �
   `/app/api/v1` 应用写入面，并受 `config.json` 的 `mcp.write_enabled` 约束。
 - 默认仅监听局域网，不对公网暴露；无外部服务器依赖。
 - 测试页不展示合同数据；数据接口需要令牌。
-- 手机签名页（`/sign/<token>`）是唯一面向局域网的写入口：一次性短时令牌、
-  仅接受私网来源、提交只接受 PNG；它不携带任何合同数据接口权限。
-- 签名图片目前只返回元数据（路径、摘要、尺寸），不提供图片下载。
+- 手机签名页（`/sign/<token>`）与租户自助建档页（`/enroll/<token>`）是唯一面向
+  局域网的写入口：一次性短时令牌、仅接受私网来源；签名提交只接受 PNG，证件照
+  只接受 JPG/PNG 并在服务端压缩；它们不携带任何合同数据接口权限。
+- 签名图片目前只返回元数据（路径、摘要、尺寸），不提供图片下载；档案证件照与
+  档案签名只能通过回环地址的 `/app/api/v1` 图片端点读取，读取前校验摘要。

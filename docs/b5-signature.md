@@ -46,6 +46,26 @@
 `party_id` 省略时默认合同相对方（乙方），也可以显式选择甲方档案；
 签名人必须属于该合同甲乙双方。
 
+### v0.2 档案级签名与显式复用
+
+相对方档案可以保存一份长期签名：档案页「扫码采集」走同一个 `/sign/<token>`
+手机页，提交后写入 `signature_assets`（`party_id` 有值、`contract_id` 为空），
+并把 `parties.signature_asset_id` 指向该记录。
+
+合同需要时，签名对话框会显示「使用档案签名」按钮（仅当当前签名人档案已有
+档案签名），确认后调用：
+
+| 方法 | 路径 | 访问范围 | 说明 |
+| --- | --- | --- | --- |
+| POST | `/app/api/v1/contracts/{id}/signature-reuse` | 仅回环 | 显式复用档案签名到合同当前内容版本，请求体 `{"party_id": "pty_xxx"}` |
+| POST | `/app/api/v1/parties/{id}/signature-sessions` | 仅回环 | 为档案采集长期签名 |
+| GET | `/app/api/v1/parties/{id}/signature` | 仅回环 | 读取档案签名 PNG（校验摘要） |
+
+复用的语义：不复制图片文件，只新增一条 `signature_assets` 记录，指向同一
+不可变 PNG（同一 SHA-256），写入当前合同 `content_sha256`，`source=archive`，
+并在变更记录里记一条「复用档案签名」。合同内容随后修改时，该记录因内容版本
+过期而被预检拦截，需要重新扫码或再次确认复用；同一内容版本重复调用是幂等的。
+
 ## 安全边界
 
 - **仅局域网**：`/sign/*` 在路由守卫中检查来源地址，只接受回环、RFC1918 /

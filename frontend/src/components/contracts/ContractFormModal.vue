@@ -14,7 +14,6 @@ import { ApiError } from "../../api/client";
 import {
   createContract,
   deleteContract as deleteContractRequest,
-  getContract,
   updateContract,
 } from "../../api/endpoints";
 import type {
@@ -40,8 +39,15 @@ import AssetPicker from "./AssetPicker.vue";
 import ContractAuditHistory from "./ContractAuditHistory.vue";
 import ContractFieldControl from "./ContractFieldControl.vue";
 import ContractGenerationPanel from "./ContractGenerationPanel.vue";
+import ContractRenewalBanners from "./ContractRenewalBanners.vue";
 import PartyBPicker from "./PartyBPicker.vue";
-import { defaultPartyAID, oneYearLeaseEnd, rememberPartyA, todayISO } from "./lease";
+import TerminationFields from "./TerminationFields.vue";
+import {
+  defaultPartyAID,
+  oneYearLeaseEnd,
+  rememberPartyA,
+  todayISO,
+} from "./lease";
 import { isAgentActor, kindLabel } from "../../ui/format";
 import { partyName } from "./format";
 import {
@@ -50,6 +56,7 @@ import {
   syncContractValues,
   type ContractSeed,
 } from "./form";
+import { useContractTermination, useRenewalSource } from "./useContractTermination";
 
 const props = defineProps<{
   mode: "create" | "edit";
@@ -76,11 +83,21 @@ const saving = ref(false);
 const fieldErrors = ref<ApiFieldError[]>([]);
 const errorText = ref("");
 const bodyEl = ref<HTMLDivElement | null>(null);
-const renewalSource = ref<Contract | null>(null);
-const renewalSourceMissing = ref(false);
 let unsubscribe: (() => void) | null = null;
 
 const contractId = computed(() => props.contract?.id ?? "");
+
+// 终止三件套与续签来源在 useContractTermination（含早终止预确认）。
+const {
+  terminatedOn,
+  terminationReason,
+  terminationNote,
+  inputExtras: terminationExtras,
+  confirmEarlyRenewal,
+} = useContractTermination(() => props.contract);
+const { renewalSource, renewalSourceMissing, loadRenewalSource } = useRenewalSource(
+  () => props.contract,
+);
 
 const seed = computed<ContractSeed | null>(() => {
   if (props.mode === "edit") {
@@ -248,7 +265,6 @@ const title = computed(() => {
 });
 
 const reusedCount = computed(() => props.renewal?.reused?.length ?? 0);
-const renewalAlreadyClosed = computed(() => renewalSourceMissing.value && !renewalSource.value);
 
 /** 乙方选择器替代内置 party_b 输入框，其余字段仍由字段定义驱动。 */
 const contractFields = computed(() =>
@@ -327,22 +343,32 @@ function showError(error: unknown): void {
   });
 }
 
-async function submit(): Promise<void> {
+async function submit(confirmRenewal = false): Promise<void> {
   if (saving.value) {
     return;
+  }
+  // 续签起租日早于原合同到期日：先在本地确认，避免一次注定失败的请求；
+  // 服务端仍会校验同样的规则，数据在确认后变化时回退到错误确认。
+  if (!confirmRenewal && values.status === "生效") {
+    const confirmed = confirmEarlyRenewal(
+      values.lease_start ?? "",
+      props.renewal?.source ?? renewalSource.value ?? null,
+    );
+    if (confirmed === null) {
+      return;
+    }
+    confirmRenewal = confirmed;
   }
   saving.value = true;
   fieldErrors.value = [];
   errorText.value = "";
-  const input = collectContractInput(
-    props.fields,
-    values,
-    seed.value,
-    partyAID.value,
-    partyBID.value,
-    partyBName.value,
-    assetID.value,
-  );
+  const input = collectContractInput(props.fields, values, seed.value, {
+    partyAID: partyAID.value,
+    partyBID: partyBID.value,
+    partyBName: partyBName.value,
+    assetID: assetID.value,
+    ...terminationExtras(confirmRenewal),
+  });
   try {
     if (props.mode === "edit" && props.contract) {
       const result = await updateContract(props.contract.id, input);
@@ -377,6 +403,18 @@ async function submit(): Promise<void> {
     }
     await refreshAfterWrite();
   } catch (error) {
+    // 续签起租日早于原合同到期日：确认后按新起租日前一天终止原合同，重新保存。
+    if (
+      !confirmRenewal &&
+      error instanceof ApiError &&
+      error.code === "renewal_termination_confirm"
+    ) {
+      saving.value = false;
+      if (window.confirm(error.message)) {
+        await submit(true);
+      }
+      return;
+    }
     saving.value = false;
     showError(error);
   }
@@ -416,19 +454,6 @@ function openSource(): void {
   }
 }
 
-async function loadRenewalSource(): Promise<void> {
-  const sourceId = props.contract?.source_contract_id;
-  if (!sourceId) {
-    return;
-  }
-  try {
-    const source = await getContract(sourceId);
-    renewalSource.value = source.contract;
-  } catch {
-    renewalSourceMissing.value = true;
-  }
-}
-
 // 行内「生成 PDF」入口：生成面板完成首次渲染（模板加载后高度稳定）再滚动。
 function onGenerationReady(): void {
   if (!props.focusGenerate) {
@@ -445,9 +470,7 @@ function onGenerationReady(): void {
 onMounted(() => {
   document.addEventListener("keydown", onKeydown);
   unsubscribe = subscribeChange(onChange);
-  if (props.contract?.source_contract_id) {
-    void loadRenewalSource();
-  }
+  void loadRenewalSource();
 });
 
 onBeforeUnmount(() => {
@@ -477,27 +500,15 @@ onBeforeUnmount(() => {
             <div v-else-if="errorText" class="form-errors">{{ errorText }}</div>
           </div>
 
-          <div
-            v-if="mode === 'edit' && contract && contract.source_contract_id"
-            id="renewalSource"
-            class="renewal-banner"
-          >
-            <template v-if="renewalSource">续签自 <strong>{{ renewalSource.contract_no }}「{{ renewalSource.title }}」</strong>
-              <button type="button" id="openSourceContract" @click="openSource">查看来源合同</button>
-            </template>
-            <template v-else-if="renewalAlreadyClosed">续签来源合同已不存在（来源编号仍保留在本合同记录中）。</template>
-            <template v-else>正在加载续签来源…</template>
-          </div>
-
-          <div v-if="renewal" class="renewal-banner">
-            续签自 <strong>{{ renewal.source.contract_no }}「{{ renewal.source.title }}」</strong>：
-            已带出 {{ reusedCount }} 项信息，均可修改。合同编号自动分配，签订 / 生效 / 到期日期与状态已重置；
-            签名与公章不会沿用，生成 PDF 前需按新内容重新采集。
-          </div>
-          <div v-else-if="partyB" class="renewal-banner">
-            以相对方档案「{{ partyB.name }}」新建合同：
-            仅带出档案信息，不复制旧合同内容；模板与字段由你选择，保存后按正常流程采集签名。
-          </div>
+          <ContractRenewalBanners
+            :show-source="mode === 'edit' && Boolean(contract?.source_contract_id)"
+            :source="renewalSource"
+            :source-missing="renewalSourceMissing"
+            :renewal="renewal"
+            :party-b="partyB"
+            :reused-count="reusedCount"
+            @open-source="openSource"
+          />
 
           <div v-if="mode === 'edit'" class="warning-list">
             合同编号创建后不可修改。修改会写入变更记录。
@@ -542,6 +553,12 @@ onBeforeUnmount(() => {
               :readonly="mode === 'edit' && field.key === 'contract_no'"
               @update:model-value="setFieldValue(field.key, $event)"
             />
+            <TerminationFields
+              v-if="values.status === '已终止'"
+              v-model:terminated-on="terminatedOn"
+              v-model:reason="terminationReason"
+              v-model:note="terminationNote"
+            />
           </div>
 
           <ContractGenerationPanel
@@ -558,7 +575,7 @@ onBeforeUnmount(() => {
           <button v-if="mode === 'edit'" type="button" @click="renew">续签</button>
           <button type="button" @click="emit('close')">取消</button>
           <button v-if="mode === 'edit'" type="button" class="danger" @click="remove">删除</button>
-          <button type="button" class="primary" :disabled="saving" @click="submit">保存</button>
+          <button type="button" class="primary" :disabled="saving" @click="submit()">保存</button>
         </div>
       </div>
     </div>

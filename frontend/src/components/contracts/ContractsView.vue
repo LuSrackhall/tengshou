@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// 合同台账（阶段 1 迁移）：年度/状态/关键词筛选、动态字段列、行操作
-// （生成 PDF / 扫码签名 / 编辑 / 删除）、批量勾选与批量生成、Excel 模板与
-// 台账导出，以及新建/编辑/续签表单的打开逻辑。
+// 合同台账（阶段 1 迁移 + v0.2 生命周期）：年度/状态/关键词筛选、动态字段列、
+// 到期提醒汇总、行操作（生成 PDF / 扫码签名 / 编辑 / 终止 / 删除）、批量勾选
+// 与批量生成、Excel 模板与台账导出，以及新建/编辑/续签表单的打开逻辑。
 //
 // 结构与 app.js renderContracts 的输出一致（toolbar / summary / data-table /
 // actions 类名不变），数据走 frontend/src/api 的 typed 端点。
@@ -55,8 +55,10 @@ import SignatureDialog from "../signatures/SignatureDialog.vue";
 import { useSignatureDialog } from "../signatures/useSignatureDialog";
 import BatchGenerateDialog from "./BatchGenerateDialog.vue";
 import ContractFormModal from "./ContractFormModal.vue";
+import ContractLedgerTable from "./ContractLedgerTable.vue";
+import TerminateContractDialog from "./TerminateContractDialog.vue";
 import { saveDownloadedFile } from "./download";
-import { contractFieldValue, statusLabel } from "./format";
+import { statusLabel } from "./format";
 
 type StatusFilter = "" | ContractStatus;
 
@@ -94,6 +96,7 @@ const loaded = ref(false);
 const selectedIds = ref<string[]>([]);
 const formRequest = ref<FormRequest | null>(null);
 const batchRequest = ref<{ key: number; options: BatchGenerateOptions } | null>(null);
+const terminateRequest = ref<{ key: number; contract: Contract } | null>(null);
 const {
   signRequest,
   open: openSignature,
@@ -103,6 +106,7 @@ const {
 let yearInitialized = false;
 let formSeq = 0;
 let batchSeq = 0;
+let terminateSeq = 0;
 let loadSeq = 0;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
@@ -112,10 +116,25 @@ let unsubBatch: (() => void) | null = null;
 
 const tableFields = computed(() => fields.value.filter((field) => field.in_ledger));
 
+const reminders = computed(() => {
+  let soon = 0;
+  let expired = 0;
+  for (const contract of contracts.value) {
+    if (contract.expiry_state === "expiring") {
+      soon += 1;
+    } else if (contract.expiry_state === "expired") {
+      expired += 1;
+    }
+  }
+  return { soon, expired };
+});
+
 const summary = computed(
   () =>
     `${year.value ? `${year.value} 年度` : "全部年度"} · 共 ${total.value} 份` +
     (statusFilter.value ? ` · 状态：${statusLabel(statusFilter.value)}` : "") +
+    (reminders.value.soon ? ` · 即将到期 ${reminders.value.soon} 份` : "") +
+    (reminders.value.expired ? ` · 已到期未续签 ${reminders.value.expired} 份` : "") +
     (activeQuery.value ? ` · 搜索「${activeQuery.value}」` : ""),
 );
 
@@ -132,15 +151,6 @@ const yearOptions = computed(() => {
 });
 
 const visibleIds = computed(() => contracts.value.map((contract) => contract.id));
-const selectedVisible = computed(
-  () => visibleIds.value.filter((id) => selectedIds.value.includes(id)).length,
-);
-const allSelected = computed(
-  () => visibleIds.value.length > 0 && selectedVisible.value === visibleIds.value.length,
-);
-const indeterminate = computed(
-  () => selectedVisible.value > 0 && selectedVisible.value < visibleIds.value.length,
-);
 const batchLabel = computed(() =>
   selectedIds.value.length
     ? `批量生成 PDF（${selectedIds.value.length}）`
@@ -267,26 +277,11 @@ function toggleSelect(id: string): void {
     : [...selectedIds.value, id];
 }
 
-function toggleAll(event: Event): void {
-  const checked = (event.target as HTMLInputElement).checked;
+function toggleAll(checked: boolean): void {
   const visible = visibleIds.value;
   selectedIds.value = checked
     ? Array.from(new Set([...selectedIds.value, ...visible]))
     : selectedIds.value.filter((id) => !visible.includes(id));
-}
-
-function cellValue(contract: Contract, field: FieldDefinition) {
-  return contractFieldValue(contract, field, parties.value);
-}
-
-function cellClass(contract: Contract, field: FieldDefinition): string {
-  const value = cellValue(contract, field);
-  if (value.badge) {
-    return "";
-  }
-  return [value.mono ? "mono" : "", value.money ? "money" : "", value.wrap ? "wrap" : ""]
-    .filter(Boolean)
-    .join(" ");
 }
 
 function openForm(draft: FormDraft): void {
@@ -352,6 +347,18 @@ function onRenew(contract: Contract): void {
 
 function onOpenContract(contract: Contract): void {
   void openEdit(contract);
+}
+
+function openTerminate(contract: Contract): void {
+  terminateRequest.value = { key: ++terminateSeq, contract };
+}
+
+function closeTerminate(): void {
+  terminateRequest.value = null;
+}
+
+function onTerminated(): void {
+  closeTerminate();
 }
 
 async function remove(contract: Contract): Promise<void> {
@@ -485,6 +492,7 @@ onBeforeUnmount(() => {
       <option value="">全部状态</option>
       <option value="draft">草稿</option>
       <option value="active">生效</option>
+      <option value="terminated">已终止</option>
       <option value="archived">归档</option>
     </select>
     <span class="spacer"></span>
@@ -497,70 +505,20 @@ onBeforeUnmount(() => {
     <button type="button" id="exportLedgerBtn" :title="exportTitle" @click="exportLedger">导出台账</button>
   </div>
   <div id="contractSummary" class="summary">{{ loaded ? summary : "" }}</div>
-  <div class="table-wrap">
-    <table id="contractTable" class="data-table">
-      <template v-if="loaded">
-        <tbody v-if="!tableFields.length">
-          <tr><td class="empty">没有可显示的台账字段，请先在「字段」页新增字段。</td></tr>
-        </tbody>
-        <template v-else>
-          <thead>
-            <tr>
-              <th class="select-col">
-                <input
-                  id="contractSelectAll"
-                  type="checkbox"
-                  title="全选当前台账合同"
-                  aria-label="全选当前台账合同"
-                  :checked="allSelected"
-                  :indeterminate="indeterminate"
-                  @change="toggleAll"
-                >
-              </th>
-              <th v-for="field in tableFields" :key="field.key">{{ field.label }}</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="contract in contracts"
-              :key="contract.id"
-              :data-id="contract.id"
-              @click="openEdit(contract)"
-            >
-              <td class="select-col">
-                <input
-                  type="checkbox"
-                  :data-select="contract.id"
-                  :checked="isSelected(contract.id)"
-                  :aria-label="`选择合同 ${contract.contract_no}`"
-                  @click.stop
-                  @change="toggleSelect(contract.id)"
-                >
-              </td>
-              <td v-for="field in tableFields" :key="field.key" :class="cellClass(contract, field)">
-                <span v-if="cellValue(contract, field).badge" class="badge" :class="cellValue(contract, field).badge">
-                  {{ cellValue(contract, field).text }}
-                </span>
-                <template v-else>{{ cellValue(contract, field).text }}</template>
-              </td>
-              <td>
-                <div class="actions">
-                  <button type="button" data-action="generate" @click.stop="openEdit(contract, true)">生成 PDF</button>
-                  <button type="button" data-action="sign" @click.stop="openSignature(contract)">扫码签名</button>
-                  <button type="button" data-action="edit" @click.stop="openEdit(contract)">编辑</button>
-                  <button type="button" class="danger" data-action="delete" @click.stop="remove(contract)">删除</button>
-                </div>
-              </td>
-            </tr>
-            <tr v-if="!contracts.length">
-              <td class="empty" :colspan="tableFields.length + 2">还没有合同。可以新建，或下载 Excel 模板填写后导入。</td>
-            </tr>
-          </tbody>
-        </template>
-      </template>
-    </table>
-  </div>
+  <ContractLedgerTable
+    :contracts="contracts"
+    :fields="tableFields"
+    :parties="parties"
+    :selected-ids="selectedIds"
+    :loaded="loaded"
+    @toggle-select="toggleSelect"
+    @toggle-all="toggleAll"
+    @edit="openEdit"
+    @remove="remove"
+    @sign="openSignature"
+    @generate="openEdit($event, true)"
+    @terminate="openTerminate"
+  />
   <ContractFormModal
     v-if="formRequest"
     :key="formRequest.key"
@@ -578,6 +536,13 @@ onBeforeUnmount(() => {
     @created="onCreated"
     @renew="onRenew"
     @open-contract="onOpenContract"
+  />
+  <TerminateContractDialog
+    v-if="terminateRequest"
+    :key="terminateRequest.key"
+    :contract="terminateRequest.contract"
+    @close="closeTerminate"
+    @terminated="onTerminated"
   />
   <BatchGenerateDialog
     v-if="batchRequest"

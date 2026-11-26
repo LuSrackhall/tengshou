@@ -63,6 +63,7 @@ a { color: var(--accent); }
 }
 .tabs button.active { background: var(--card); color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
 .meta { margin-left: auto; color: var(--muted); font-size: 13px; display: flex; gap: 12px; flex-wrap: wrap; }
+.meta-warn { color: var(--warn); font-weight: 600; }
 
 main { max-width: 1280px; margin: 0 auto; padding: 22px 28px 64px; }
 .view { display: none; }
@@ -111,6 +112,10 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .badge.active, .badge.create { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-soft); }
 .badge.draft, .badge.update { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: var(--warn-soft); }
 .badge.archived, .badge.unchanged { color: var(--muted); }
+.badge.terminated { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); background: transparent; }
+.badge.expiry { margin-left: 6px; font-weight: 500; }
+.badge.expiry.expiring { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: var(--warn-soft); }
+.badge.expiry.expired { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); background: transparent; }
 .badge.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); background: transparent; }
 .badge.delete, .badge.conflict { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 

@@ -132,6 +132,30 @@ func (s *Store) migrate() error {
 	if err != nil {
 		return fmt.Errorf("load migrations: %w", err)
 	}
+	// SQLite cannot modify an existing CHECK constraint, so migrations that
+	// change one rebuild the table with the official 12-step procedure. That
+	// procedure requires foreign-key enforcement to be off while the old table
+	// is dropped (otherwise ON DELETE actions would rewrite child rows); the
+	// rebuilt table keeps every id, so references stay valid. Enforcement is
+	// restored and verified as soon as the migration ledger is up to date.
+	if _, err := s.db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("disable foreign keys for migrations: %w", err)
+	}
+	if err := s.applyPendingMigrations(migrations); err != nil {
+		if _, ferr := s.db.Exec(`PRAGMA foreign_keys = ON`); ferr != nil {
+			return fmt.Errorf("%w（并且无法恢复外键检查：%v）", err, ferr)
+		}
+		return err
+	}
+	if _, err := s.db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		return fmt.Errorf("enable foreign keys after migrations: %w", err)
+	}
+	return s.checkForeignKeys()
+}
+
+// applyPendingMigrations runs every migration not yet recorded in
+// schema_migrations, one transaction per migration.
+func (s *Store) applyPendingMigrations(migrations []migration) error {
 	if _, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version    INTEGER PRIMARY KEY,
@@ -183,6 +207,26 @@ func (s *Store) migrate() error {
 		}
 	}
 	return nil
+}
+
+// checkForeignKeys verifies referential integrity after migrations. Migrations
+// run with enforcement off (table rebuilds need that), so a dangling reference
+// would otherwise surface only on a later write.
+func (s *Store) checkForeignKeys() error {
+	rows, err := s.db.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("foreign key check: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table, parent string
+		var rowid, fkID sql.NullInt64
+		if err := rows.Scan(&table, &rowid, &parent, &fkID); err != nil {
+			return fmt.Errorf("foreign key check scan: %w", err)
+		}
+		return fmt.Errorf("迁移后外键校验失败：表 %s 有记录引用不存在的 %s", table, parent)
+	}
+	return rows.Err()
 }
 
 // SchemaVersion returns the highest applied migration version.

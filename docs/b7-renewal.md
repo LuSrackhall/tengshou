@@ -72,11 +72,21 @@ D3 把「乙方档案与直接签订」拆成三层：
   时间；合同详情可查看该记录并跳转来源合同。
 - 来源合同被删除后，已创建合同的来源编号仍保留，界面提示来源已不存在。
 
+### 续签联动终止（v0.2）
+
+- 续签合同保存为「生效」时，如果来源合同仍在生效，来源合同自动置为
+  「已终止」（`terminated`），终止原因记为「续签」并写入变更记录；
+  草稿状态的续签合同不会触发。
+- 终止日期默认取来源合同的租赁到期日。若新合同起租日早于来源合同到期日，
+  界面先提示确认，确认后按新起租日的**前一天**终止来源合同；服务端校验同一条
+  规则，未确认的保存返回 `renewal_termination_confirm`（409）。
+- 联动终止会释放房产占用；终止后来源合同仍保留在台账，可按「已终止」筛选。
+
 ## 5. 接口
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/app/api/v1/contracts/{id}/renewal-draft` | 返回 `{source, input, reused}`；`input` 为预填的 `ContractInput` |
+| GET | `/app/api/v1/contracts/{id}/renewal-draft` | 返回 `{source, input, reused}`；`input` 为预填的 `ContractInput`，`source` 带来源合同状态（`status`）、租期与编号，界面仅在来源仍 `active` 时做提前终止预确认 |
 | POST | `/app/api/v1/contracts` | 接受 `source_contract_id`（仅创建时生效） |
 | GET | `/app/api/v1/contracts?party_id=<id>` | 按相对方过滤（甲方或乙方引用），供档案页列历史合同 |
 

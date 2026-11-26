@@ -251,6 +251,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /app/api/v1/contracts", s.handleAppSaveContract)
 	m.HandleFunc("GET /app/api/v1/contracts/years", s.handleAppContractYears)
 	m.HandleFunc("GET /app/api/v1/contracts/{id}/renewal-draft", s.handleAppContractRenewalDraft)
+	m.HandleFunc("POST /app/api/v1/contracts/{id}/terminate", s.handleAppTerminateContract)
 	m.HandleFunc("GET /app/api/v1/contracts/{id}", s.handleAppGetContract)
 	m.HandleFunc("PUT /app/api/v1/contracts/{id}", s.handleAppSaveContract)
 	m.HandleFunc("DELETE /app/api/v1/contracts/{id}", s.handleAppDeleteContract)

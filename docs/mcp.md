@@ -251,7 +251,7 @@ false`）。只读工具标注 `readOnlyHint=true`；写工具标注
 | `tengshou_list_fields` | `entity`（contract / party） | 动态字段定义：类型、必填、选项、默认值、台账 / 模板开关 |
 | `tengshou_list_parties` | `q`、`limit`、`offset` | 搜索相对方档案 |
 | `tengshou_get_party` | `id` | 单个相对方档案（含 `data`） |
-| `tengshou_list_contracts` | `year`、`status`、`q`、`limit`、`offset` | 合同列表；`year` 省略即跨年查询 |
+| `tengshou_list_contracts` | `year`、`status`、`q`、`limit`、`offset` | 合同列表；`status` 支持 draft/active/terminated/archived；`year` 省略即跨年查询 |
 | `tengshou_get_contract` | `id` | 合同详情：双方、模板版本、签名资产、公章关联、PDF 记录 |
 | `tengshou_list_signature_assets` | `contract_id`、`q`、`limit`、`offset` | 签名状态与 `content_sha256`（不含图片内容） |
 | `tengshou_list_templates` | `q`、`limit`、`offset` | 模板列表与版本号（HTML / PDF 两类；不含正文） |
@@ -275,7 +275,7 @@ false`）。只读工具标注 `readOnlyHint=true`；写工具标注
 - 变更记录 actor 固定为 `tengshou-mcp`（`X-Tengshou-MCP` 标记），与桌面 UI
   操作者、`config.json` 的 `operator` 区分。
 - **不提供**删除、修改既有记录、替换公章、归档字段、批量导入等破坏性工具。
-- 合同草稿只能以 `draft` 新建；生效 / 归档仍由用户在桌面应用内完成。
+- 合同草稿只能以 `draft` 新建；生效 / 已终止 / 归档仍由用户在桌面应用内完成。
 
 ### 生成工具的共同约束
 

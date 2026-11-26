@@ -38,6 +38,7 @@ import type {
   PartyInput,
   PartyPhotoSide,
   RenewalDraft,
+  TerminationInput,
 } from "../types";
 
 const enc = encodePathSegment;
@@ -200,6 +201,15 @@ export function getContractYears(
   options: RequestOptions = {},
 ): Promise<ContractYearsResponse> {
   return get("/contracts/years", options);
+}
+
+/** POST /contracts/{id}/terminate：终止生效中的合同（日期与原因必填）。 */
+export function terminateContract(
+  id: string,
+  input: TerminationInput,
+  options: RequestOptions = {},
+): Promise<ItemResponse<Contract>> {
+  return post(`/contracts/${enc(id)}/terminate`, input, options);
 }
 
 /** GET /contracts/{id}/renewal-draft：续签预填草稿（只读）。 */

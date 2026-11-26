@@ -59,7 +59,32 @@ export function fmtDate(iso: string | undefined): string {
 // 与迁移前 app.js 的同名逻辑逐字一致（不改文案与格式）。
 
 export function statusLabel(status: string): string {
-  return status === "active" ? "生效" : status === "archived" ? "归档" : "草稿";
+  switch (status) {
+    case "active":
+      return "生效";
+    case "terminated":
+      return "已终止";
+    case "archived":
+      return "归档";
+    default:
+      return "草稿";
+  }
+}
+
+/** 终止原因展示（service.TerminationReasonLabel）。 */
+export function terminationReasonLabel(reason: string | undefined): string {
+  switch (reason) {
+    case "early":
+      return "提前退租";
+    case "void":
+      return "作废";
+    case "renewal":
+      return "续签";
+    case "other":
+      return "其他";
+    default:
+      return "—";
+  }
 }
 
 export function kindLabel(kind: PartyKind | string): string {

@@ -242,22 +242,25 @@ type Contract struct {
 // seeded by migrations and bound to first-class columns; user fields are
 // stored in the entity's data JSON under Key.
 type FieldDefinition struct {
-	ID           string    `json:"id"`
-	Entity       string    `json:"entity"`
-	Key          string    `json:"key"`
-	Label        string    `json:"label"`
-	Type         string    `json:"type"`
-	Required     bool      `json:"required"`
-	DefaultValue string    `json:"default_value,omitempty"`
-	Options      []string  `json:"options,omitempty"`
-	InLedger     bool      `json:"in_ledger"`
-	InTemplate   bool      `json:"in_template"`
-	BuiltIn      bool      `json:"built_in"`
-	Archived     bool      `json:"archived"`
-	SortOrder    int       `json:"sort_order"`
-	Note         string    `json:"note,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           string   `json:"id"`
+	Entity       string   `json:"entity"`
+	Key          string   `json:"key"`
+	Label        string   `json:"label"`
+	Type         string   `json:"type"`
+	Required     bool     `json:"required"`
+	DefaultValue string   `json:"default_value,omitempty"`
+	Options      []string `json:"options,omitempty"`
+	// Group 是合同表单的可选分组名（te-bzqhx）；空串表示未分组，按
+	// 「其他约定」渲染。内置字段由界面固定归组，不读取该值。
+	Group      string    `json:"group,omitempty"`
+	InLedger   bool      `json:"in_ledger"`
+	InTemplate bool      `json:"in_template"`
+	BuiltIn    bool      `json:"built_in"`
+	Archived   bool      `json:"archived"`
+	SortOrder  int       `json:"sort_order"`
+	Note       string    `json:"note,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // FieldChange is one field-level difference recorded in the change log.

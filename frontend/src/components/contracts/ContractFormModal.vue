@@ -35,13 +35,20 @@ import {
 } from "../../bridge/app";
 import SealSummary from "../seals/SealSummary.vue";
 import SignatureSummary from "../signatures/SignatureSummary.vue";
+import FormErrors from "../../ui/FormErrors.vue";
 import AssetPicker from "./AssetPicker.vue";
 import ContractAuditHistory from "./ContractAuditHistory.vue";
 import ContractFieldControl from "./ContractFieldControl.vue";
+import ContractFormSection from "./ContractFormSection.vue";
 import ContractGenerationPanel from "./ContractGenerationPanel.vue";
 import ContractRenewalBanners from "./ContractRenewalBanners.vue";
 import PartyBPicker from "./PartyBPicker.vue";
 import TerminationFields from "./TerminationFields.vue";
+import {
+  CONTRACT_GROUP_BASIC,
+  contractFormEntryKey,
+  groupContractFields,
+} from "./fieldGroups";
 import {
   defaultPartyAID,
   oneYearLeaseEnd,
@@ -268,10 +275,8 @@ const title = computed(() => {
 
 const reusedCount = computed(() => props.renewal?.reused?.length ?? 0);
 
-/** 乙方选择器替代内置 party_b 输入框，其余字段仍由字段定义驱动。 */
-const contractFields = computed(() =>
-  props.fields.filter((field) => field.key !== "party_b"),
-);
+/** 表单分组（te-bzqhx）：内置字段固定归组，动态字段按 group 归位。 */
+const formGroups = computed(() => groupContractFields(props.fields));
 
 syncContractValues(values, props.fields, seed.value, partyBName.value, props.currentYear);
 syncWordsValues(values, props.fields, seed.value);
@@ -493,14 +498,7 @@ onBeforeUnmount(() => {
         </div>
         <div ref="bodyEl" class="modal-body">
           <div id="contractErrors">
-            <div v-if="fieldErrors.length" class="form-errors">
-              请修正以下问题：<ul>
-                <li v-for="problem in fieldErrors" :key="problem.field">
-                  {{ problem.label || problem.field }}：{{ problem.message }}
-                </li>
-              </ul>
-            </div>
-            <div v-else-if="errorText" class="form-errors">{{ errorText }}</div>
+            <FormErrors :field-errors="fieldErrors" :error-text="errorText" />
           </div>
 
           <ContractRenewalBanners
@@ -524,47 +522,55 @@ onBeforeUnmount(() => {
             <SealSummary :seals="detail.seals" />
           </div>
 
-          <div class="form-grid">
-            <div class="field">
-              <label for="f_contract_party_a">甲方（本方）</label>
-              <select id="f_contract_party_a" v-model="partyAID">
-                <option value="">（未设置）</option>
-                <option v-if="partyAID && !partyAInList" :value="partyAID">{{ partyALabel }}</option>
-                <option v-for="party in parties" :key="party.id" :value="party.id">
-                  {{ party.name }}（{{ kindLabel(party.kind) }}）
-                </option>
-              </select>
-              <span class="help">本方档案默认带出，可切换；模板里的甲方名称、证件号与甲方公章按此档案取用。</span>
-            </div>
-            <PartyBPicker
-              v-model="partyBID"
-              :parties="allParties"
-              :fallback="detail?.party_b ?? null"
-              @created="onPartyCreated"
-            />
-            <AssetPicker
-              v-model="assetID"
-              :assets="allAssets"
-              :fallback="detail?.asset ?? null"
-              @created="onAssetCreated"
-            />
-            <ContractFieldControl
-              v-for="field in contractFields"
-              :key="field.key"
-              :field="field"
-              :model-value="values[field.key] ?? ''"
-              :words-value="values[moneyWordsKey(field.key)] ?? ''"
-              :readonly="mode === 'edit' && field.key === 'contract_no'"
-              @update:model-value="setFieldValue(field.key, $event)"
-              @update:words-value="values[moneyWordsKey(field.key)] = $event"
-            />
+          <ContractFormSection
+            v-for="group in formGroups"
+            :key="group.name"
+            :title="group.name"
+            :data-group="group.name"
+          >
+            <template v-for="entry in group.entries" :key="contractFormEntryKey(entry)">
+              <div v-if="entry.kind === 'party_a'" class="field">
+                <label for="f_contract_party_a">甲方（本方）</label>
+                <select id="f_contract_party_a" v-model="partyAID">
+                  <option value="">（未设置）</option>
+                  <option v-if="partyAID && !partyAInList" :value="partyAID">{{ partyALabel }}</option>
+                  <option v-for="party in parties" :key="party.id" :value="party.id">
+                    {{ party.name }}（{{ kindLabel(party.kind) }}）
+                  </option>
+                </select>
+                <span class="help">本方档案默认带出，可切换；模板里的甲方名称、证件号与甲方公章按此档案取用。</span>
+              </div>
+              <PartyBPicker
+                v-else-if="entry.kind === 'party_b'"
+                v-model="partyBID"
+                :parties="allParties"
+                :fallback="detail?.party_b ?? null"
+                @created="onPartyCreated"
+              />
+              <AssetPicker
+                v-else-if="entry.kind === 'asset'"
+                v-model="assetID"
+                :assets="allAssets"
+                :fallback="detail?.asset ?? null"
+                @created="onAssetCreated"
+              />
+              <ContractFieldControl
+                v-else
+                :field="entry.field"
+                :model-value="values[entry.field.key] ?? ''"
+                :words-value="values[moneyWordsKey(entry.field.key)] ?? ''"
+                :readonly="mode === 'edit' && entry.field.key === 'contract_no'"
+                @update:model-value="setFieldValue(entry.field.key, $event)"
+                @update:words-value="values[moneyWordsKey(entry.field.key)] = $event"
+              />
+            </template>
             <TerminationFields
-              v-if="values.status === '已终止'"
+              v-if="group.name === CONTRACT_GROUP_BASIC && values.status === '已终止'"
               v-model:terminated-on="terminatedOn"
               v-model:reason="terminationReason"
               v-model:note="terminationNote"
             />
-          </div>
+          </ContractFormSection>
 
           <ContractGenerationPanel
             v-if="mode === 'edit' && contract && detail"

@@ -134,6 +134,8 @@ export interface FieldInput {
   required?: boolean;
   default_value?: string;
   options?: string[];
+  /** 合同表单分组；空串表示未分组。更新时省略表示保持原值。 */
+  group?: string;
   in_ledger?: boolean;
   in_template?: boolean;
   sort_order?: number;

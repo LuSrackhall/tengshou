@@ -39,19 +39,20 @@ func (s *Store) PutFieldDefinition(ctx context.Context, f *model.FieldDefinition
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO field_definitions (id, entity, key, label, type, required,
-			default_value, options_json, in_ledger, in_template, built_in, archived,
+			default_value, options_json, group_name, in_ledger, in_template, built_in, archived,
 			sort_order, note, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			entity = excluded.entity, key = excluded.key, label = excluded.label,
 			type = excluded.type, required = excluded.required,
 			default_value = excluded.default_value, options_json = excluded.options_json,
+			group_name = excluded.group_name,
 			in_ledger = excluded.in_ledger, in_template = excluded.in_template,
 			built_in = excluded.built_in, archived = excluded.archived,
 			sort_order = excluded.sort_order, note = excluded.note,
 			updated_at = excluded.updated_at`,
 		f.ID, f.Entity, f.Key, f.Label, f.Type, boolInt(f.Required), f.DefaultValue,
-		string(options), boolInt(f.InLedger), boolInt(f.InTemplate), boolInt(f.BuiltIn),
+		string(options), f.Group, boolInt(f.InLedger), boolInt(f.InTemplate), boolInt(f.BuiltIn),
 		boolInt(f.Archived), f.SortOrder, f.Note,
 		formatTime(f.CreatedAt), formatTime(f.UpdatedAt))
 	if err != nil {

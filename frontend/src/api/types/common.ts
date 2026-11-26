@@ -87,6 +87,7 @@ export const CHANGE_ENTITIES = [
   "backup",
   "settings",
   "import",
+  "migration",
 ] as const;
 
 export type ChangeEntity = (typeof CHANGE_ENTITIES)[number];

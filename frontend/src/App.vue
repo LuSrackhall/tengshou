@@ -111,6 +111,12 @@ onBeforeUnmount(() => {
         <span>相对方 {{ stats?.parties || 0 }} 个</span>
         <span>公章 {{ stats?.seals || 0 }} 枚</span>
         <span>字段 {{ stats?.fields || 0 }} 个</span>
+        <span v-if="stats?.expiring_contracts" class="meta-warn">
+          即将到期 {{ stats.expiring_contracts }} 份
+        </span>
+        <span v-if="stats?.expired_contracts" class="meta-warn">
+          已到期未续签 {{ stats.expired_contracts }} 份
+        </span>
         <span :title="`应用版本（数据格式 v${bootstrap.schema_version || ''}）`">版本 {{ bootstrap.version || "未知" }}</span>
       </template>
     </div>

@@ -79,7 +79,7 @@ func toolDefinitions() []toolDefinition {
 			"查询合同列表，可按年度、状态与关键词筛选并分页。合同编号 contract_no 稳定唯一。",
 			objectSchema(map[string]any{
 				"year":   intProp("合同年度，例如 2026；省略即跨年查询"),
-				"status": enumProp("draft", "active", "archived", "合同状态；省略为全部"),
+				"status": enumProp("draft", "active", "terminated", "archived", "合同状态；省略为全部"),
 				"q":      stringProp("关键词（合同编号 / 名称 / 相对方名称）"),
 				"limit":  intProp("每页条数，1～500，默认 50"),
 				"offset": intProp("偏移量，默认 0"),
@@ -407,10 +407,10 @@ func (s *Server) toolListContracts(ctx context.Context, args json.RawMessage) (j
 	}
 	if status := strings.TrimSpace(in.Status); status != "" {
 		switch status {
-		case "draft", "active", "archived":
+		case "draft", "active", "terminated", "archived":
 			q.Set("status", status)
 		default:
-			return nil, fmt.Errorf("status 只能是 draft / active / archived")
+			return nil, fmt.Errorf("status 只能是 draft / active / terminated / archived")
 		}
 	}
 	return s.api.Get(ctx, "/api/v1/contracts", q)

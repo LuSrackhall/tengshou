@@ -82,12 +82,12 @@ func scanContract(sc scanner) (model.Contract, error) {
 	var c model.Contract
 	var templateID, partyAID, partyBID, assetID sql.NullString
 	var contractNo, title, ctype, status, signedOn, validFrom, validTo string
-	var leaseStart, leaseEnd, dataJSON string
+	var leaseStart, leaseEnd, terminatedOn, terminationReason, terminationNote, dataJSON string
 	var sourceContractID, createdAt, updatedAt string
 	if err := sc.Scan(&c.ID, &contractNo, &c.Year, &title, &ctype, &templateID,
 		&partyAID, &partyBID, &assetID, &status, &signedOn, &validFrom, &validTo,
-		&leaseStart, &leaseEnd, &c.Amount, &dataJSON, &sourceContractID,
-		&createdAt, &updatedAt); err != nil {
+		&leaseStart, &leaseEnd, &terminatedOn, &terminationReason, &terminationNote,
+		&c.Amount, &dataJSON, &sourceContractID, &createdAt, &updatedAt); err != nil {
 		return c, err
 	}
 	c.ContractNo, c.Title, c.Type, c.Status = contractNo, title, ctype, status
@@ -95,6 +95,8 @@ func scanContract(sc scanner) (model.Contract, error) {
 	c.AssetID = assetID.String
 	c.SignedOn, c.ValidFrom, c.ValidTo = signedOn, validFrom, validTo
 	c.LeaseStart, c.LeaseEnd = leaseStart, leaseEnd
+	c.TerminatedOn, c.TerminationReason, c.TerminationNote = terminatedOn, terminationReason, terminationNote
+	c.ExpiryState = deriveExpiryState(status, leaseEnd, time.Now().UTC())
 	c.Data = parseJSONMap(dataJSON)
 	c.SourceContractID = sourceContractID
 	c.CreatedAt, c.UpdatedAt = parseTime(createdAt), parseTime(updatedAt)
@@ -103,8 +105,8 @@ func scanContract(sc scanner) (model.Contract, error) {
 
 const contractColumns = `id, contract_no, year, title, type, template_id, party_a_id,
 	party_b_id, asset_id, status, signed_on, valid_from, valid_to,
-	lease_start, lease_end, amount, data_json, source_contract_id,
-	created_at, updated_at`
+	lease_start, lease_end, terminated_on, termination_reason, termination_note,
+	amount, data_json, source_contract_id, created_at, updated_at`
 
 func scanSignature(sc scanner) (model.Signature, error) {
 	var sig model.Signature

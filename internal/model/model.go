@@ -31,11 +31,33 @@ const (
 	LeaseStatusVacant = "vacant"
 )
 
-// Contract statuses.
+// Contract statuses. A terminated contract stays in the ledger: termination is
+// an explicit act recorded with a date and a reason, while lease expiry alone
+// never changes the status or releases the asset (te-l0hh0 D4).
 const (
-	ContractDraft    = "draft"
-	ContractActive   = "active"
-	ContractArchived = "archived"
+	ContractDraft      = "draft"
+	ContractActive     = "active"
+	ContractTerminated = "terminated"
+	ContractArchived   = "archived"
+)
+
+// Termination reasons. Renewal is set by the server when a renewal contract
+// takes effect; the other values are chosen by the user.
+const (
+	TerminationReasonEarly   = "early"   // 提前退租
+	TerminationReasonVoid    = "void"    // 作废
+	TerminationReasonRenewal = "renewal" // 续签联动
+	TerminationReasonOther   = "other"   // 其他
+)
+
+// Lease expiry reminder states are derived at read time for active contracts
+// only. They are labels, never stored and never trigger a status change.
+const (
+	ExpiryStateExpiring = "expiring" // 30 天内到期
+	ExpiryStateExpired  = "expired"  // 已到期未续签
+	// ExpiryReminderDays is the "about to expire" window used by the ledger,
+	// the home stats and derived expiry_state.
+	ExpiryReminderDays = 30
 )
 
 // Field definition entities. Field definitions make the data model
@@ -193,10 +215,20 @@ type Contract struct {
 	ValidTo   string `json:"valid_to,omitempty"`
 	// LeaseStart / LeaseEnd are the rental period (YYYY-MM-DD). Empty on
 	// historical rows; such contracts are skipped by overlap checks.
-	LeaseStart string         `json:"lease_start,omitempty"`
-	LeaseEnd   string         `json:"lease_end,omitempty"`
-	Amount     float64        `json:"amount"`
-	Data       map[string]any `json:"data"`
+	LeaseStart string `json:"lease_start,omitempty"`
+	LeaseEnd   string `json:"lease_end,omitempty"`
+	// TerminatedOn / TerminationReason are set only while status is
+	// terminated. They are lifecycle metadata, not contract text, so they are
+	// deliberately excluded from ContentSHA256 (a termination does not
+	// invalidate an existing signature).
+	TerminatedOn      string `json:"terminated_on,omitempty"`
+	TerminationReason string `json:"termination_reason,omitempty"`
+	TerminationNote   string `json:"termination_note,omitempty"`
+	// ExpiryState is derived at read time (expiring / expired) for active
+	// contracts with a lease end date. It is never stored.
+	ExpiryState string         `json:"expiry_state,omitempty"`
+	Amount      float64        `json:"amount"`
+	Data        map[string]any `json:"data"`
 	// SourceContractID records the contract this one was renewed from (B7).
 	// It is provenance metadata: set once at creation, never changed, and
 	// deliberately excluded from ContentSHA256 so an existing signature's
@@ -487,6 +519,11 @@ type Stats struct {
 	Seals      int `json:"seals"`
 	Documents  int `json:"documents"`
 	Fields     int `json:"fields"`
+	// ExpiringContracts / ExpiredContracts count active contracts whose lease
+	// ends within ExpiryReminderDays / has already ended. They are reminders
+	// only: nothing is changed automatically.
+	ExpiringContracts int `json:"expiring_contracts"`
+	ExpiredContracts  int `json:"expired_contracts"`
 }
 
 // List is the JSON envelope for paginated collections.

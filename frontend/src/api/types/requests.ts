@@ -31,6 +31,7 @@ import type {
   PartyKind,
   Placement,
   TemplateKind,
+  TerminationReason,
 } from "./records";
 
 // ---------- 相对方 ----------
@@ -83,6 +84,12 @@ export interface ContractInput {
   valid_to?: string;
   lease_start?: string;
   lease_end?: string;
+  /** 状态为 terminated 时必填；离开该状态时后端清空。 */
+  terminated_on?: string;
+  termination_reason?: TerminationReason;
+  termination_note?: string;
+  /** 续签起租日早于原合同到期日时，确认后置 true 重新保存。 */
+  renewal_termination_confirm?: boolean;
   amount?: number;
   template_id?: string;
   /** 仅新建时生效的续签来源。 */
@@ -92,6 +99,13 @@ export interface ContractInput {
   create_party?: boolean;
 }
 
+/** TerminationInput：台账「终止」动作的请求体（POST /contracts/{id}/terminate）。 */
+export interface TerminationInput {
+  terminated_on: string;
+  reason: TerminationReason;
+  note?: string;
+}
+
 /** 续签草稿（service.RenewalDraft）；只读，不落库。 */
 export interface RenewalDraft {
   source: {
@@ -99,6 +113,8 @@ export interface RenewalDraft {
     contract_no: string;
     title: string;
     year: number;
+    lease_start?: string;
+    lease_end?: string;
   };
   input: ContractInput;
   /** 已从原合同带入的字段 key，供界面展示。 */

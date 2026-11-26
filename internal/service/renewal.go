@@ -14,6 +14,10 @@ type RenewalSource struct {
 	ContractNo string `json:"contract_no"`
 	Title      string `json:"title"`
 	Year       int    `json:"year"`
+	// LeaseStart / LeaseEnd let the form ask for the earlier-termination
+	// confirmation before submitting; the server still validates it.
+	LeaseStart string `json:"lease_start,omitempty"`
+	LeaseEnd   string `json:"lease_end,omitempty"`
 }
 
 // RenewalDraft is the prefilled new-contract payload for B7 repeat signing.
@@ -98,6 +102,7 @@ func (s *Service) RenewalDraft(ctx context.Context, contractID string) (RenewalD
 		Source: RenewalSource{
 			ID: source.ID, ContractNo: source.ContractNo,
 			Title: source.Title, Year: source.Year,
+			LeaseStart: source.LeaseStart, LeaseEnd: source.LeaseEnd,
 		},
 		Input:  input,
 		Reused: reused,

@@ -84,7 +84,7 @@ func (s *Store) PutContract(ctx context.Context, c *model.Contract) error {
 		c.Status = model.ContractDraft
 	}
 	switch c.Status {
-	case model.ContractDraft, model.ContractActive, model.ContractArchived:
+	case model.ContractDraft, model.ContractActive, model.ContractTerminated, model.ContractArchived:
 	default:
 		return fmt.Errorf("invalid contract status %q", c.Status)
 	}
@@ -109,9 +109,9 @@ func (s *Store) PutContract(ctx context.Context, c *model.Contract) error {
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO contracts (id, contract_no, year, title, type, template_id, party_a_id,
 			party_b_id, asset_id, status, signed_on, valid_from, valid_to,
-			lease_start, lease_end, amount, data_json, source_contract_id,
-			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			lease_start, lease_end, terminated_on, termination_reason, termination_note,
+			amount, data_json, source_contract_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			contract_no = excluded.contract_no, year = excluded.year,
 			title = excluded.title, type = excluded.type,
@@ -121,11 +121,15 @@ func (s *Store) PutContract(ctx context.Context, c *model.Contract) error {
 			status = excluded.status, signed_on = excluded.signed_on,
 			valid_from = excluded.valid_from, valid_to = excluded.valid_to,
 			lease_start = excluded.lease_start, lease_end = excluded.lease_end,
+			terminated_on = excluded.terminated_on,
+			termination_reason = excluded.termination_reason,
+			termination_note = excluded.termination_note,
 			amount = excluded.amount,
 			data_json = excluded.data_json, updated_at = excluded.updated_at`,
 		c.ID, c.ContractNo, c.Year, c.Title, c.Type, nullString(c.TemplateID),
 		nullString(c.PartyAID), nullString(c.PartyBID), nullString(c.AssetID),
 		c.Status, c.SignedOn, c.ValidFrom, c.ValidTo, c.LeaseStart, c.LeaseEnd,
+		c.TerminatedOn, c.TerminationReason, c.TerminationNote,
 		c.Amount, string(data), c.SourceContractID,
 		formatTime(c.CreatedAt), formatTime(c.UpdatedAt))
 	if err != nil {

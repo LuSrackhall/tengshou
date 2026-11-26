@@ -5,7 +5,12 @@
 //   - 续签草稿：带出原合同值，编号/日期/状态重置（REUSE-7 语义不变）；
 //   - 提交：内置字段直接映射到一级字段，自定义字段进 data，空串照旧提交。
 
-import type { ContractInput, FieldDefinition, RenewalDraft } from "../../api/types";
+import type {
+  ContractInput,
+  FieldDefinition,
+  RenewalDraft,
+  TerminationReason,
+} from "../../api/types";
 import { statusLabel } from "./format";
 
 /** 表单初值与提交所需的合同片段；Contract 与续签草稿都满足。 */
@@ -25,6 +30,9 @@ export interface ContractSeed {
   lease_start?: string;
   lease_end?: string;
   status?: string;
+  terminated_on?: string;
+  termination_reason?: string;
+  termination_note?: string;
   data?: Record<string, unknown>;
 }
 
@@ -136,6 +144,18 @@ export function syncContractValues(
   }
 }
 
+/** collectContractInput 的选档/终止扩展：非字段定义驱动的值在这里汇入。 */
+export interface ContractInputExtras {
+  partyAID: string;
+  partyBID: string;
+  partyBName: string;
+  assetID: string;
+  terminatedOn?: string;
+  terminationReason?: string;
+  terminationNote?: string;
+  renewalTerminationConfirm?: boolean;
+}
+
 /**
  * 表单值转 ContractInput（app.js collectContractInput）。
  * party_a_id 取合同表单的「甲方（本方）」下拉，为空时回退 seed；
@@ -145,15 +165,12 @@ export function collectContractInput(
   fields: FieldDefinition[],
   values: Record<string, string>,
   seed: ContractSeed | null,
-  partyAID: string,
-  partyBID: string,
-  partyBName: string,
-  assetID: string,
+  extras: ContractInputExtras,
 ): ContractInput {
   const input: ContractInput = {
     data: {},
-    party_a_id: partyAID || seed?.party_a_id || "",
-    asset_id: assetID || seed?.asset_id || "",
+    party_a_id: extras.partyAID || seed?.party_a_id || "",
+    asset_id: extras.assetID || seed?.asset_id || "",
     template_id: seed?.template_id ?? "",
     year: 0,
     title: "",
@@ -205,8 +222,22 @@ export function collectContractInput(
     }
   }
   input.data = data;
-  if (partyBID && input.party_b && input.party_b === partyBName) {
-    input.party_b_id = partyBID;
+  if (extras.partyBID && input.party_b && input.party_b === extras.partyBName) {
+    input.party_b_id = extras.partyBID;
+  }
+  if (extras.terminatedOn !== undefined) {
+    input.terminated_on = extras.terminatedOn.trim();
+  }
+  if (extras.terminationReason !== undefined) {
+    input.termination_reason = extras.terminationReason
+      ? (extras.terminationReason as TerminationReason)
+      : undefined;
+  }
+  if (extras.terminationNote !== undefined) {
+    input.termination_note = extras.terminationNote.trim();
+  }
+  if (extras.renewalTerminationConfirm) {
+    input.renewal_termination_confirm = true;
   }
   return input;
 }

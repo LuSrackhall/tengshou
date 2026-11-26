@@ -28,21 +28,32 @@ type ContractInput struct {
 	// AssetID links the contract to one property archive (v0.2 three-party
 	// model). Empty is allowed for historical contracts; an update that omits
 	// it keeps the existing link.
-	AssetID    string  `json:"asset_id"`
-	Status     string  `json:"status"`
-	SignedOn   string  `json:"signed_on"`
-	ValidFrom  string  `json:"valid_from"`
-	ValidTo    string  `json:"valid_to"`
-	LeaseStart string  `json:"lease_start"`
-	LeaseEnd   string  `json:"lease_end"`
-	Amount     float64 `json:"amount"`
-	TemplateID string  `json:"template_id"`
+	AssetID    string `json:"asset_id"`
+	Status     string `json:"status"`
+	SignedOn   string `json:"signed_on"`
+	ValidFrom  string `json:"valid_from"`
+	ValidTo    string `json:"valid_to"`
+	LeaseStart string `json:"lease_start"`
+	LeaseEnd   string `json:"lease_end"`
+	// TerminatedOn / TerminationReason / TerminationNote are required (date
+	// and reason) while Status is "已终止": 提前退租 / 作废 / 其他, plus 续签
+	// written by the renewal linkage. They are cleared when the contract leaves
+	// the terminated state.
+	TerminatedOn      string  `json:"terminated_on"`
+	TerminationReason string  `json:"termination_reason"`
+	TerminationNote   string  `json:"termination_note"`
+	Amount            float64 `json:"amount"`
+	TemplateID        string  `json:"template_id"`
 	// SourceContractID records the contract a new contract is renewed from
 	// (B7 provenance). It is only honored when creating; updates ignore it.
-	SourceContractID string         `json:"source_contract_id,omitempty"`
-	Data             map[string]any `json:"data"`
-	Source           string         `json:"-"`
-	CreateParty      *bool          `json:"create_party,omitempty"`
+	SourceContractID string `json:"source_contract_id,omitempty"`
+	// RenewalTerminationConfirm acknowledges ending the renewal source earlier
+	// than its lease end: the source is then terminated the day before the new
+	// lease starts instead of on the source lease end date.
+	RenewalTerminationConfirm bool           `json:"renewal_termination_confirm,omitempty"`
+	Data                      map[string]any `json:"data"`
+	Source                    string         `json:"-"`
+	CreateParty               *bool          `json:"create_party,omitempty"`
 }
 
 // SaveContract creates or updates a contract. Contract numbers are allocated
@@ -84,6 +95,13 @@ func (s *Service) SaveContract(ctx context.Context, in ContractInput) (model.Con
 	if err != nil {
 		return model.Contract{}, nil, err
 	}
+	// Renewal linkage (te-x54oj): an active renewal contract terminates its
+	// source contract. buildContract already rejected the save when the earlier
+	// start date needs confirmation, so this call never prompts; it is
+	// idempotent, so retrying a save after a partial failure converges.
+	if err := s.linkRenewalTermination(ctx, &contract, in.RenewalTerminationConfirm); err != nil {
+		return model.Contract{}, nil, err
+	}
 
 	action := model.ChangeActionCreate
 	prefix := ""
@@ -95,6 +113,11 @@ func (s *Service) SaveContract(ctx context.Context, in ContractInput) (model.Con
 	if existing != nil {
 		action = model.ChangeActionUpdate
 		summary = fmt.Sprintf("%s修改合同 %s「%s」", prefix, contract.ContractNo, contract.Title)
+		if existing.Status != model.ContractTerminated && contract.Status == model.ContractTerminated {
+			summary = fmt.Sprintf("%s终止合同 %s「%s」（%s：%s）", prefix,
+				contract.ContractNo, contract.Title,
+				TerminationReasonLabel(contract.TerminationReason), contract.TerminatedOn)
+		}
 		changes = s.diffContract(ctx, existing, &contract)
 	} else {
 		changes = s.contractChanges(ctx, &contract)
@@ -135,6 +158,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 	// and never copies signatures, seals or documents from the source; a new
 	// contract must collect its own signatures before generation.
 	sourceNo := ""
+	var renewalSource *model.Contract
 	if existing == nil {
 		if sourceID := strings.TrimSpace(in.SourceContractID); sourceID != "" {
 			source, err := s.rd.GetContract(ctx, sourceID)
@@ -146,6 +170,16 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 			}
 			contract.SourceContractID = sourceID
 			sourceNo = source.ContractNo
+			renewalSource = &source
+		}
+	} else if existing.SourceContractID != "" {
+		// Updates keep the create-only link; the row is read once here so the
+		// renewal confirmation and overlap check can reason about it.
+		source, err := s.rd.GetContract(ctx, existing.SourceContractID)
+		if err == nil {
+			renewalSource = &source
+		} else if !isNotFound(err) {
+			return model.Contract{}, "", nil, err
 		}
 	}
 
@@ -208,7 +242,7 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 	} else if status, ok := normalizeStatus(in.Status); ok {
 		contract.Status = status
 	} else {
-		validation.add(model.FieldStatus, "状态", "只能是 草稿 / 生效 / 归档")
+		validation.add(model.FieldStatus, "状态", "只能是 草稿 / 生效 / 已终止 / 归档")
 	}
 	if contract.Status == "" {
 		contract.Status = model.ContractDraft
@@ -236,6 +270,42 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 	if contract.LeaseStart != "" && contract.LeaseEnd != "" &&
 		contract.LeaseEnd < contract.LeaseStart {
 		validation.add(model.FieldLeaseEnd, "租赁到期日", "不能早于租赁起租日")
+	}
+
+	// Termination is explicit and complete: the date and reason are mandatory
+	// while the status is terminated, and cleared for every other status.
+	if contract.Status == model.ContractTerminated {
+		rawTerminatedOn := strings.TrimSpace(in.TerminatedOn)
+		if rawTerminatedOn == "" && existing != nil {
+			rawTerminatedOn = existing.TerminatedOn
+		}
+		terminatedOn, ok := normalizeDate(rawTerminatedOn)
+		if !ok {
+			validation.add("terminated_on", "终止日期", "日期格式应为 YYYY-MM-DD")
+		} else if terminatedOn == "" {
+			validation.add("terminated_on", "终止日期", "状态为已终止时不能为空")
+		} else if contract.LeaseStart != "" && terminatedOn < contract.LeaseStart {
+			validation.add("terminated_on", "终止日期", "不能早于租赁起租日")
+		}
+		contract.TerminatedOn = terminatedOn
+
+		rawReason := strings.TrimSpace(in.TerminationReason)
+		if rawReason == "" && existing != nil {
+			rawReason = existing.TerminationReason
+		}
+		reason, ok := normalizeTerminationReason(rawReason)
+		if !ok {
+			validation.add("termination_reason", "终止原因", "请选择 提前退租 / 作废 / 其他")
+		} else {
+			contract.TerminationReason = reason
+		}
+		// The form always submits the note, so an empty value is an explicit
+		// clear; only create/partial callers omit it (zero value).
+		contract.TerminationNote = truncateRunes(strings.TrimSpace(in.TerminationNote), 500)
+	} else {
+		contract.TerminatedOn = ""
+		contract.TerminationReason = ""
+		contract.TerminationNote = ""
 	}
 
 	if math.IsNaN(in.Amount) || math.IsInf(in.Amount, 0) || in.Amount < 0 {
@@ -353,9 +423,31 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 				"已存在相同年度、相对方和名称的合同（编号 %s），请确认不是重复录入", other.ContractNo))
 		}
 	}
-	// v0.2 basic occupancy hint: the hard overlap validation (and explicit
-	// termination) lands in te-x54oj. Here a conflicting lease only warns, so
-	// legacy data and the current single-step form keep saving.
+	// Renewal linkage (te-x54oj): an effective renewal contract ends its
+	// still-active source. The termination date defaults to the source lease
+	// end. When the new lease starts before that date the user must confirm
+	// the earlier end; the confirmed date is the day before the new start.
+	linkRenewal := false
+	if contract.Status == model.ContractActive && contract.SourceContractID != "" &&
+		renewalSource != nil && renewalSource.ID != contract.ID &&
+		renewalSource.Status == model.ContractActive {
+		date, needsConfirm, err := s.renewalTerminationDate(*renewalSource, contract, in.RenewalTerminationConfirm)
+		if err != nil {
+			return model.Contract{}, "", nil, err
+		}
+		if needsConfirm {
+			return model.Contract{}, "", nil, business("renewal_termination_confirm",
+				"续签合同起租日 %s 早于原合同 %s 的租赁到期日 %s。确认后原合同将于 %s 终止（新租期起租日前一天），请确认后重新保存",
+				contract.LeaseStart, renewalSource.ContractNo, renewalSource.LeaseEnd, date)
+		}
+		linkRenewal = true
+	}
+
+	// Asset occupancy (te-x54oj): saving an effective (active) contract whose
+	// lease period overlaps another effective, non-terminated contract for the
+	// same asset is blocked. Historical rows without a complete lease period do
+	// not participate and only produce a reminder. The renewal source is
+	// excluded because the renewal linkage terminates it in this same save.
 	if contract.AssetID != "" {
 		exclude := ""
 		if existing != nil {
@@ -371,23 +463,48 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 		}
 		active := []string{}
 		overlaps := []string{}
+		legacy := []string{}
 		for _, other := range others {
-			if other.Status == model.ContractActive {
-				active = append(active, other.ContractNo)
+			if linkRenewal && other.ID == renewalSource.ID {
+				continue
 			}
+			if other.Status != model.ContractActive {
+				continue
+			}
+			if other.LeaseStart == "" || other.LeaseEnd == "" {
+				legacy = append(legacy, other.ContractNo)
+				continue
+			}
+			active = append(active, other.ContractNo)
 			if leasePeriodsOverlap(contract, other) {
 				overlaps = append(overlaps, other.ContractNo)
 			}
 		}
-		if len(active) > 0 {
+		if contract.Status == model.ContractActive {
+			if contract.LeaseStart == "" || contract.LeaseEnd == "" {
+				warnings = append(warnings, fmt.Sprintf(
+					"本合同未填写完整租期（起租日/到期日），未做租期重叠硬校验；请补全后再改为生效",
+				))
+			}
+			if len(overlaps) > 0 {
+				return model.Contract{}, "", nil, business("lease_conflict",
+					"房产「%s」的租期与生效合同（编号 %s）重叠，不能保存；请先终止冲突合同或调整租期",
+					label, strings.Join(overlaps, "、"))
+			}
+			if len(active) > 0 {
+				warnings = append(warnings, fmt.Sprintf(
+					"房产「%s」当前有生效中的合同（编号 %s），请确认不是同一租期内的重复录入",
+					label, strings.Join(active, "、")))
+			}
+		} else if len(overlaps) > 0 {
 			warnings = append(warnings, fmt.Sprintf(
-				"房产「%s」当前有生效中的合同（编号 %s），请确认不是同一租期内的重复录入",
-				label, strings.Join(active, "、")))
+				"房产「%s」的租期与生效合同（编号 %s）重叠；合同改为「生效」时将被拦截",
+				label, strings.Join(overlaps, "、")))
 		}
-		if len(overlaps) > 0 {
+		if len(legacy) > 0 {
 			warnings = append(warnings, fmt.Sprintf(
-				"该房产的租期与合同 %s 重叠；当前仅提示，保存不受影响",
-				strings.Join(overlaps, "、")))
+				"房产「%s」的合同（编号 %s）缺少完整租赁日期，未参与租期重叠校验",
+				label, strings.Join(legacy, "、")))
 		}
 	}
 	return contract, sourceNo, warnings, nil
@@ -526,6 +643,9 @@ func (s *Service) diffContract(ctx context.Context, before, after *model.Contrac
 	newName := s.partyName(ctx, after.PartyBID)
 	labels := s.fieldLabels(ctx, model.FieldEntityContract)
 	labels[model.FieldAssetID] = "房产"
+	labels["terminated_on"] = "终止日期"
+	labels["termination_reason"] = "终止原因"
+	labels["termination_note"] = "终止备注"
 	return diffValueMaps(
 		s.contractValues(ctx, before, oldName),
 		s.contractValues(ctx, after, newName),
@@ -570,6 +690,11 @@ func (s *Service) contractValues(ctx context.Context, contract *model.Contract, 
 		model.FieldLeaseStart: contract.LeaseStart,
 		model.FieldLeaseEnd:   contract.LeaseEnd,
 		model.FieldStatus:     StatusLabel(contract.Status),
+		// Lifecycle metadata is diffed like any other column so the change log
+		// records terminations and renewal linkage field by field.
+		"terminated_on":      contract.TerminatedOn,
+		"termination_reason": TerminationReasonLabel(contract.TerminationReason),
+		"termination_note":   contract.TerminationNote,
 	}
 	fields, err := s.rd.ListFieldDefinitions(ctx, model.FieldEntityContract, true)
 	if err != nil {

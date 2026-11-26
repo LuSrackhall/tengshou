@@ -40,8 +40,16 @@ import AssetPicker from "./AssetPicker.vue";
 import ContractAuditHistory from "./ContractAuditHistory.vue";
 import ContractFieldControl from "./ContractFieldControl.vue";
 import ContractGenerationPanel from "./ContractGenerationPanel.vue";
+import ContractRenewalBanners from "./ContractRenewalBanners.vue";
 import PartyBPicker from "./PartyBPicker.vue";
-import { defaultPartyAID, oneYearLeaseEnd, rememberPartyA, todayISO } from "./lease";
+import TerminationFields from "./TerminationFields.vue";
+import {
+  defaultPartyAID,
+  earlyRenewalTerminationPrompt,
+  oneYearLeaseEnd,
+  rememberPartyA,
+  todayISO,
+} from "./lease";
 import { isAgentActor, kindLabel } from "../../ui/format";
 import { partyName } from "./format";
 import {
@@ -81,6 +89,11 @@ const renewalSourceMissing = ref(false);
 let unsubscribe: (() => void) | null = null;
 
 const contractId = computed(() => props.contract?.id ?? "");
+
+// 「已终止」附加字段：编辑时带出，新建时为空；离开该状态不提交。
+const terminatedOn = ref(props.contract?.terminated_on ?? "");
+const terminationReason = ref(props.contract?.termination_reason ?? "");
+const terminationNote = ref(props.contract?.termination_note ?? "");
 
 const seed = computed<ContractSeed | null>(() => {
   if (props.mode === "edit") {
@@ -248,7 +261,6 @@ const title = computed(() => {
 });
 
 const reusedCount = computed(() => props.renewal?.reused?.length ?? 0);
-const renewalAlreadyClosed = computed(() => renewalSourceMissing.value && !renewalSource.value);
 
 /** 乙方选择器替代内置 party_b 输入框，其余字段仍由字段定义驱动。 */
 const contractFields = computed(() =>
@@ -327,22 +339,38 @@ function showError(error: unknown): void {
   });
 }
 
-async function submit(): Promise<void> {
+async function submit(confirmRenewal = false): Promise<void> {
   if (saving.value) {
     return;
+  }
+  // 续签起租日早于原合同到期日：先在本地确认，避免一次注定失败的请求；
+  // 服务端仍会校验同样的规则，数据在确认后变化时回退到错误确认。
+  if (!confirmRenewal && values.status === "生效") {
+    const prompt = earlyRenewalTerminationPrompt(
+      values.lease_start ?? "",
+      props.renewal?.source.lease_end ?? renewalSource.value?.lease_end ?? "",
+      props.renewal?.source.contract_no ?? renewalSource.value?.contract_no ?? "",
+    );
+    if (prompt) {
+      if (!window.confirm(prompt)) {
+        return;
+      }
+      confirmRenewal = true;
+    }
   }
   saving.value = true;
   fieldErrors.value = [];
   errorText.value = "";
-  const input = collectContractInput(
-    props.fields,
-    values,
-    seed.value,
-    partyAID.value,
-    partyBID.value,
-    partyBName.value,
-    assetID.value,
-  );
+  const input = collectContractInput(props.fields, values, seed.value, {
+    partyAID: partyAID.value,
+    partyBID: partyBID.value,
+    partyBName: partyBName.value,
+    assetID: assetID.value,
+    terminatedOn: terminatedOn.value,
+    terminationReason: terminationReason.value,
+    terminationNote: terminationNote.value,
+    renewalTerminationConfirm: confirmRenewal,
+  });
   try {
     if (props.mode === "edit" && props.contract) {
       const result = await updateContract(props.contract.id, input);
@@ -377,6 +405,18 @@ async function submit(): Promise<void> {
     }
     await refreshAfterWrite();
   } catch (error) {
+    // 续签起租日早于原合同到期日：确认后按新起租日前一天终止原合同，重新保存。
+    if (
+      !confirmRenewal &&
+      error instanceof ApiError &&
+      error.code === "renewal_termination_confirm"
+    ) {
+      saving.value = false;
+      if (window.confirm(error.message)) {
+        await submit(true);
+      }
+      return;
+    }
     saving.value = false;
     showError(error);
   }
@@ -477,27 +517,15 @@ onBeforeUnmount(() => {
             <div v-else-if="errorText" class="form-errors">{{ errorText }}</div>
           </div>
 
-          <div
-            v-if="mode === 'edit' && contract && contract.source_contract_id"
-            id="renewalSource"
-            class="renewal-banner"
-          >
-            <template v-if="renewalSource">续签自 <strong>{{ renewalSource.contract_no }}「{{ renewalSource.title }}」</strong>
-              <button type="button" id="openSourceContract" @click="openSource">查看来源合同</button>
-            </template>
-            <template v-else-if="renewalAlreadyClosed">续签来源合同已不存在（来源编号仍保留在本合同记录中）。</template>
-            <template v-else>正在加载续签来源…</template>
-          </div>
-
-          <div v-if="renewal" class="renewal-banner">
-            续签自 <strong>{{ renewal.source.contract_no }}「{{ renewal.source.title }}」</strong>：
-            已带出 {{ reusedCount }} 项信息，均可修改。合同编号自动分配，签订 / 生效 / 到期日期与状态已重置；
-            签名与公章不会沿用，生成 PDF 前需按新内容重新采集。
-          </div>
-          <div v-else-if="partyB" class="renewal-banner">
-            以相对方档案「{{ partyB.name }}」新建合同：
-            仅带出档案信息，不复制旧合同内容；模板与字段由你选择，保存后按正常流程采集签名。
-          </div>
+          <ContractRenewalBanners
+            :show-source="mode === 'edit' && Boolean(contract?.source_contract_id)"
+            :source="renewalSource"
+            :source-missing="renewalSourceMissing"
+            :renewal="renewal"
+            :party-b="partyB"
+            :reused-count="reusedCount"
+            @open-source="openSource"
+          />
 
           <div v-if="mode === 'edit'" class="warning-list">
             合同编号创建后不可修改。修改会写入变更记录。
@@ -542,6 +570,12 @@ onBeforeUnmount(() => {
               :readonly="mode === 'edit' && field.key === 'contract_no'"
               @update:model-value="setFieldValue(field.key, $event)"
             />
+            <TerminationFields
+              v-if="values.status === '已终止'"
+              v-model:terminated-on="terminatedOn"
+              v-model:reason="terminationReason"
+              v-model:note="terminationNote"
+            />
           </div>
 
           <ContractGenerationPanel
@@ -558,7 +592,7 @@ onBeforeUnmount(() => {
           <button v-if="mode === 'edit'" type="button" @click="renew">续签</button>
           <button type="button" @click="emit('close')">取消</button>
           <button v-if="mode === 'edit'" type="button" class="danger" @click="remove">删除</button>
-          <button type="button" class="primary" :disabled="saving" @click="submit">保存</button>
+          <button type="button" class="primary" :disabled="saving" @click="submit()">保存</button>
         </div>
       </div>
     </div>

@@ -122,6 +122,25 @@ func (s *Service) DataDir() string { return s.dataDir }
 // Now returns the service clock.
 func (s *Service) Now() time.Time { return s.now() }
 
+// Stats summarizes the dataset and adds lease-expiry reminders. Reminders are
+// read-time counters only: nothing changes a contract's status or releases an
+// asset when a lease ends.
+func (s *Service) Stats(ctx context.Context) (model.Stats, error) {
+	stats, err := s.rd.Stats(ctx)
+	if err != nil {
+		return stats, err
+	}
+	today := s.now().UTC()
+	expiring, expired, err := s.rd.CountContractLeaseExpiry(ctx,
+		today.Format("2006-01-02"),
+		today.AddDate(0, 0, model.ExpiryReminderDays).Format("2006-01-02"))
+	if err != nil {
+		return stats, fmt.Errorf("统计合同到期提醒: %w", err)
+	}
+	stats.ExpiringContracts, stats.ExpiredContracts = expiring, expired
+	return stats, nil
+}
+
 // Error is a business error with a machine-readable code. The HTTP layer maps
 // codes to statuses; anything else becomes a 500.
 type Error struct {
@@ -289,13 +308,16 @@ func parseBoolValue(raw string) (bool, bool) {
 	return false, false
 }
 
-// normalizeStatus maps labels and machine values to draft/active/archived.
+// normalizeStatus maps labels and machine values to
+// draft/active/terminated/archived.
 func normalizeStatus(raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", "draft", "草稿", "未生效", "未签":
 		return model.ContractDraft, true
 	case "active", "生效", "已生效", "履行中", "执行中":
 		return model.ContractActive, true
+	case "terminated", "已终止", "终止":
+		return model.ContractTerminated, true
 	case "archived", "归档", "已归档", "作废":
 		return model.ContractArchived, true
 	}
@@ -307,10 +329,46 @@ func StatusLabel(status string) string {
 	switch status {
 	case model.ContractActive:
 		return "生效"
+	case model.ContractTerminated:
+		return "已终止"
 	case model.ContractArchived:
 		return "归档"
 	default:
 		return "草稿"
+	}
+}
+
+// normalizeTerminationReason maps labels and machine values to the stored
+// termination reason. "续签" is normally set by the renewal linkage, but a
+// user correction is allowed.
+func normalizeTerminationReason(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "early", "提前退租", "提前终止", "退租":
+		return model.TerminationReasonEarly, true
+	case "void", "作废":
+		return model.TerminationReasonVoid, true
+	case "renewal", "续签", "续约":
+		return model.TerminationReasonRenewal, true
+	case "other", "其他", "其它":
+		return model.TerminationReasonOther, true
+	}
+	return "", false
+}
+
+// TerminationReasonLabel returns the Chinese display label for a stored
+// termination reason.
+func TerminationReasonLabel(reason string) string {
+	switch reason {
+	case model.TerminationReasonEarly:
+		return "提前退租"
+	case model.TerminationReasonVoid:
+		return "作废"
+	case model.TerminationReasonRenewal:
+		return "续签"
+	case model.TerminationReasonOther:
+		return "其他"
+	default:
+		return ""
 	}
 }
 

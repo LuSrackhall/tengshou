@@ -106,6 +106,9 @@ test.describe("场景 E：快速新建入口与最近使用", () => {
     await test.step("刷新后「最近使用」列出刚建的租户", async () => {
       await dialog.getByRole("button", { name: "取消" }).click();
       await expect(dialog).toBeHidden();
+      // 等首屏合同/档案列表请求全部结束再刷新：WebKit 会把刷新时被中断的
+      // 在途请求记成页面异常（E2E 竞态，与业务无关）。
+      await expect(page.locator("#contractSummary")).toContainText(/共 \d+ 份/);
       await page.reload({ waitUntil: "domcontentloaded" });
       const reopened = await openNewContract(page);
       const field = reopened.locator('.picker-field[data-key="party_b"]');
@@ -152,7 +155,7 @@ test.describe("场景 F：证件号判重与租期重叠的界面提示", () => 
     ).toEqual([]);
   });
 
-  test("保存与在租房产重叠的租期时，toast 提示冲突合同编号", async ({
+  test("保存与在租房产重叠的租期时，toast 提示生效合同编号与拦截规则", async ({
     app,
     page,
   }, testInfo) => {
@@ -205,7 +208,7 @@ test.describe("场景 F：证件号判重与租期重叠的界面提示", () => 
     await expect(dialog).toBeHidden();
 
     await expect(toast).toContainText(
-      `租期与合同 ${first.contract_no} 重叠`,
+      `租期与生效合同（编号 ${first.contract_no}）重叠`,
       { timeout: 10_000 },
     );
     await expect(toast).toHaveClass(/show/);

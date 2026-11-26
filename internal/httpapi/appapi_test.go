@@ -528,14 +528,26 @@ func TestAppContractAssetAndLease(t *testing.T) {
 		t.Fatalf("contract detail asset: %d %s", resp.StatusCode, body)
 	}
 
-	// 租期重叠只提示，不阻断保存。
+	// 草稿租期重叠只提示，不阻断保存。
 	resp, body = f.appRequest(t, http.MethodPost, "/app/api/v1/contracts", map[string]any{
 		"year": 2026, "title": "幸福里租赁合同（重复）", "party_b_id": f.partyBID,
 		"asset_id": assetID, "lease_start": "2026-06-01", "lease_end": "2027-05-31",
 		"data": map[string]any{},
 	}, nil)
-	if resp.StatusCode != 200 || !strings.Contains(string(body), "租期与合同") {
+	if resp.StatusCode != 200 || !strings.Contains(string(body), "租期与生效合同") {
 		t.Fatalf("overlap warning: %d %s", resp.StatusCode, body)
+	}
+
+	// 生效合同租期重叠：硬拦，409，报错里带冲突合同编号。
+	resp, body = f.appRequest(t, http.MethodPost, "/app/api/v1/contracts", map[string]any{
+		"year": 2026, "title": "幸福里租赁合同（硬冲突）", "party_b_id": f.partyBID,
+		"asset_id": assetID, "lease_start": "2026-06-01", "lease_end": "2027-05-31",
+		"status": "active", "data": map[string]any{},
+	}, nil)
+	if resp.StatusCode != http.StatusConflict ||
+		!strings.Contains(string(body), "lease_conflict") ||
+		!strings.Contains(string(body), contract["contract_no"].(string)) {
+		t.Fatalf("active overlap block: %d %s", resp.StatusCode, body)
 	}
 
 	// 被合同引用的房产不能删除（in_use → 409）。

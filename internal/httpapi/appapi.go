@@ -51,6 +51,7 @@ func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 			"/app/api/v1/contracts/years",
 			"/app/api/v1/contracts/{id}",
 			"/app/api/v1/contracts/{id}/renewal-draft",
+			"/app/api/v1/contracts/{id}/terminate",
 			"/app/api/v1/contracts/{id}/signature-reuse",
 			"/app/api/v1/changelog",
 			"/app/api/v1/seals",
@@ -103,7 +104,7 @@ func (s *Server) handleAppBootstrap(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "contract years", err)
 		return
 	}
-	stats, err := s.opts.Reader.Stats(r.Context())
+	stats, err := svc.Stats(r.Context())
 	if err != nil {
 		s.internalError(w, "stats", err)
 		return
@@ -340,6 +341,26 @@ func (s *Server) handleAppSaveContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"item": contract, "warnings": warnings})
+}
+
+// handleAppTerminateContract ends an active contract early (v0.2 lifecycle).
+// The contract stays in the ledger as terminated, releases the asset, and the
+// change log records the date and reason. Expiry never terminates a contract.
+func (s *Server) handleAppTerminateContract(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appService(w)
+	if !ok {
+		return
+	}
+	var in service.TerminationInput
+	if !s.readAppJSON(w, r, &in) {
+		return
+	}
+	contract, err := svc.TerminateContract(r.Context(), r.PathValue("id"), in)
+	if err != nil {
+		s.writeServiceError(w, "terminate contract", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"item": contract})
 }
 
 func (s *Server) handleAppDeleteContract(w http.ResponseWriter, r *http.Request) {
@@ -835,7 +856,7 @@ func (s *Server) writeServiceError(w http.ResponseWriter, msg string, err error)
 			status = http.StatusNotFound
 		case "conflict", "immutable", "in_use", "duplicate", "ambiguous_party",
 			"preview_required", "missing_asset", "invalid_template", "content_changed",
-			"duplicate_id_number":
+			"duplicate_id_number", "lease_conflict", "renewal_termination_confirm":
 			status = http.StatusConflict
 		case "import_errors", "converter_unavailable", "convert_failed",
 			"invalid_pdf", "invalid_kind", "too_many_placements",

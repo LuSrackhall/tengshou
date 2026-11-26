@@ -69,7 +69,7 @@
 | `{{.Contract.Type}}` | 合同类型 |
 | `{{.Contract.Amount}}` | 金额 |
 | `{{.Contract.SignedOn}}` / `.ValidFrom` / `.ValidTo` | 日期 |
-| `{{.Contract.Status}}` | 状态（draft/active/archived） |
+| `{{.Contract.Status}}` | 状态（draft/active/terminated/archived） |
 
 相对方档案使用 `.PartyA` / `.PartyB`（`Name`、`IDNumber`、`Phone`、`Address`、
 `Data.<字段键>`）。用户新增字段后，直接用字段键写入模板，例如：

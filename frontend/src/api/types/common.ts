@@ -56,6 +56,10 @@ export interface Stats {
   seals: number;
   documents: number;
   fields: number;
+  /** 生效合同中租期 30 天内到期的数量（只读提醒，不改状态）。 */
+  expiring_contracts: number;
+  /** 生效合同中租期已过、尚未续签的数量（只读提醒，不改状态）。 */
+  expired_contracts: number;
 }
 
 export interface YearCount {

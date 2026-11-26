@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/LuSrackhall/tengshou/internal/model"
 )
@@ -36,9 +37,10 @@ func (r *Reader) MaxContractNumberSuffix(ctx context.Context, prefix string) (in
 
 // ContractsForAsset returns non-archived contracts that reference one asset,
 // optionally excluding one contract (the record being saved). The service uses
-// it for the non-blocking occupancy hint; the hard overlap validation lands in
-// a later bead. Archived contracts are excluded because they no longer occupy
-// the asset.
+// it for the occupancy validation (active, non-terminated overlapping leases
+// block saving) and for non-blocking hints. Archived contracts are excluded
+// because they no longer occupy the asset; terminated contracts are returned
+// so callers can distinguish them from active conflicts.
 func (r *Reader) ContractsForAsset(ctx context.Context, assetID, excludeID string) ([]model.Contract, error) {
 	assetID = strings.TrimSpace(assetID)
 	if assetID == "" {
@@ -62,6 +64,47 @@ func (r *Reader) ContractsForAsset(ctx context.Context, assetID, excludeID strin
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// CountContractLeaseExpiry counts active contracts whose lease ends within
+// [today, cutoff] (expiring) and whose lease ended before today (expired).
+// Rows without a lease end date are skipped because they cannot be classified.
+// The dates are YYYY-MM-DD and compared as strings, matching stored values.
+func (r *Reader) CountContractLeaseExpiry(ctx context.Context, today, cutoff string) (expiring, expired int, err error) {
+	err = r.db.QueryRowContext(ctx,
+		`SELECT
+			COALESCE(SUM(CASE WHEN lease_end >= ? AND lease_end <= ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN lease_end < ? THEN 1 ELSE 0 END), 0)
+		 FROM contracts
+		 WHERE status = ? AND lease_end <> ''`,
+		today, cutoff, today, model.ContractActive).Scan(&expiring, &expired)
+	return expiring, expired, err
+}
+
+// deriveExpiryState labels an active contract whose lease is about to end or
+// has already ended. The label is a read-time reminder only: expiry never
+// changes the contract status and never releases the asset (te-l0hh0 D4).
+func deriveExpiryState(status, leaseEnd string, now time.Time) string {
+	if status != model.ContractActive || strings.TrimSpace(leaseEnd) == "" {
+		return ""
+	}
+	end, err := time.Parse("2006-01-02", strings.TrimSpace(leaseEnd))
+	if err != nil {
+		return ""
+	}
+	today, err := time.Parse("2006-01-02", now.Format("2006-01-02"))
+	if err != nil {
+		return ""
+	}
+	days := int(end.Sub(today).Hours() / 24)
+	switch {
+	case days < 0:
+		return model.ExpiryStateExpired
+	case days <= model.ExpiryReminderDays:
+		return model.ExpiryStateExpiring
+	default:
+		return ""
+	}
 }
 
 // CountContractsByAsset returns how many contracts reference an asset,

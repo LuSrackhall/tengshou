@@ -66,7 +66,7 @@ func TestContractAssetLeaseFlow(t *testing.T) {
 		t.Fatalf("不存在房产应报字段错误: %v", err)
 	}
 
-	// 重叠只提示不阻断，且提示里带冲突合同编号。
+	// 草稿与生效合同租期重叠：保存成功，提示在改为生效时会被拦截。
 	other, warnings, err := svc.SaveContract(ctx, service.ContractInput{
 		Year: 2026, Title: "同房产新合同", PartyBID: party.ID, AssetID: asset.ID,
 		LeaseStart: "2026-06-01", LeaseEnd: "2027-05-31", Status: "草稿",
@@ -75,9 +75,9 @@ func TestContractAssetLeaseFlow(t *testing.T) {
 		t.Fatalf("save overlapping contract: %v", err)
 	}
 	joined := strings.Join(warnings, "；")
-	if !strings.Contains(joined, "租期与合同 "+contract.ContractNo+" 重叠") ||
-		!strings.Contains(joined, "生效中的合同") {
-		t.Fatalf("缺租期/占用提示: %#v", warnings)
+	if !strings.Contains(joined, "租期与生效合同（编号 "+contract.ContractNo+"）重叠") ||
+		!strings.Contains(joined, "合同改为「生效」时将被拦截") {
+		t.Fatalf("缺租期重叠提示: %#v", warnings)
 	}
 
 	// 续签草稿沿用房产，但清空租期，重新约定。

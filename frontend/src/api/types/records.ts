@@ -41,7 +41,13 @@ export type PartyPhotoSide = "front" | "back";
 
 // ---------- 合同 ----------
 
-export type ContractStatus = "draft" | "active" | "archived";
+export type ContractStatus = "draft" | "active" | "terminated" | "archived";
+
+/** 终止原因（service 存储值）。renewal 由续签联动写入。 */
+export type TerminationReason = "early" | "void" | "other" | "renewal";
+
+/** 只读到期提醒：30 天内到期 / 已到期未续签；不影响状态与房产占用。 */
+export type ContractExpiryState = "expiring" | "expired";
 
 export interface Contract {
   id: string;
@@ -62,6 +68,12 @@ export interface Contract {
   /** 租赁起止日；与合同自身生效/到期日期分开，驱动房产占用。 */
   lease_start?: string;
   lease_end?: string;
+  /** 终止信息；仅在 status 为 terminated 时有值。 */
+  terminated_on?: string;
+  termination_reason?: TerminationReason;
+  termination_note?: string;
+  /** 后端按租期到期日派生，只读。 */
+  expiry_state?: ContractExpiryState;
   amount: number;
   /** 用户自定义字段的值，键为字段定义的 key。 */
   data: Record<string, unknown>;

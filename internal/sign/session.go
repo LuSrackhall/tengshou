@@ -25,6 +25,14 @@ const (
 	StateExpired    = "expired"
 )
 
+// Session kinds. Signature sessions capture a signature for a contract or a
+// party archive; enroll sessions let a tenant fill a complete archive on a
+// phone over the LAN.
+const (
+	KindSignature = "signature"
+	KindEnroll    = "enroll"
+)
+
 var (
 	// ErrNotFound means the token or session id is unknown (never issued,
 	// cancelled, or already purged).
@@ -42,6 +50,7 @@ var (
 // submit.
 type Session struct {
 	ID              string
+	Kind            string
 	ContractID      string
 	ContractNo      string
 	ContractTitle   string
@@ -61,6 +70,8 @@ type Session struct {
 
 // CreateInput describes a new capture session.
 type CreateInput struct {
+	// Kind selects the phone page: signature (default) or enroll.
+	Kind          string
 	ContractID    string
 	ContractNo    string
 	ContractTitle string
@@ -119,6 +130,7 @@ func (m *Manager) Create(in CreateInput) (Session, string, error) {
 	}
 	s := &Session{
 		ID:            id,
+		Kind:          kindOrDefault(in.Kind),
 		ContractID:    in.ContractID,
 		ContractNo:    in.ContractNo,
 		ContractTitle: in.ContractTitle,
@@ -246,6 +258,15 @@ func (m *Manager) purgeLocked(now time.Time) {
 			delete(m.byToken, token)
 			delete(m.byID, s.ID)
 		}
+	}
+}
+
+func kindOrDefault(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case KindEnroll:
+		return KindEnroll
+	default:
+		return KindSignature
 	}
 }
 

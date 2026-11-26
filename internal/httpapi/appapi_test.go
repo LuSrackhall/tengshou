@@ -228,8 +228,16 @@ func TestAppContractLifecycle(t *testing.T) {
 
 func TestAppPartyCRUDAndValidation(t *testing.T) {
 	f := newFixture(t)
+	// v0.2: a new archive must carry an ID number.
 	resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/parties", map[string]any{
+		"name": "无证件号", "kind": "person",
+	}, nil)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("create without id_number should be 422: %d %s", resp.StatusCode, body)
+	}
+	resp, body = f.appRequest(t, http.MethodPost, "/app/api/v1/parties", map[string]any{
 		"name": "李四", "kind": "person", "phone": "13900000000",
+		"id_number": "110101199001011234",
 	}, nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("create party: %d %s", resp.StatusCode, body)

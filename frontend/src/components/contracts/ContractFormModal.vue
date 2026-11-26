@@ -9,7 +9,7 @@
 // 「生成 PDF」面板与批量生成对话框已迁到 Vue
 // （ContractGenerationPanel / BatchGenerateDialog），「已关联公章」摘要用
 // 公章域的 SealSummary 渲染。
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { ApiError } from "../../api/client";
 import {
   createContract,
@@ -134,6 +134,36 @@ const partyBName = computed(() => {
   }
   return props.partyB?.name ?? "";
 });
+
+// v0.2：选中（或打开）缺少证件号的存量档案时提示一次补录；补录后永久有效，
+// 同一档案在同一浏览器只提示一次，不打断合同录入。
+watch(
+  [partyBName, () => props.parties],
+  () => {
+    const name = partyBName.value.trim();
+    if (!name) {
+      return;
+    }
+    const match = props.parties.find((item) => item.name.trim() === name);
+    if (!match || (match.id_number ?? "").trim() !== "") {
+      return;
+    }
+    const key = `tengshou:party-id-backfill:${match.id}`;
+    try {
+      if (window.localStorage.getItem(key) === "1") {
+        return;
+      }
+      window.localStorage.setItem(key, "1");
+    } catch {
+      /* 隐私模式禁用 localStorage 时仍提示，但不落标记 */
+    }
+    toast(
+      `相对方「${match.name}」还没有证件号，请在「相对方档案」页补录一次，补录后长期有效`,
+      true,
+    );
+  },
+  { immediate: true },
+);
 
 const title = computed(() => {
   if (props.mode === "edit" && props.contract) {

@@ -14,6 +14,7 @@ import {
   type AppChangeNotice,
 } from "../../bridge/app";
 import PartyAuditHistory from "./PartyAuditHistory.vue";
+import PartyAssetsPanel from "./PartyAssetsPanel.vue";
 import PartyFieldControl from "./PartyFieldControl.vue";
 import PartyHistoryList from "./PartyHistoryList.vue";
 import { isAgentActor } from "../../ui/format";
@@ -34,11 +35,23 @@ const saving = ref(false);
 const fieldErrors = ref<ApiFieldError[]>([]);
 const errorText = ref("");
 const bodyEl = ref<HTMLDivElement | null>(null);
+const localParty = ref<Party | null>(props.party ? { ...props.party } : null);
 let unsubscribe: (() => void) | null = null;
 
 const title = computed(() =>
   props.party ? `编辑相对方 · ${props.party.name}` : "新建相对方",
 );
+
+// v0.2：新建档案时证件号必填（服务端同样校验）；存量档案允许为空、可稍后补录。
+const displayFields = computed(() =>
+  props.fields.map((field) =>
+    !props.party && field.key === "id_number" ? { ...field, required: true } : field,
+  ),
+);
+
+function onAssetsUpdated(updated: Party): void {
+  localParty.value = updated;
+}
 
 syncControlValues(values, props.fields, props.party);
 watch(
@@ -165,14 +178,15 @@ onBeforeUnmount(() => {
           </div>
           <div class="form-grid">
             <PartyFieldControl
-              v-for="field in fields"
+              v-for="field in displayFields"
               :key="field.key"
               :field="field"
               :model-value="values[field.key] ?? ''"
               @update:model-value="setValue(field.key, $event)"
             />
           </div>
-          <template v-if="party">
+          <template v-if="party && localParty">
+            <PartyAssetsPanel :party="localParty" @updated="onAssetsUpdated" />
             <div class="audit-host">
               <PartyHistoryList :party-id="party.id" @open-contract="onOpenContract" />
             </div>

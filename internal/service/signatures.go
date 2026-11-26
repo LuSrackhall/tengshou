@@ -126,6 +126,94 @@ func (s *Service) SaveSignature(ctx context.Context, in SignatureInput) (model.S
 	return sig, nil
 }
 
+// ReusePartySignature links a party's archive-level signature to a contract at
+// the contract's current content version. It never copies the image: a new
+// signature row points at the same immutable asset, so the exact file stays
+// pinned by SHA-256 and the change log records the explicit reuse.
+func (s *Service) ReusePartySignature(ctx context.Context, contractID, partyID string) (model.Signature, error) {
+	contractID = strings.TrimSpace(contractID)
+	partyID = strings.TrimSpace(partyID)
+	contract, err := s.rd.GetContract(ctx, contractID)
+	if err != nil {
+		if isNotFound(err) {
+			return model.Signature{}, business("not_found", "合同不存在")
+		}
+		return model.Signature{}, err
+	}
+	if partyID == "" || (partyID != contract.PartyAID && partyID != contract.PartyBID) {
+		return model.Signature{}, business("invalid_party", "只能复用本合同甲方或乙方档案的签名")
+	}
+	party, err := s.rd.GetParty(ctx, partyID)
+	if err != nil {
+		if isNotFound(err) {
+			return model.Signature{}, business("not_found", "相对方档案不存在")
+		}
+		return model.Signature{}, err
+	}
+	if party.SignatureID == "" {
+		return model.Signature{}, business("missing_signature", "该档案还没有采集签名，请先扫码采集")
+	}
+	archive, err := s.rd.GetSignature(ctx, party.SignatureID)
+	if err != nil {
+		if isNotFound(err) {
+			return model.Signature{}, business("missing_signature", "档案签名记录不存在，请重新采集")
+		}
+		return model.Signature{}, err
+	}
+	if archive.PartyID != "" && archive.PartyID != party.ID {
+		return model.Signature{}, business("invalid_signature", "档案签名记录不属于该相对方，请重新采集")
+	}
+	full, err := s.assetFile(archive.AssetPath)
+	if err != nil {
+		return model.Signature{}, err
+	}
+	if _, err := os.Stat(full); err != nil {
+		return model.Signature{}, business("missing_asset", "档案签名图片文件缺失，请重新采集")
+	}
+	content, err := ContentSHA256(contract)
+	if err != nil {
+		return model.Signature{}, err
+	}
+	// Idempotent: reuse of the same archive signature for the same contract
+	// content version returns the existing row instead of piling up duplicates.
+	existing, err := s.rd.ListSignatures(ctx, model.ListFilter{ContractID: contract.ID, Limit: 500})
+	if err != nil {
+		return model.Signature{}, err
+	}
+	for _, sig := range existing.Items {
+		if sig.PartyID == party.ID && sig.Source == model.SignatureSourceArchive &&
+			sig.ContentSHA256 == content && sig.AssetPath == archive.AssetPath {
+			return sig, nil
+		}
+	}
+	id, err := model.NewID("sig")
+	if err != nil {
+		return model.Signature{}, err
+	}
+	now := s.now()
+	sig := model.Signature{
+		ID:            id,
+		PartyID:       party.ID,
+		ContractID:    contract.ID,
+		SignerName:    party.Name,
+		AssetPath:     archive.AssetPath,
+		SHA256:        archive.SHA256,
+		ContentSHA256: content,
+		Source:        model.SignatureSourceArchive,
+		WidthPx:       archive.WidthPx,
+		HeightPx:      archive.HeightPx,
+		CapturedAt:    now,
+		CreatedAt:     now,
+	}
+	if err := s.st.PutSignature(ctx, &sig); err != nil {
+		return model.Signature{}, err
+	}
+	s.logChange(ctx, model.ChangeEntityContract, contract.ID, model.ChangeActionUpdate,
+		fmt.Sprintf("复用档案签名：%s（合同 %s，内容版本 %s）",
+			party.Name, contract.ContractNo, shortSHA(content)), nil)
+	return sig, nil
+}
+
 // ExportSignature reads one retained signature image after verifying its
 // SHA-256 against the database, then records the export in the change log.
 // Signature images live under the private data directory and are never served

@@ -268,6 +268,20 @@ func TestMigrationUpgradesB1Database(t *testing.T) {
 		);
 		INSERT INTO schema_migrations VALUES (1, '0001_init.sql', '2026-11-01T00:00:00Z');
 		INSERT INTO schema_migrations VALUES (2, '0002_api_indexes.sql', '2026-11-01T00:00:00Z');
+		CREATE TABLE parties (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			name TEXT NOT NULL,
+			id_number TEXT NOT NULL DEFAULT '',
+			phone TEXT NOT NULL DEFAULT '',
+			address TEXT NOT NULL DEFAULT '',
+			note TEXT NOT NULL DEFAULT '',
+			data_json TEXT NOT NULL DEFAULT '{}',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		INSERT INTO parties (id, kind, name, created_at, updated_at)
+		VALUES ('pty-legacy', 'person', '老档案', '2024-05-01T09:00:00Z', '2024-05-01T09:00:00Z');
 		CREATE TABLE contracts (
 			id TEXT PRIMARY KEY,
 			title TEXT NOT NULL,

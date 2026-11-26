@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="referrer" content="no-referrer">
+<title>腾手 · 自助建档</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { min-height: 100%; }
+  body {
+    margin: 0; background: #eef1ef; color: #1f2328;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    padding: env(safe-area-inset-top) 14px calc(20px + env(safe-area-inset-bottom));
+  }
+  .wrap { width: min(720px, 100%); margin: 0 auto; }
+  .brand { display: flex; align-items: baseline; gap: 10px; padding: 18px 4px 12px; }
+  .brand .mark { font-size: 22px; font-weight: 700; letter-spacing: .06em; color: #1f6f4a; }
+  .brand .sub { color: #5f6670; font-size: 14px; }
+  .card { background: #fff; border-radius: 16px; padding: 18px 18px 16px; box-shadow: 0 12px 32px rgba(22,34,28,.10); }
+  h2 { margin: 2px 0 6px; font-size: 18px; }
+  .help { margin: 0 0 14px; color: #5f6670; font-size: 13.5px; }
+  .field { margin: 0 0 14px; }
+  .field > label { display: block; margin: 0 0 6px; font-weight: 600; font-size: 14.5px; }
+  .field .req { color: #b4342c; margin-left: 3px; }
+  input[type="text"], input[type="tel"] {
+    width: 100%; min-height: 48px; border: 1px solid #d8ddda; border-radius: 11px;
+    background: #fff; color: #1f2328; font: inherit; padding: 10px 12px;
+  }
+  input[type="file"] { display: block; width: 100%; font: inherit; font-size: 14px; }
+  .photo-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .photo-box { border: 1px dashed #c9d0cc; border-radius: 12px; padding: 10px; background: #fafbfa; }
+  .photo-box .title { font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .photo-box img { display: none; width: 100%; margin-top: 8px; border-radius: 8px; }
+  .photo-box img.ready { display: block; }
+  .pad-wrap { position: relative; border: 1px solid #d8ddda; border-radius: 12px; background: #fff; overflow: hidden; }
+  canvas { display: block; width: 100%; height: auto; aspect-ratio: 1200 / 420; touch-action: none; cursor: crosshair; }
+  .pad-hint {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #b3bab5; font-size: 17px; letter-spacing: .1em; pointer-events: none;
+  }
+  .row { display: flex; gap: 10px; margin-top: 14px; }
+  button {
+    flex: 1; border: 1px solid #d8ddda; background: #fff; color: #1f2328; border-radius: 11px;
+    min-height: 50px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button.primary { background: #1f6f4a; border-color: #1f6f4a; color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .message { min-height: 22px; margin: 12px 2px 0; font-size: 14px; color: #5f6670; word-break: break-word; }
+  .message.error { color: #b4342c; }
+  .message.ok { color: #1f6f4a; }
+  .expiry { margin: 8px 2px 0; color: #8b928c; font-size: 12.5px; }
+  .foot { color: #7d857f; font-size: 12.5px; text-align: center; padding: 16px 8px 0; }
+  .result { text-align: center; padding: 18px 8px 10px; }
+  .result .icon {
+    width: 64px; height: 64px; margin: 0 auto 12px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 34px; font-weight: 700;
+  }
+  .result.done .icon { background: #e3f1e9; color: #1f6f4a; }
+  .result.expired .icon { background: #fff4d6; color: #8a5a00; }
+  .result h1 { margin: 0 0 8px; font-size: 21px; }
+  .result p { margin: 0; color: #5f6670; font-size: 14.5px; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="brand"><span class="mark">腾手</span><span class="sub">租户自助建档</span></header>
+  {{if .Active}}
+  <section class="card" id="enrollCard">
+    <h2>填写您的档案</h2>
+    <p class="help">请如实填写姓名与证件号，并拍摄证件照正反面、手写签名。提交后由出租方电脑保存，不会上传互联网。</p>
+    <div class="field">
+      <label for="enrollName">姓名<span class="req">*</span></label>
+      <input id="enrollName" type="text" autocomplete="name" maxlength="120" placeholder="请输入姓名">
+    </div>
+    <div class="field">
+      <label for="enrollIDNumber">证件号<span class="req">*</span></label>
+      <input id="enrollIDNumber" type="text" inputmode="numeric" autocomplete="off" maxlength="120" placeholder="身份证号 / 统一社会信用代码">
+    </div>
+    <div class="field">
+      <label for="enrollPhone">联系电话</label>
+      <input id="enrollPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="120" placeholder="选填">
+    </div>
+    <div class="field">
+      <label for="enrollAddress">地址</label>
+      <input id="enrollAddress" type="text" autocomplete="street-address" maxlength="300" placeholder="选填">
+    </div>
+    <div class="field">
+      <div class="photo-row">
+        <div class="photo-box">
+          <div class="title">证件照正面<span class="req">*</span></div>
+          <input id="enrollIdFront" type="file" accept="image/*" capture="environment">
+          <img id="enrollIdFrontPreview" alt="证件照正面预览">
+        </div>
+        <div class="photo-box">
+          <div class="title">证件照反面<span class="req">*</span></div>
+          <input id="enrollIdBack" type="file" accept="image/*" capture="environment">
+          <img id="enrollIdBackPreview" alt="证件照反面预览">
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label>手写签名<span class="req">*</span></label>
+      <div class="pad-wrap">
+        <canvas id="enrollPad" width="1200" height="420" aria-label="手写签名区"></canvas>
+        <div id="enrollPadHint" class="pad-hint">请在此处手写签名</div>
+      </div>
+      <div class="row">
+        <button type="button" id="enrollClearBtn">清除重写</button>
+        <button type="button" id="enrollSubmitBtn" class="primary" disabled>提交建档</button>
+      </div>
+    </div>
+    <p id="enrollMessage" class="message" role="status" aria-live="polite"></p>
+    <p class="expiry">链接一次性使用，有效期至 <time id="enrollExpiresAt" datetime="{{.ExpiresAt}}">{{.ExpiresAt}}</time>。</p>
+  </section>
+  {{else if .Completed}}
+  <section class="card result done">
+    <div class="icon">✓</div>
+    <h1>档案已提交</h1>
+    <p>档案已保存到出租方的电脑上，请回到电脑继续办理合同。</p>
+  </section>
+  {{else}}
+  <section class="card result expired">
+    <div class="icon">!</div>
+    <h1>链接已失效</h1>
+    <p>这个自助建档链接已过期或已被使用。请联系出租方重新生成二维码。</p>
+  </section>
+  {{end}}
+  <p class="foot">本页面仅在与电脑同一局域网内可访问；证件照与签名只保存在电脑本机。</p>
+</main>
+{{if .Active}}
+<script>
+(function () {
+  "use strict";
+  var nameEl = document.getElementById("enrollName");
+  var idNumberEl = document.getElementById("enrollIDNumber");
+  var phoneEl = document.getElementById("enrollPhone");
+  var addressEl = document.getElementById("enrollAddress");
+  var frontInput = document.getElementById("enrollIdFront");
+  var backInput = document.getElementById("enrollIdBack");
+  var frontPreview = document.getElementById("enrollIdFrontPreview");
+  var backPreview = document.getElementById("enrollIdBackPreview");
+  var canvas = document.getElementById("enrollPad");
+  var hint = document.getElementById("enrollPadHint");
+  var clearBtn = document.getElementById("enrollClearBtn");
+  var submitBtn = document.getElementById("enrollSubmitBtn");
+  var message = document.getElementById("enrollMessage");
+  var card = document.getElementById("enrollCard");
+  var ctx = canvas.getContext("2d");
+  var drawing = false, dirty = false, last = null, lastMid = null, busy = false, expired = false;
+  var frontData = "", backData = "";
+  var MAX_PHOTO_BYTES = 15 * 1024 * 1024;
+
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "#000";
+  ctx.fillStyle = "#000";
+
+  function pos(e) {
+    var r = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) * canvas.width / r.width,
+      y: (e.clientY - r.top) * canvas.height / r.height
+    };
+  }
+  function setMessage(text, cls) {
+    message.textContent = text || "";
+    message.className = "message" + (cls ? " " + cls : "");
+  }
+  function refreshSubmit() {
+    submitBtn.disabled = !(dirty && frontData && backData && !busy && !expired);
+  }
+  function setDirty(value) {
+    dirty = value;
+    hint.style.display = value ? "none" : "flex";
+    refreshSubmit();
+  }
+  function down(e) {
+    if (busy || expired) return;
+    e.preventDefault();
+    drawing = true;
+    var p = pos(e);
+    last = p;
+    lastMid = p;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fill();
+    setDirty(true);
+    if (canvas.setPointerCapture) {
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    }
+  }
+  function move(e) {
+    if (!drawing) return;
+    e.preventDefault();
+    var p = pos(e);
+    var mid = { x: (last.x + p.x) / 2, y: (last.y + p.y) / 2 };
+    ctx.beginPath();
+    ctx.moveTo(lastMid.x, lastMid.y);
+    ctx.quadraticCurveTo(last.x, last.y, mid.x, mid.y);
+    ctx.stroke();
+    last = p;
+    lastMid = mid;
+  }
+  function up(e) {
+    if (!drawing) return;
+    drawing = false;
+    if (e && e.pointerId !== undefined && canvas.releasePointerCapture) {
+      try { canvas.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    }
+  }
+  canvas.addEventListener("pointerdown", down);
+  canvas.addEventListener("pointermove", move);
+  canvas.addEventListener("pointerup", up);
+  canvas.addEventListener("pointercancel", up);
+  canvas.addEventListener("pointerleave", up);
+
+  clearBtn.addEventListener("click", function () {
+    if (busy) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setDirty(false);
+    setMessage("", "");
+  });
+
+  function readPhoto(input, preview, setter) {
+    input.addEventListener("change", function () {
+      var file = input.files && input.files[0];
+      if (!file) {
+        setter("");
+        preview.className = "";
+        preview.removeAttribute("src");
+        refreshSubmit();
+        return;
+      }
+      if (file.size > MAX_PHOTO_BYTES) {
+        setMessage("照片过大，请重新拍摄或选择小一些的图片。", "error");
+        input.value = "";
+        setter("");
+        preview.className = "";
+        refreshSubmit();
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function () {
+        setter(String(reader.result || ""));
+        preview.src = String(reader.result || "");
+        preview.className = "ready";
+        setMessage("", "");
+        refreshSubmit();
+      };
+      reader.onerror = function () {
+        setMessage("照片读取失败，请重新选择。", "error");
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  readPhoto(frontInput, frontPreview, function (value) { frontData = value; });
+  readPhoto(backInput, backPreview, function (value) { backData = value; });
+
+  function showTerminal(title, text, cls) {
+    card.className = "card result " + cls;
+    card.innerHTML = "";
+    var icon = document.createElement("div");
+    icon.className = "icon";
+    icon.textContent = cls === "done" ? "✓" : "!";
+    var h = document.createElement("h1");
+    h.textContent = title;
+    var p = document.createElement("p");
+    p.textContent = text;
+    card.appendChild(icon);
+    card.appendChild(h);
+    card.appendChild(p);
+  }
+
+  function markExpired() {
+    expired = true;
+    refreshSubmit();
+    setMessage("自助建档链接已过期，请联系出租方重新生成二维码。", "error");
+  }
+
+  var expiryEl = document.getElementById("enrollExpiresAt");
+  var expiresAt = null;
+  if (expiryEl) {
+    var parsed = new Date(expiryEl.getAttribute("datetime"));
+    if (!isNaN(parsed.getTime())) {
+      expiresAt = parsed.getTime();
+      expiryEl.textContent = parsed.toLocaleString("zh-CN", { hour12: false });
+      window.setInterval(function () {
+        if (!expired && expiresAt && Date.now() > expiresAt) markExpired();
+      }, 1000);
+      if (Date.now() > expiresAt) markExpired();
+    }
+  }
+
+  submitBtn.addEventListener("click", async function () {
+    if (busy || expired) return;
+    var name = nameEl.value.trim();
+    var idNumber = idNumberEl.value.trim();
+    if (!name) { setMessage("请填写姓名。", "error"); return; }
+    if (!idNumber) { setMessage("请填写证件号。", "error"); return; }
+    if (!frontData || !backData) { setMessage("请上传证件照正反面。", "error"); return; }
+    if (!dirty) { setMessage("请手写签名。", "error"); return; }
+    busy = true;
+    refreshSubmit();
+    clearBtn.disabled = true;
+    setMessage("正在提交档案…", "");
+    var endpoint = location.pathname.replace(/\/+$/, "") + "/submit";
+    try {
+      var res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Tengshou-Sign": "1" },
+        body: JSON.stringify({
+          name: name,
+          id_number: idNumber,
+          phone: phoneEl.value.trim(),
+          address: addressEl.value.trim(),
+          id_front: frontData,
+          id_back: backData,
+          signature: canvas.toDataURL("image/png")
+        })
+      });
+      var data = null;
+      try { data = await res.json(); } catch (_) { data = null; }
+      var code = data && data.error && data.error.code ? data.error.code : "";
+      var msg = data && data.error && data.error.message
+        ? data.error.message
+        : "提交失败，请稍后再试。";
+      if (res.ok) {
+        showTerminal("档案已提交", "档案已保存到出租方的电脑上，请回到电脑继续办理合同。", "done");
+        return;
+      }
+      if (code === "enroll_consumed" || code === "enroll_expired" || res.status === 410) {
+        showTerminal("无法再次提交", msg, "expired");
+        return;
+      }
+      // Duplicate ID and validation errors stay recoverable: the tenant can
+      // correct the form and submit again with the same link.
+      busy = false;
+      clearBtn.disabled = false;
+      refreshSubmit();
+      setMessage(msg, "error");
+    } catch (err) {
+      busy = false;
+      clearBtn.disabled = false;
+      refreshSubmit();
+      setMessage("网络中断，档案没有提交成功。请确认手机仍连着与电脑相同的 Wi-Fi 后重试。", "error");
+    }
+  });
+})();
+</script>
+{{end}}
+</body>
+</html>

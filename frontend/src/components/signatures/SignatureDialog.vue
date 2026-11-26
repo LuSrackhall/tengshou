@@ -12,6 +12,7 @@ import {
   cancelSignatureSession,
   createSignatureSession,
   getSignatureSession,
+  reusePartySignature,
   signatureSessionQrUrl,
 } from "../../api/endpoints";
 import type {
@@ -61,6 +62,8 @@ const startError = ref("");
 const stateText = ref("等待手机扫码并提交签名…");
 const stateClass = ref("");
 const expiryText = ref("");
+const reusing = ref(false);
+const reuseMessage = ref("");
 /** 多网卡时用户选择的地址下标；null 表示还未手动选择。 */
 const qrIndex = ref<number | null>(null);
 
@@ -83,6 +86,46 @@ const qrSrc = computed(() => {
     ? item.qr_url
     : signatureSessionQrUrl(item.id, qrIndex.value);
 });
+
+/** 当前签名人档案；档案里已采集长期签名时可显式复用。 */
+const selectedParty = computed(() => {
+  if (props.detail.party_a?.id === signerId.value) {
+    return props.detail.party_a;
+  }
+  if (props.detail.party_b?.id === signerId.value) {
+    return props.detail.party_b;
+  }
+  return null;
+});
+const archiveSignatureAvailable = computed(
+  () => Boolean(selectedParty.value?.signature_id),
+);
+
+async function reuseArchiveSignature(): Promise<void> {
+  const party = selectedParty.value;
+  if (!party?.signature_id || reusing.value) {
+    return;
+  }
+  if (
+    !window.confirm(
+      `确定在合同 ${props.contract.contract_no} 中复用「${party.name}」档案里保存的签名吗？\n\n复用只对当前合同内容版本生效，并记入变更记录；合同内容再次修改后需要重新确认。`,
+    )
+  ) {
+    return;
+  }
+  reusing.value = true;
+  reuseMessage.value = "";
+  try {
+    await reusePartySignature(props.contract.id, party.id);
+    reuseMessage.value = "已复用档案签名（已记入变更记录），可以直接生成合同。";
+    toast("已复用档案签名");
+    await refreshAfterWrite();
+  } catch (error) {
+    toast(errorMessage(error), true);
+  } finally {
+    reusing.value = false;
+  }
+}
 
 function stopPolling(): void {
   if (pollTimer !== null) {
@@ -242,6 +285,14 @@ onBeforeUnmount(() => {
                 </option>
               </select>
               <span class="help">手机与电脑需连接同一局域网；二维码一次性有效，过期或提交后失效。手机打不开时，请确认连接的是同一 Wi-Fi（非访客网络），也可直接输入下方地址。</span>
+            </div>
+            <div v-if="archiveSignatureAvailable" class="field">
+              <label>档案签名</label>
+              <span class="help">该档案已采集长期签名，可显式复用到本合同当前内容版本；复用会记入变更记录，合同内容修改后需重新确认。</span>
+              <button type="button" class="reuse-btn" :disabled="reusing" @click="reuseArchiveSignature">
+                {{ reusing ? "正在复用…" : "使用档案签名" }}
+              </button>
+              <div v-if="reuseMessage" class="sign-state ok">{{ reuseMessage }}</div>
             </div>
             <SignatureSummary v-if="detail.signatures.length" :detail="detail" />
             <div id="signQrArea" class="sign-qr-empty">

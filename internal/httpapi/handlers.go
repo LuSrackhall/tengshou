@@ -14,11 +14,12 @@ import (
 	"github.com/LuSrackhall/tengshou/internal/store"
 )
 
-//go:embed web/index.html web/sign.html
+//go:embed web/index.html web/sign.html web/enroll.html
 var webFS embed.FS
 
 var indexTemplate = template.Must(template.ParseFS(webFS, "web/index.html"))
 var signPageTemplate = template.Must(template.ParseFS(webFS, "web/sign.html"))
+var enrollPageTemplate = template.Must(template.ParseFS(webFS, "web/enroll.html"))
 
 type pageData struct {
 	Version       string

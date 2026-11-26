@@ -431,7 +431,7 @@ func TestWriteToolsAndActorAudit(t *testing.T) {
 	assertMCPActor(t, env.reader, "field", fieldID)
 
 	party := callToolJSON(t, srv, toolCreateParty, map[string]any{
-		"name": "李四", "kind": "person", "phone": "13900000000",
+		"name": "李四", "kind": "person", "phone": "13900000000", "id_number": "110101199001011234",
 	})
 	partyItem := party["item"].(map[string]any)
 	partyID, _ := partyItem["id"].(string)
@@ -511,7 +511,7 @@ func TestWriteSwitchOff(t *testing.T) {
 		t.Fatalf("mcp_write_enabled = %v", status["mcp_write_enabled"])
 	}
 
-	text, isError := callTool(t, srv, toolCreateParty, map[string]any{"name": "被拒绝"})
+	text, isError := callTool(t, srv, toolCreateParty, map[string]any{"name": "被拒绝", "id_number": "110101199001015678"})
 	if !isError || !strings.Contains(text, "mcp_write_disabled") {
 		t.Fatalf("write off: isError=%v text=%s", isError, text)
 	}
@@ -520,7 +520,7 @@ func TestWriteSwitchOff(t *testing.T) {
 	post := func(mcp bool) (int, []byte) {
 		t.Helper()
 		req, err := http.NewRequest(http.MethodPost, env.server.URL+"/app/api/v1/parties",
-			strings.NewReader(`{"name":"直接写入"}`))
+			strings.NewReader(`{"name":"直接写入","id_number":"110101199001019999"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -647,7 +647,7 @@ func TestWriteGateShortCircuitsWriteTools(t *testing.T) {
 		WriteEnabled: func() bool { return allowed },
 	})
 
-	text, isError := callTool(t, srv, toolCreateParty, map[string]any{"name": "被开关拒绝"})
+	text, isError := callTool(t, srv, toolCreateParty, map[string]any{"name": "被开关拒绝", "id_number": "110101199001017777"})
 	if !isError || !strings.Contains(text, "mcp_write_disabled") {
 		t.Fatalf("write gate off: isError=%v text=%s", isError, text)
 	}
@@ -655,7 +655,7 @@ func TestWriteGateShortCircuitsWriteTools(t *testing.T) {
 	callToolJSON(t, srv, toolListContracts, map[string]any{})
 
 	allowed = true
-	created := callToolJSON(t, srv, toolCreateParty, map[string]any{"name": "允许写入"})
+	created := callToolJSON(t, srv, toolCreateParty, map[string]any{"name": "允许写入", "id_number": "110101199001016666"})
 	item, _ := created["item"].(map[string]any)
 	if item["name"] != "允许写入" {
 		t.Fatalf("create after gate opened = %v", created)

@@ -106,18 +106,35 @@ const (
 	ChangeActionGenerate = "generate"
 )
 
-// Party is a counterparty (person or organization) in a contract.
+// Party ID-photo sides for the archive upgrade (v0.2).
+const (
+	PartyPhotoFront = "front"
+	PartyPhotoBack  = "back"
+)
+
+// Party is a counterparty (person or organization) in a contract. The v0.2
+// archive upgrade adds the ID-card photos and an archive-level handwritten
+// signature that can be reused by later contracts.
 type Party struct {
-	ID        string         `json:"id"`
-	Kind      string         `json:"kind"`
-	Name      string         `json:"name"`
-	IDNumber  string         `json:"id_number,omitempty"`
-	Phone     string         `json:"phone,omitempty"`
-	Address   string         `json:"address,omitempty"`
-	Note      string         `json:"note,omitempty"`
-	Data      map[string]any `json:"data"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	ID       string         `json:"id"`
+	Kind     string         `json:"kind"`
+	Name     string         `json:"name"`
+	IDNumber string         `json:"id_number,omitempty"`
+	Phone    string         `json:"phone,omitempty"`
+	Address  string         `json:"address,omitempty"`
+	Note     string         `json:"note,omitempty"`
+	Data     map[string]any `json:"data"`
+	// IDFrontPath / IDBackPath are asset paths (relative to the data dir) of
+	// the compressed ID-card photos; the digest pins the exact file.
+	IDFrontPath   string `json:"id_front_path,omitempty"`
+	IDFrontSHA256 string `json:"id_front_sha256,omitempty"`
+	IDBackPath    string `json:"id_back_path,omitempty"`
+	IDBackSHA256  string `json:"id_back_sha256,omitempty"`
+	// SignatureID points at the archive-level retained signature asset. It is
+	// captured once and may be reused when signing later contracts.
+	SignatureID string    `json:"signature_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Asset is one rentable property record (v0.2: houses only). The minimal
@@ -248,7 +265,8 @@ type Signature struct {
 
 // Signature sources.
 const (
-	SignatureSourceLANQR = "lan_qr"
+	SignatureSourceLANQR   = "lan_qr"
+	SignatureSourceArchive = "archive"
 )
 
 // Seal is an imported official-seal image retained as an asset file. Only the

@@ -17,6 +17,7 @@ import {
   toast,
 } from "../../bridge/app";
 import PartyFormModal from "./PartyFormModal.vue";
+import EnrollSessionDialog from "./EnrollSessionDialog.vue";
 import { partyFieldValue } from "./format";
 
 const fields = ref<FieldDefinition[]>([]);
@@ -27,6 +28,7 @@ const search = ref("");
 const loaded = ref(false);
 const formOpen = ref(false);
 const editingParty = ref<Party | null>(null);
+const enrollOpen = ref(false);
 
 let loadSeq = 0;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
@@ -150,6 +152,7 @@ onBeforeUnmount(() => {
       autocomplete="off"
     >
     <span class="spacer"></span>
+    <button type="button" id="enrollQrBtn" @click="enrollOpen = true">自助建档二维码</button>
     <button type="button" id="newPartyBtn" class="primary" @click="openCreate">新建相对方</button>
   </div>
   <div id="partySummary" class="summary">{{ loaded ? summary : "" }}</div>
@@ -198,4 +201,5 @@ onBeforeUnmount(() => {
     @close="closeForm"
     @open-contract="onOpenContract"
   />
+  <EnrollSessionDialog v-if="enrollOpen" @close="enrollOpen = false" />
 </template>

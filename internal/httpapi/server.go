@@ -237,6 +237,16 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /app/api/v1/assets/{id}", s.handleAppGetAsset)
 	m.HandleFunc("PUT /app/api/v1/assets/{id}", s.handleAppSaveAsset)
 	m.HandleFunc("DELETE /app/api/v1/assets/{id}", s.handleAppDeleteAsset)
+	// v0.2 archive upgrade: ID-card photos, archive-level signature and LAN
+	// self-enrollment sessions.
+	m.HandleFunc("POST /app/api/v1/parties/{id}/id-photos/{side}", s.handleAppUploadPartyIDPhoto)
+	m.HandleFunc("GET /app/api/v1/parties/{id}/id-photos/{side}", s.handleAppPartyIDPhoto)
+	m.HandleFunc("GET /app/api/v1/parties/{id}/signature", s.handleAppPartySignatureImage)
+	m.HandleFunc("POST /app/api/v1/parties/{id}/signature-sessions", s.handleAppCreatePartySignatureSession)
+	m.HandleFunc("POST /app/api/v1/enroll-sessions", s.handleAppCreateEnrollSession)
+	m.HandleFunc("GET /app/api/v1/enroll-sessions/{id}", s.handleAppGetEnrollSession)
+	m.HandleFunc("DELETE /app/api/v1/enroll-sessions/{id}", s.handleAppCancelEnrollSession)
+	m.HandleFunc("GET /app/api/v1/enroll-sessions/{id}/qr.png", s.handleAppSignatureQR)
 	m.HandleFunc("GET /app/api/v1/contracts", s.handleAppListContracts)
 	m.HandleFunc("POST /app/api/v1/contracts", s.handleAppSaveContract)
 	m.HandleFunc("GET /app/api/v1/contracts/years", s.handleAppContractYears)
@@ -244,6 +254,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /app/api/v1/contracts/{id}", s.handleAppGetContract)
 	m.HandleFunc("PUT /app/api/v1/contracts/{id}", s.handleAppSaveContract)
 	m.HandleFunc("DELETE /app/api/v1/contracts/{id}", s.handleAppDeleteContract)
+	m.HandleFunc("POST /app/api/v1/contracts/{id}/signature-reuse", s.handleAppReusePartySignature)
 	m.HandleFunc("GET /app/api/v1/changelog", s.handleAppChangeLog)
 	m.HandleFunc("GET /app/api/v1/seals", s.handleAppListSeals)
 	m.HandleFunc("POST /app/api/v1/seals", s.handleAppImportSeal)
@@ -300,6 +311,13 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /sign/{token}", s.handleSignPage)
 	m.HandleFunc("GET /sign/{token}/status", s.handleSignStatus)
 	m.HandleFunc("POST /sign/{token}/submit", s.handleSignSubmit)
+
+	// v0.2 LAN self-enrollment: a tenant fills a complete archive on a phone
+	// (name, ID number, ID-card photos, handwritten signature). Same one-time
+	// token model as the signing page, LAN-only.
+	m.HandleFunc("GET /enroll/{token}", s.handleEnrollPage)
+	m.HandleFunc("GET /enroll/{token}/status", s.handleEnrollStatus)
+	m.HandleFunc("POST /enroll/{token}/submit", s.handleEnrollSubmit)
 }
 
 // auth enforces bearer-token access for data endpoints. The test page and
@@ -451,15 +469,21 @@ func (s *Server) withRecover(next http.Handler) http.Handler {
 // are rejected before the token is inspected.
 func (s *Server) withSignGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/sign/") {
+		if isPhonePagePath(r.URL.Path) {
 			if !isLANRemote(r.RemoteAddr) {
-				writeError(w, http.StatusForbidden, "lan_only", "签名页只允许在同一局域网内访问")
+				writeError(w, http.StatusForbidden, "lan_only", "该页面只允许在同一局域网内访问")
 				return
 			}
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isPhonePagePath reports whether path belongs to the LAN-only phone surface
+// (signature capture and self-enrollment).
+func isPhonePagePath(path string) bool {
+	return strings.HasPrefix(path, "/sign/") || strings.HasPrefix(path, "/enroll/")
 }
 
 // isLANRemote accepts loopback, RFC1918/ULA private and link-local addresses.
@@ -486,9 +510,10 @@ func (s *Server) withSecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
-		if strings.HasPrefix(r.URL.Path, "/sign/") {
-			// The signing page is self-contained: inline styles/script, no
-			// external resources, no form posts, no framing.
+		if isPhonePagePath(r.URL.Path) {
+			// The phone pages are self-contained: inline styles/script, no
+			// external resources, no form posts, no framing. Enrollment reads
+			// camera/gallery files through the browser's file input only.
 			w.Header().Set("Content-Security-Policy",
 				"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "+
 					"img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")

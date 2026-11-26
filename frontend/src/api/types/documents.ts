@@ -15,7 +15,7 @@ import type { Template } from "./records";
 // ---------- 签名资产 ----------
 
 /** 签名来源；目前只有局域网二维码采集。 */
-export type SignatureSource = "lan_qr";
+export type SignatureSource = "lan_qr" | "archive";
 
 /** 留存的签名图片及元数据（model.Signature）。 */
 export interface Signature {

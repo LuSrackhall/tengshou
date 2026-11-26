@@ -100,6 +100,7 @@ test.describe("场景 A：合同主流程", () => {
         .filter({ has: page.getByRole("heading", { name: "新建相对方", exact: true }) });
       await expect(partyDialog).toBeVisible();
       await partyDialog.locator("#f_party_name").fill(partyName);
+      await partyDialog.locator("#f_party_id_number").fill(`E2E${stamp}`);
       await partyDialog.locator("#f_party_phone").fill("13800000000");
       await partyDialog
         .getByRole("button", { name: "保存", exact: true })

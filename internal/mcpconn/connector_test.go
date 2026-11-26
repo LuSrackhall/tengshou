@@ -62,7 +62,7 @@ func TestRunServesSharedProtocol(t *testing.T) {
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tengshou_list_parties","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"tengshou_create_party","arguments":{"name":"共享实现相对方","kind":"person"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"tengshou_create_party","arguments":{"name":"共享实现相对方","kind":"person","id_number":"110101199001011234"}}}`,
 	}, "\n") + "\n"
 
 	var stdout, stderr bytes.Buffer

@@ -135,6 +135,30 @@ func (s *Server) handleAppCancelSignatureSession(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]any{"cancelled": cancelled})
 }
 
+type reusePartySignatureInput struct {
+	PartyID string `json:"party_id"`
+}
+
+// handleAppReusePartySignature links a party's archive-level signature to the
+// contract at its current content version. Reuse is explicit (the desktop UI
+// confirms first) and audited in the change log.
+func (s *Server) handleAppReusePartySignature(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appService(w)
+	if !ok {
+		return
+	}
+	var in reusePartySignatureInput
+	if !s.readAppJSON(w, r, &in) {
+		return
+	}
+	sig, err := svc.ReusePartySignature(r.Context(), r.PathValue("id"), in.PartyID)
+	if err != nil {
+		s.writeServiceError(w, "reuse party signature", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"item": sig})
+}
+
 func (s *Server) handleAppSignatureQR(w http.ResponseWriter, r *http.Request) {
 	sess, err := s.sign.GetByID(r.PathValue("id"))
 	if err != nil {
@@ -159,13 +183,12 @@ func (s *Server) handleAppSignatureQR(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(png)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(png)
-}
-
-// signSessionView is the app-API shape of a session. The one-time token is
+} // signSessionView is the app-API shape of a session. The one-time token is
 // deliberately absent: only the QR/URL carries it.
 func (s *Server) signSessionView(sess sign.Session) map[string]any {
 	item := map[string]any{
 		"id":             sess.ID,
+		"kind":           sess.Kind,
 		"state":          sess.State,
 		"contract_id":    sess.ContractID,
 		"contract_no":    sess.ContractNo,
@@ -210,6 +233,11 @@ func (s *Server) handleSignPage(w http.ResponseWriter, r *http.Request) {
 			data.SignerName = sess.SignerName
 			data.ContractNo = sess.ContractNo
 			data.ContractTitle = sess.ContractTitle
+			if sess.ContractID == "" {
+				// Archive-level signature: the phone page is about the party,
+				// not a contract.
+				data.ContractTitle = "相对方档案签名"
+			}
 			data.ExpiresAt = sess.ExpiresAt.Format(time.RFC3339)
 			switch sess.State {
 			case sign.StateCompleted:
@@ -282,7 +310,7 @@ func (s *Server) handleSignSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", "请求体不是有效的 JSON")
 		return
 	}
-	raw, err := decodeSignatureImage(in.Image)
+	raw, err := decodeImageDataURL(in.Image)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
 		return
@@ -339,6 +367,14 @@ func (s *Server) handleSignSubmit(w http.ResponseWriter, r *http.Request) {
 		s.writeServiceError(w, "save signature", err)
 		return
 	}
+	if sess.ContractID == "" && sess.PartyID != "" {
+		// Archive-level signature: make it the party's reusable signature.
+		if err := svc.AttachPartySignature(r.Context(), sess.PartyID, sig.ID); err != nil {
+			s.sign.Release(token)
+			s.writeServiceError(w, "attach archive signature", err)
+			return
+		}
+	}
 	s.sign.Complete(token, sig.ID, sig.AssetPath, sig.WidthPx, sig.HeightPx)
 	if logger := s.opts.Logger; logger != nil {
 		logger.Info("signature captured", "contract", sig.ContractID, "signer", sig.SignerName,
@@ -354,7 +390,7 @@ func (s *Server) handleSignSubmit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func decodeSignatureImage(encoded string) ([]byte, error) {
+func decodeImageDataURL(encoded string) ([]byte, error) {
 	encoded = strings.TrimSpace(encoded)
 	if encoded == "" {
 		return nil, errors.New("缺少签名图片")

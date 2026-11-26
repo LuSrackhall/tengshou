@@ -98,6 +98,13 @@ func run(args []string) error {
 			return err
 		}
 		return runRestore(*c.dataDir, *file)
+	case "migrate-assets":
+		fs, c := newFlags("migrate-assets")
+		dryRun := fs.Bool("dry-run", false, "只输出迁移计划，不写入任何数据")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return runMigrateAssets(*c.dataDir, *c.fontPath, *c.fontIndex, *dryRun)
 	case "mcp":
 		// The desktop client exposes the exact same subcommand through
 		// internal/mcpconn; the two entry points must never grow copies.
@@ -120,6 +127,7 @@ func usage() {
   render    用模板重新生成一份合同 PDF
   backup    导出完整备份包（数据库快照 + 签名 / 公章 / 模板 / PDF + 配置）
   restore   从完整备份包恢复数据（请先关闭正在运行的腾手）
+  migrate-assets  将存量合同自定义字段中的房屋地址迁移为房产档案并关联合同
   mcp       启动 MCP stdio 连接器（供 Claude Code / Claude Desktop 注册）
   version   显示版本
 
@@ -140,6 +148,7 @@ mcp 参数：
   tengshou-cli demo --data-dir ./data
   tengshou-cli serve --data-dir ./data --port 8765
   tengshou-cli render --data-dir ./data --contract demo-contract-1
+  tengshou-cli migrate-assets --data-dir ./data --dry-run
   tengshou-cli mcp --data-dir ./data
 `, version.String())
 }

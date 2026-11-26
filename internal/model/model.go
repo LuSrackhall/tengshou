@@ -103,15 +103,19 @@ const (
 	ChangeEntitySettings  = "settings"
 	// ChangeEntityImport records import-level (file) audit entries; per-row
 	// changes stay attached to their contract entries.
-	ChangeEntityImport   = "import"
-	ChangeActionCreate   = "create"
-	ChangeActionUpdate   = "update"
-	ChangeActionDelete   = "delete"
-	ChangeActionArchive  = "archive"
-	ChangeActionImport   = "import"
-	ChangeActionExport   = "export"
-	ChangeActionRestore  = "restore"
-	ChangeActionGenerate = "generate"
+	ChangeEntityImport = "import"
+	// ChangeEntityMigration records one-time legacy data migrations (for
+	// example turning old contract address fields into property archives);
+	// the entry carries a run-level summary rather than per-row diffs.
+	ChangeEntityMigration = "migration"
+	ChangeActionCreate    = "create"
+	ChangeActionUpdate    = "update"
+	ChangeActionDelete    = "delete"
+	ChangeActionArchive   = "archive"
+	ChangeActionImport    = "import"
+	ChangeActionExport    = "export"
+	ChangeActionRestore   = "restore"
+	ChangeActionGenerate  = "generate"
 )
 
 // Party ID-photo sides for the archive upgrade (v0.2).

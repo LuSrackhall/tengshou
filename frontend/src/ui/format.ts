@@ -14,6 +14,7 @@ export const ENTITY_LABELS: Record<string, string> = {
   backup: "备份",
   settings: "设置",
   import: "导入",
+  migration: "迁移",
 };
 
 export const ACTION_LABELS: Record<string, string> = {

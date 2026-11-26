@@ -144,6 +144,7 @@ v0.2 租户档案升级新增（同样仅限回环的应用写入面）：
 | GET | `/app/api/v1/parties/{id}/id-photos/{front\|back}` | 读取证件照（校验摘要后返回图片） |
 | GET | `/app/api/v1/parties/{id}/signature` | 读取档案级签名 PNG |
 | POST | `/app/api/v1/parties/{id}/signature-sessions` | 为档案采集长期复用的手写签名（局域网扫码） |
+| POST | `/app/api/v1/contracts/{id}/signature-reuse` | 使用档案签名直接套印到合同（`{"party_id": "pty_xxx"}`，来源记为档案复用，不绑定内容版本） |
 | POST | `/app/api/v1/enroll-sessions` | 生成租户自助建档二维码会话 |
 | GET | `/app/api/v1/enroll-sessions/{id}` | 轮询自助建档状态 |
 | DELETE | `/app/api/v1/enroll-sessions/{id}` | 取消自助建档会话 |

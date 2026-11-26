@@ -51,6 +51,154 @@ func mustErrorCode(t *testing.T, err error, want string) {
 	}
 }
 
+// TestArchiveSignatureReuseBypassesContentGate pins v0.2 D3=B: an archive
+// signature reused into a contract stamps as-is. Later content edits must not
+// resurrect the B5 content_changed gate, the generation record must name the
+// archive source, and replacing the archive signature must leave both the
+// linked signature row and the already-generated document snapshot untouched.
+func TestArchiveSignatureReuseBypassesContentGate(t *testing.T) {
+	f := newTemplateFixture(t)
+	ctx := context.Background()
+	party := mustParty(t, f.svc, "档案复用租户")
+	sealRel, _, _ := f.writePNG(t, "assets/seals/seal.png")
+	seal := model.Seal{Name: "测试公章", AssetPath: sealRel, SHA256: "sealsha", WidthPx: 80, HeightPx: 30}
+	if err := f.st.PutSeal(ctx, &seal); err != nil {
+		t.Fatal(err)
+	}
+	tpl := b4Template(t, f, seal.ID)
+
+	// The archive signature itself is captured once (source lan_qr, no
+	// contract link); the party archive points at it.
+	archiveRel, aw, ah := f.writePNG(t, "assets/signatures/archive.png")
+	archive := model.Signature{
+		PartyID: party.ID, SignerName: party.Name, AssetPath: archiveRel,
+		SHA256: "archive-sha", WidthPx: aw, HeightPx: ah,
+		Source: model.SignatureSourceLANQR,
+	}
+	if err := f.st.PutSignature(ctx, &archive); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.AttachPartySignature(ctx, party.ID, archive.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	contract := mustContract(t, f.svc, service.ContractInput{
+		Year: 2026, Title: "档案复用合同", PartyBID: party.ID, Amount: 1500,
+	})
+	reused, err := f.svc.ReusePartySignature(ctx, contract.ID, party.ID)
+	if err != nil {
+		t.Fatalf("reuse: %v", err)
+	}
+	if reused.Source != model.SignatureSourceArchive || reused.ContentSHA256 != "" {
+		t.Fatalf("reused signature = %+v", reused)
+	}
+
+	preflight, err := f.svc.PreflightContractGeneration(ctx, tpl.ID, contract.ID)
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	if !preflight.Ready || preflight.Status != service.PreflightReady {
+		t.Fatalf("preflight = %+v", preflight)
+	}
+	if len(preflight.Signatures) != 1 ||
+		preflight.Signatures[0].Source != model.SignatureSourceArchive ||
+		preflight.Signatures[0].ContentSHA256 != "" {
+		t.Fatalf("signature snapshot = %+v", preflight.Signatures)
+	}
+
+	preview, err := f.svc.PreviewTemplate(ctx, tpl.ID, service.TemplatePreviewInput{ContractID: contract.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := f.svc.GenerateContractDocument(ctx, service.GenerateInput{
+		TemplateID: tpl.ID, ContractID: contract.ID, PreviewSHA256: preview.PreviewSHA256,
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if len(first.Document.Signatures) != 1 ||
+		first.Document.Signatures[0].SignatureID != reused.ID ||
+		first.Document.Signatures[0].Source != model.SignatureSourceArchive {
+		t.Fatalf("generation record signatures = %+v", first.Document.Signatures)
+	}
+
+	// Editing the contract content must not require re-confirming the archive
+	// signature: generation stays ready and succeeds without allow_stale.
+	if _, _, err := f.svc.SaveContract(ctx, service.ContractInput{
+		ID: contract.ID, ContractNo: contract.ContractNo, Year: contract.Year,
+		Title: "档案复用合同（改名）", PartyBID: party.ID, Amount: contract.Amount,
+	}); err != nil {
+		t.Fatalf("update contract: %v", err)
+	}
+	afterEdit, err := f.svc.PreflightContractGeneration(ctx, tpl.ID, contract.ID)
+	if err != nil {
+		t.Fatalf("preflight after edit: %v", err)
+	}
+	if !afterEdit.Ready || afterEdit.Status != service.PreflightReady {
+		t.Fatalf("preflight after edit = %+v", afterEdit)
+	}
+	for _, issue := range afterEdit.Issues {
+		if issue.Code == "content_changed" {
+			t.Fatalf("archive reuse must not be judged against content version: %+v", afterEdit.Issues)
+		}
+	}
+	preview2, err := f.svc.PreviewTemplate(ctx, tpl.ID, service.TemplatePreviewInput{ContractID: contract.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.GenerateContractDocument(ctx, service.GenerateInput{
+		TemplateID: tpl.ID, ContractID: contract.ID, PreviewSHA256: preview2.PreviewSHA256,
+	}); err != nil {
+		t.Fatalf("generate after edit: %v", err)
+	}
+
+	// Replacing the archive signature only affects future reuse. The row
+	// already linked to this contract and the generated document snapshot keep
+	// the original asset, so an issued PDF never changes underneath the user.
+	replacementRel, rw, rh := f.writePNG(t, "assets/signatures/archive2.png")
+	replacement := model.Signature{
+		PartyID: party.ID, SignerName: party.Name, AssetPath: replacementRel,
+		SHA256: "archive-sha-2", WidthPx: rw, HeightPx: rh,
+		Source: model.SignatureSourceLANQR,
+	}
+	if err := f.st.PutSignature(ctx, &replacement); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.AttachPartySignature(ctx, party.ID, replacement.ID); err != nil {
+		t.Fatal(err)
+	}
+	linked, err := f.rd.GetSignature(ctx, reused.ID)
+	if err != nil {
+		t.Fatalf("read linked signature: %v", err)
+	}
+	if linked.AssetPath != archive.AssetPath || linked.SHA256 != archive.SHA256 {
+		t.Fatalf("archive replacement changed the linked signature: %+v", linked)
+	}
+	docs, err := f.rd.ListDocuments(ctx, model.ListFilter{
+		ContractID: contract.ID, Status: model.DocumentStatusSuccess, Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, doc := range docs.Items {
+		for _, snap := range doc.Signatures {
+			if snap.SignatureID == reused.ID && snap.SHA256 != archive.SHA256 {
+				t.Fatalf("archive replacement changed an issued document snapshot: %+v", snap)
+			}
+		}
+	}
+	fresh, err := f.svc.ReusePartySignature(ctx, contract.ID, party.ID)
+	if err != nil {
+		t.Fatalf("reuse after archive replacement: %v", err)
+	}
+	if fresh.ID == reused.ID || fresh.AssetPath != replacement.AssetPath {
+		t.Fatalf("new reuse should pick the replacement asset: %+v", fresh)
+	}
+}
+
+// TestGenerateRecordsHistoryAndBlocksChangedContent verifies generation history,
+// regenerate links, failed attempts and the B5 content gate for on-site
+// signatures.
 func TestGenerateRecordsHistoryAndBlocksChangedContent(t *testing.T) {
 	f := newTemplateFixture(t)
 	ctx := context.Background()

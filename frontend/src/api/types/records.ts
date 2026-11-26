@@ -30,7 +30,7 @@ export interface Party {
   id_front_sha256?: string;
   id_back_path?: string;
   id_back_sha256?: string;
-  /** 档案级签名资产 id；一次采集后可复用于后续合同（需显式确认）。 */
+  /** 档案级签名资产 id；一次采集后可直接套印到后续合同（档案复用）。 */
   signature_id?: string;
   created_at: ISODateTime;
   updated_at: ISODateTime;

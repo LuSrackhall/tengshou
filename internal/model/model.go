@@ -139,7 +139,7 @@ type Party struct {
 	IDBackPath    string `json:"id_back_path,omitempty"`
 	IDBackSHA256  string `json:"id_back_sha256,omitempty"`
 	// SignatureID points at the archive-level retained signature asset. It is
-	// captured once and may be reused when signing later contracts.
+	// captured once and can be reused by later contracts as-is (v0.2 D3=B).
 	SignatureID string    `json:"signature_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -263,8 +263,10 @@ type ContractDetail struct {
 }
 
 // Signature is a retained handwritten signature image and its metadata.
-// ContractID and ContentSHA256 tie a signature to the contract and to the
-// exact content version it was collected for (B5).
+// A lan_qr row is bound to the contract and to the exact content version it
+// was collected for (B5). An archive row (v0.2 D3=B) instead points at the
+// party's long-lived archive signature: it is deliberately not bound to one
+// contract content version, so later contract edits do not invalidate it.
 type Signature struct {
 	ID            string    `json:"id"`
 	PartyID       string    `json:"party_id,omitempty"`
@@ -281,7 +283,8 @@ type Signature struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
-// Signature sources.
+// Signature sources. lan_qr is a one-time LAN QR capture (现场手写);
+// archive is the party archive signature reused for a contract (档案复用).
 const (
 	SignatureSourceLANQR   = "lan_qr"
 	SignatureSourceArchive = "archive"
@@ -407,14 +410,17 @@ const (
 )
 
 // DocumentSignatureSnapshot pins the signatures used for one generated PDF.
-// It lets users later see which signature asset was stamped into which output
-// and whether it was collected for the same contract content version.
+// It lets users later see which signature asset was stamped into which output,
+// whether it was collected on site or reused from the party archive, and (for
+// on-site captures) the content version it was collected for.
 type DocumentSignatureSnapshot struct {
 	SignatureID   string `json:"signature_id"`
 	PartyID       string `json:"party_id,omitempty"`
 	SignerName    string `json:"signer_name,omitempty"`
 	SHA256        string `json:"sha256"`
 	ContentSHA256 string `json:"content_sha256,omitempty"`
+	// Source is lan_qr (现场手写) or archive (档案复用).
+	Source string `json:"source,omitempty"`
 }
 
 // OutputDocument records one PDF generation attempt (B4): who ran it, when,

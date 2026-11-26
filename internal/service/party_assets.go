@@ -197,7 +197,7 @@ func (s *Service) PartySignatureImage(ctx context.Context, partyID string) ([]by
 
 // AttachPartySignature marks a retained signature as the party's archive
 // signature. It is called after a LAN signature session submits for a party
-// (no contract), so later contracts can reuse it after explicit confirmation.
+// (no contract), so later contracts can stamp it directly (v0.2 D3=B).
 func (s *Service) AttachPartySignature(ctx context.Context, partyID, signatureID string) error {
 	party, err := s.rd.GetParty(ctx, strings.TrimSpace(partyID))
 	if err != nil {

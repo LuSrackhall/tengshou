@@ -215,7 +215,7 @@ func TestEnrollPartyCreatesArchiveWithAssets(t *testing.T) {
 }
 
 func TestReusePartySignatureOnContract(t *testing.T) {
-	svc, _, _ := openService(t)
+	svc, rd, _ := openService(t)
 	dir := t.TempDir()
 	svc.SetDataDir(dir)
 	ctx := context.Background()
@@ -244,16 +244,55 @@ func TestReusePartySignatureOnContract(t *testing.T) {
 	if reused.Source != model.SignatureSourceArchive || reused.AssetPath != sig.AssetPath {
 		t.Fatalf("reused signature = %+v", reused)
 	}
-	if reused.ContentSHA256 == "" {
-		t.Fatal("reused signature missing content version")
+	// v0.2 D3=B: archive reuse stamps as-is and is not bound to one content
+	// version, so the reused row carries no content digest.
+	if reused.ContentSHA256 != "" {
+		t.Fatalf("reused signature should not bind a content version: %q", reused.ContentSHA256)
+	}
+	// Editing the contract content later must not force a re-confirmation.
+	if _, _, err := svc.SaveContract(ctx, service.ContractInput{
+		ID: contract.ID, ContractNo: contract.ContractNo, Year: contract.Year,
+		Title: "复用签名合同（改名）", PartyBID: party.ID, Amount: contract.Amount,
+	}); err != nil {
+		t.Fatalf("update contract: %v", err)
 	}
 	again, err := svc.ReusePartySignature(ctx, contract.ID, party.ID)
 	if err != nil {
-		t.Fatalf("reuse again: %v", err)
+		t.Fatalf("reuse after content change: %v", err)
 	}
 	if again.ID != reused.ID {
-		t.Fatalf("reuse should be idempotent: %s vs %s", again.ID, reused.ID)
+		t.Fatalf("reuse should stay idempotent across content changes: %s vs %s", again.ID, reused.ID)
 	}
+
+	// Replacing the archive signature only affects future reuse: the row
+	// already linked to the contract keeps pointing at the original asset.
+	replacementRaw := testPNG(t, 9, 5)
+	replacementSum := sha256.Sum256(replacementRaw)
+	replacement, err := svc.SaveSignature(ctx, service.SignatureInput{
+		PartyID: party.ID, SignerName: party.Name,
+		ImagePNG: replacementRaw, SHA256: hex.EncodeToString(replacementSum[:]), WidthPx: 9, HeightPx: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AttachPartySignature(ctx, party.ID, replacement.ID); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := rd.GetSignature(ctx, reused.ID)
+	if err != nil {
+		t.Fatalf("read linked signature: %v", err)
+	}
+	if stored.AssetPath != sig.AssetPath || stored.SHA256 != reused.SHA256 {
+		t.Fatalf("archive replacement changed a linked signature: %+v", stored)
+	}
+	fresh, err := svc.ReusePartySignature(ctx, contract.ID, party.ID)
+	if err != nil {
+		t.Fatalf("reuse after archive replacement: %v", err)
+	}
+	if fresh.ID == reused.ID || fresh.AssetPath != replacement.AssetPath {
+		t.Fatalf("new reuse should use the replacement asset: %+v", fresh)
+	}
+
 	// A party without an archive signature cannot be reused.
 	other := mustParty(t, svc, "无档案签名")
 	if _, err := svc.ReusePartySignature(ctx, contract.ID, other.ID); err == nil {

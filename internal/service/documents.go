@@ -578,7 +578,7 @@ func (s *Service) preflightRenderContext(rc *templateRenderContext) (*generation
 		if !ok {
 			pf.issues = append(pf.issues, PreflightIssue{
 				Code: "missing_signature",
-				Message: fmt.Sprintf("签名位置「%s」没有%s签名，请先扫码采集",
+				Message: fmt.Sprintf("签名位置「%s」没有%s签名，请先扫码采集，或在签名对话框选择「使用租户档案签名」",
 					p.ID, partyRoleLabel(p.Party)),
 			})
 			continue
@@ -591,6 +591,7 @@ func (s *Service) preflightRenderContext(rc *templateRenderContext) (*generation
 				SignerName:    sig.SignerName,
 				SHA256:        sig.SHA256,
 				ContentSHA256: sig.ContentSHA256,
+				Source:        sig.Source,
 			})
 			if !s.assetExists(sig.AssetPath) {
 				pf.issues = append(pf.issues, PreflightIssue{
@@ -600,7 +601,11 @@ func (s *Service) preflightRenderContext(rc *templateRenderContext) (*generation
 				})
 			}
 		}
-		if sig.ContentSHA256 != "" && sig.ContentSHA256 != content && !seenStale[sig.ID] {
+		// Archive reuse (v0.2 D3=B) is intentionally not bound to one contract
+		// content version: it stamps as-is, so a later content edit must not
+		// invalidate it. Only on-site (lan_qr) captures keep the B5 gate.
+		if sig.Source != model.SignatureSourceArchive &&
+			sig.ContentSHA256 != "" && sig.ContentSHA256 != content && !seenStale[sig.ID] {
 			seenStale[sig.ID] = true
 			pf.stale = append(pf.stale, sig)
 			pf.issues = append(pf.issues, PreflightIssue{

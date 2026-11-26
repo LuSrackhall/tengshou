@@ -78,8 +78,9 @@ export function createPartySignatureSession(
 }
 
 /**
- * POST /contracts/{id}/signature-reuse：显式复用档案签名到当前合同内容版本。
- * 服务端记入变更记录；同一内容版本重复调用是幂等的。
+ * POST /contracts/{id}/signature-reuse：使用租户档案签名，直接套印到合同。
+ * 服务端记入变更记录（来源：档案复用）；档案复用不绑定合同内容版本，
+ * 同一合同/档案/签名资产重复调用是幂等的。
  */
 export function reusePartySignature(
   contractId: string,

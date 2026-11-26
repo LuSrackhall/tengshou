@@ -4,11 +4,15 @@
 // 核对与整体刷新。会话生命周期（创建/轮询/取消/地址选择）由 useQrSession
 // 共用；关闭对话框（含 Esc）时取消未完成的会话（DELETE）。
 //
+// v0.2 档案复用（D3=B）：签名人档案已有长期签名时可直接「使用租户档案签名」
+// 套印到本合同，不再逐份确认，也不绑定合同内容版本；扫码手写保留为备选。
+//
 // 数据走 frontend/src/api 的 typed 端点；二维码继续用服务端生成的 PNG。
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   cancelSignatureSession,
   createSignatureSession,
+  getContract,
   getSignatureSession,
   reusePartySignature,
   signatureSessionQrUrl,
@@ -57,6 +61,8 @@ const signerId = ref(signers[0]?.id ?? "");
 const expiryText = ref("");
 const reusing = ref(false);
 const reuseMessage = ref("");
+// 本地合同详情：档案复用或扫码完成后重取，签名摘要即时刷新。
+const detail = ref<ContractDetail>(props.detail);
 
 const {
   session,
@@ -99,6 +105,7 @@ const {
     const warn = Boolean(item.content_changed);
     toast(warn ? "签名已保存，但合同内容已变更，请核对" : "签名已保存到本机", warn);
     refreshAfterWrite().catch((error: unknown) => toast(errorMessage(error), true));
+    void refreshDetail();
     return {
       text: `签名已保存：${item.signer_name} · ${fmtDate(item.completed_at)}${version}${changed}`,
       tone: warn ? "warn" : "ok",
@@ -111,18 +118,33 @@ const startLabel = computed(() =>
   session.value ? "重新生成二维码" : "生成签名二维码",
 );
 
-/** 当前签名人档案；档案里已采集长期签名时可显式复用。 */
-const selectedParty = computed(() => {
-  if (props.detail.party_a?.id === signerId.value) {
-    return props.detail.party_a;
+/** 重新拉取合同详情，让签名摘要展示刚落库的签名记录。 */
+async function refreshDetail(): Promise<void> {
+  try {
+    detail.value = await getContract(props.contract.id);
+  } catch {
+    /* transient：保留上一次详情，签名摘要仍可用 */
   }
-  if (props.detail.party_b?.id === signerId.value) {
-    return props.detail.party_b;
+}
+
+/** 当前签名人档案；档案里有长期签名时可直接套印到本合同。 */
+const selectedParty = computed(() => {
+  if (detail.value.party_a?.id === signerId.value) {
+    return detail.value.party_a;
+  }
+  if (detail.value.party_b?.id === signerId.value) {
+    return detail.value.party_b;
   }
   return null;
 });
 const archiveSignatureAvailable = computed(
   () => Boolean(selectedParty.value?.signature_id),
+);
+/** 乙方档案即租户档案；甲方档案同样可复用，按钮文案按角色区分。 */
+const reuseLabel = computed(() =>
+  signers.find((signer) => signer.id === signerId.value)?.role === "甲方"
+    ? "使用甲方档案签名"
+    : "使用租户档案签名",
 );
 
 async function reuseArchiveSignature(): Promise<void> {
@@ -130,20 +152,14 @@ async function reuseArchiveSignature(): Promise<void> {
   if (!party?.signature_id || reusing.value) {
     return;
   }
-  if (
-    !window.confirm(
-      `确定在合同 ${props.contract.contract_no} 中复用「${party.name}」档案里保存的签名吗？\n\n复用只对当前合同内容版本生效，并记入变更记录；合同内容再次修改后需要重新确认。`,
-    )
-  ) {
-    return;
-  }
   reusing.value = true;
   reuseMessage.value = "";
   try {
     await reusePartySignature(props.contract.id, party.id);
-    reuseMessage.value = "已复用档案签名（已记入变更记录），可以直接生成合同。";
-    toast("已复用档案签名");
+    reuseMessage.value = "已使用档案签名（来源：档案复用，已记入变更记录），可以直接生成合同。";
+    toast("已使用档案签名");
     await refreshAfterWrite();
+    await refreshDetail();
   } catch (error) {
     toast(errorMessage(error), true);
   } finally {
@@ -195,9 +211,9 @@ onBeforeUnmount(() => {
             </div>
             <div v-if="archiveSignatureAvailable" class="field">
               <label>档案签名</label>
-              <span class="help">该档案已采集长期签名，可显式复用到本合同当前内容版本；复用会记入变更记录，合同内容修改后需重新确认。</span>
+              <span class="help">该档案已采集长期签名，可直接套印到本合同（来源记为「档案复用」）；签署事实由你自行确认。</span>
               <button type="button" class="reuse-btn" :disabled="reusing" @click="reuseArchiveSignature">
-                {{ reusing ? "正在复用…" : "使用档案签名" }}
+                {{ reusing ? "正在套印…" : reuseLabel }}
               </button>
               <div v-if="reuseMessage" class="sign-state ok">{{ reuseMessage }}</div>
             </div>

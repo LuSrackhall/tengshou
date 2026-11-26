@@ -90,8 +90,8 @@ func serveImage(w http.ResponseWriter, contentType string, raw []byte) {
 }
 
 // handleAppCreatePartySignatureSession starts an archive-level signature
-// capture: the signature is kept with the party archive and can be reused for
-// later contracts after explicit confirmation.
+// capture: the signature is kept with the party archive and can be stamped
+// into later contracts directly (v0.2 D3=B).
 func (s *Server) handleAppCreatePartySignatureSession(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.appService(w); !ok {
 		return

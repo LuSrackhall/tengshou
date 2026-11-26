@@ -113,6 +113,8 @@ export interface RenewalDraft {
     contract_no: string;
     title: string;
     year: number;
+    /** 来源合同当前状态；只有 active 才会触发续签联动。 */
+    status: ContractStatus;
     lease_start?: string;
     lease_end?: string;
   };

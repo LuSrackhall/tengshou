@@ -63,6 +63,9 @@ func TestRenewalDraftPrefillRules(t *testing.T) {
 		draft.Source.Title != source.Title || draft.Source.Year != source.Year {
 		t.Fatalf("source summary = %+v", draft.Source)
 	}
+	if draft.Source.Status != model.ContractActive {
+		t.Fatalf("source status = %q, want active", draft.Source.Status)
+	}
 	in := draft.Input
 	if in.ContractNo != "" {
 		t.Fatalf("draft contract number = %q, want empty (auto-allocated)", in.ContractNo)
@@ -157,6 +160,32 @@ func TestRenewalSourceValidation(t *testing.T) {
 	})
 	if code := businessCode(t, err); code != "not_found" {
 		t.Fatalf("create with missing source code = %q", code)
+	}
+}
+
+// TestRenewalDraftReportsSourceStatus covers the form gate added for the
+// build-basic review S2: the draft carries the source status so the UI only
+// asks for the earlier-termination confirmation while the server can still
+// link (source active).
+func TestRenewalDraftReportsSourceStatus(t *testing.T) {
+	svc, _, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "状态来源租户")
+	source := mustContract(t, svc, service.ContractInput{
+		Year: 2026, Title: "状态来源合同", PartyBID: party.ID,
+		LeaseStart: "2026-01-01", LeaseEnd: "2026-12-31", Status: "生效",
+	})
+	if _, err := svc.TerminateContract(ctx, source.ID, service.TerminationInput{
+		TerminatedOn: "2026-06-30", Reason: "提前退租",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := svc.RenewalDraft(ctx, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Source.Status != model.ContractTerminated {
+		t.Fatalf("terminated source status = %q, want terminated", draft.Source.Status)
 	}
 }
 

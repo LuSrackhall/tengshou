@@ -86,7 +86,7 @@ D3 把「乙方档案与直接签订」拆成三层：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/app/api/v1/contracts/{id}/renewal-draft` | 返回 `{source, input, reused}`；`input` 为预填的 `ContractInput` |
+| GET | `/app/api/v1/contracts/{id}/renewal-draft` | 返回 `{source, input, reused}`；`input` 为预填的 `ContractInput`，`source` 带来源合同状态（`status`）、租期与编号，界面仅在来源仍 `active` 时做提前终止预确认 |
 | POST | `/app/api/v1/contracts` | 接受 `source_contract_id`（仅创建时生效） |
 | GET | `/app/api/v1/contracts?party_id=<id>` | 按相对方过滤（甲方或乙方引用），供档案页列历史合同 |
 

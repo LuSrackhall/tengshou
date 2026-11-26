@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestAppTerminateContract covers the v0.2 termination endpoint: an active
@@ -122,5 +123,60 @@ func TestAppRenewalEarlyStartConfirmation(t *testing.T) {
 		detail.Contract["termination_reason"] != "renewal" ||
 		detail.Contract["terminated_on"] != "2026-05-31" {
 		t.Fatalf("source after confirmed renewal: %s", body)
+	}
+}
+
+// TestAppBootstrapExpiryCounters covers REQ-002 on the HTTP bootstrap: the
+// desktop top bar counters count expiring/expired active leases and the
+// reminder never changes the contract status.
+func TestAppBootstrapExpiryCounters(t *testing.T) {
+	f := newFixture(t)
+	day := func(offset int) string {
+		return time.Now().UTC().AddDate(0, 0, offset).Format("2006-01-02")
+	}
+	create := func(title, start, end string) map[string]any {
+		t.Helper()
+		resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/contracts", map[string]any{
+			"year": time.Now().Year(), "title": title, "party_b_id": f.partyBID,
+			"lease_start": start, "lease_end": end, "status": "active",
+			"data": map[string]any{},
+		}, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("create %s: %d %s", title, resp.StatusCode, body)
+		}
+		return decodeAppItem(t, body)
+	}
+	expiring := create("接口即将到期合同", day(-300), day(10))
+	create("接口已到期合同", day(-400), day(-1))
+	create("接口远期合同", day(-1), day(100))
+
+	resp, body := f.get(t, "/app/api/v1/bootstrap", false)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("bootstrap: %d %s", resp.StatusCode, body)
+	}
+	var boot struct {
+		Stats struct {
+			ExpiringContracts int `json:"expiring_contracts"`
+			ExpiredContracts  int `json:"expired_contracts"`
+		} `json:"stats"`
+	}
+	if err := json.Unmarshal(body, &boot); err != nil {
+		t.Fatalf("decode bootstrap: %v body=%s", err, body)
+	}
+	if boot.Stats.ExpiringContracts != 1 || boot.Stats.ExpiredContracts != 1 {
+		t.Fatalf("bootstrap counters = %d/%d, want 1/1",
+			boot.Stats.ExpiringContracts, boot.Stats.ExpiredContracts)
+	}
+
+	// The reminder is read-only: the contract is still active.
+	resp, body = f.get(t, "/app/api/v1/contracts/"+expiring["id"].(string), false)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expiring contract: %d %s", resp.StatusCode, body)
+	}
+	var detail struct {
+		Contract map[string]any `json:"contract"`
+	}
+	if err := json.Unmarshal(body, &detail); err != nil || detail.Contract["status"] != "active" {
+		t.Fatalf("reminder changed status: %s", body)
 	}
 }

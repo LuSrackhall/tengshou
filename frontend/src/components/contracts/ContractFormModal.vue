@@ -14,7 +14,6 @@ import { ApiError } from "../../api/client";
 import {
   createContract,
   deleteContract as deleteContractRequest,
-  getContract,
   updateContract,
 } from "../../api/endpoints";
 import type {
@@ -45,7 +44,6 @@ import PartyBPicker from "./PartyBPicker.vue";
 import TerminationFields from "./TerminationFields.vue";
 import {
   defaultPartyAID,
-  earlyRenewalTerminationPrompt,
   oneYearLeaseEnd,
   rememberPartyA,
   todayISO,
@@ -58,6 +56,7 @@ import {
   syncContractValues,
   type ContractSeed,
 } from "./form";
+import { useContractTermination, useRenewalSource } from "./useContractTermination";
 
 const props = defineProps<{
   mode: "create" | "edit";
@@ -84,16 +83,21 @@ const saving = ref(false);
 const fieldErrors = ref<ApiFieldError[]>([]);
 const errorText = ref("");
 const bodyEl = ref<HTMLDivElement | null>(null);
-const renewalSource = ref<Contract | null>(null);
-const renewalSourceMissing = ref(false);
 let unsubscribe: (() => void) | null = null;
 
 const contractId = computed(() => props.contract?.id ?? "");
 
-// 「已终止」附加字段：编辑时带出，新建时为空；离开该状态不提交。
-const terminatedOn = ref(props.contract?.terminated_on ?? "");
-const terminationReason = ref(props.contract?.termination_reason ?? "");
-const terminationNote = ref(props.contract?.termination_note ?? "");
+// 终止三件套与续签来源在 useContractTermination（含早终止预确认）。
+const {
+  terminatedOn,
+  terminationReason,
+  terminationNote,
+  inputExtras: terminationExtras,
+  confirmEarlyRenewal,
+} = useContractTermination(() => props.contract);
+const { renewalSource, renewalSourceMissing, loadRenewalSource } = useRenewalSource(
+  () => props.contract,
+);
 
 const seed = computed<ContractSeed | null>(() => {
   if (props.mode === "edit") {
@@ -346,17 +350,14 @@ async function submit(confirmRenewal = false): Promise<void> {
   // 续签起租日早于原合同到期日：先在本地确认，避免一次注定失败的请求；
   // 服务端仍会校验同样的规则，数据在确认后变化时回退到错误确认。
   if (!confirmRenewal && values.status === "生效") {
-    const prompt = earlyRenewalTerminationPrompt(
+    const confirmed = confirmEarlyRenewal(
       values.lease_start ?? "",
-      props.renewal?.source.lease_end ?? renewalSource.value?.lease_end ?? "",
-      props.renewal?.source.contract_no ?? renewalSource.value?.contract_no ?? "",
+      props.renewal?.source ?? renewalSource.value ?? null,
     );
-    if (prompt) {
-      if (!window.confirm(prompt)) {
-        return;
-      }
-      confirmRenewal = true;
+    if (confirmed === null) {
+      return;
     }
+    confirmRenewal = confirmed;
   }
   saving.value = true;
   fieldErrors.value = [];
@@ -366,10 +367,7 @@ async function submit(confirmRenewal = false): Promise<void> {
     partyBID: partyBID.value,
     partyBName: partyBName.value,
     assetID: assetID.value,
-    terminatedOn: terminatedOn.value,
-    terminationReason: terminationReason.value,
-    terminationNote: terminationNote.value,
-    renewalTerminationConfirm: confirmRenewal,
+    ...terminationExtras(confirmRenewal),
   });
   try {
     if (props.mode === "edit" && props.contract) {
@@ -456,19 +454,6 @@ function openSource(): void {
   }
 }
 
-async function loadRenewalSource(): Promise<void> {
-  const sourceId = props.contract?.source_contract_id;
-  if (!sourceId) {
-    return;
-  }
-  try {
-    const source = await getContract(sourceId);
-    renewalSource.value = source.contract;
-  } catch {
-    renewalSourceMissing.value = true;
-  }
-}
-
 // 行内「生成 PDF」入口：生成面板完成首次渲染（模板加载后高度稳定）再滚动。
 function onGenerationReady(): void {
   if (!props.focusGenerate) {
@@ -485,9 +470,7 @@ function onGenerationReady(): void {
 onMounted(() => {
   document.addEventListener("keydown", onKeydown);
   unsubscribe = subscribeChange(onChange);
-  if (props.contract?.source_contract_id) {
-    void loadRenewalSource();
-  }
+  void loadRenewalSource();
 });
 
 onBeforeUnmount(() => {

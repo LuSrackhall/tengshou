@@ -176,6 +176,33 @@ func TestContractOverlapHardBlock(t *testing.T) {
 	}
 }
 
+// TestContractOverlapLeaseBoundary pins the closed-interval semantics of the
+// occupancy check: a shared endpoint day (previous lease_end == next
+// lease_start) counts as overlap, while starting the day after is allowed.
+func TestContractOverlapLeaseBoundary(t *testing.T) {
+	svc, _, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "边界租户")
+	asset := mustAsset(t, svc, "边界房产")
+	mustContract(t, svc, service.ContractInput{
+		Year: 2026, Title: "边界首合同", PartyBID: party.ID, AssetID: asset.ID,
+		LeaseStart: "2026-01-01", LeaseEnd: "2026-12-31", Status: "生效",
+	})
+
+	if _, _, err := svc.SaveContract(ctx, service.ContractInput{
+		Year: 2027, Title: "共享到期日起租合同", PartyBID: party.ID, AssetID: asset.ID,
+		LeaseStart: "2026-12-31", LeaseEnd: "2027-12-30", Status: "生效",
+	}); businessCode(t, err) != "lease_conflict" {
+		t.Fatalf("shared endpoint day should count as overlap: %v", err)
+	}
+	if _, _, err := svc.SaveContract(ctx, service.ContractInput{
+		Year: 2027, Title: "次日续租合同", PartyBID: party.ID, AssetID: asset.ID,
+		LeaseStart: "2027-01-01", LeaseEnd: "2027-12-31", Status: "生效",
+	}); err != nil {
+		t.Fatalf("next-day start should be allowed: %v", err)
+	}
+}
+
 // TestRenewalLinkageTerminatesSource covers the renewal rule: an active
 // renewal ends its source with reason renewal; an earlier new start requires
 // confirmation and then terminates the day before the new start; a draft
@@ -369,5 +396,137 @@ func TestContractTerminationViaEditForm(t *testing.T) {
 	stored, _ := rd.GetContract(ctx, contract.ID)
 	if stored.TerminatedOn != "" || stored.TerminationReason != "" {
 		t.Fatalf("stored reopened contract = %+v", stored)
+	}
+}
+
+// TestRenewalLinkageIdempotent pins the documented retry promise: replaying
+// the renewal save after the linkage already ended the source keeps the
+// source terminated (same date) and writes no second linkage audit entry.
+func TestRenewalLinkageIdempotent(t *testing.T) {
+	svc, rd, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "幂等租户")
+	asset := mustAsset(t, svc, "幂等房产")
+	source := mustContract(t, svc, service.ContractInput{
+		Year: 2026, Title: "幂等原合同", PartyBID: party.ID, AssetID: asset.ID,
+		LeaseStart: "2026-01-01", LeaseEnd: "2026-12-31", Status: "生效",
+	})
+	renewal := mustContract(t, svc, service.ContractInput{
+		Year: 2027, Title: "幂等续签合同", PartyBID: party.ID, AssetID: asset.ID,
+		LeaseStart: "2027-01-01", LeaseEnd: "2027-12-31", Status: "生效",
+		SourceContractID: source.ID,
+	})
+	closed, err := rd.GetContract(ctx, source.ID)
+	if err != nil || closed.Status != model.ContractTerminated || closed.TerminatedOn != "2026-12-31" {
+		t.Fatalf("source after linkage = %+v err=%v", closed, err)
+	}
+
+	linkAuditCount := func() int {
+		t.Helper()
+		logs, err := rd.ListChangeLogs(ctx, store.ChangeFilter{EntityID: source.ID})
+		if err != nil {
+			t.Fatalf("changelog: %v", err)
+		}
+		count := 0
+		for _, entry := range logs.Items {
+			if strings.Contains(entry.Summary, "续签联动") {
+				count++
+			}
+		}
+		return count
+	}
+	before := linkAuditCount()
+	if before != 1 {
+		t.Fatalf("linkage audit entries = %d, want 1", before)
+	}
+
+	// Replay the same renewal save: no error, source untouched, no duplicate
+	// audit entry.
+	if _, _, err := svc.SaveContract(ctx, service.ContractInput{
+		ID: renewal.ID, Year: renewal.Year, Title: renewal.Title, PartyBID: party.ID,
+		AssetID: asset.ID, LeaseStart: renewal.LeaseStart, LeaseEnd: renewal.LeaseEnd,
+		Status: "生效",
+	}); err != nil {
+		t.Fatalf("replay renewal save: %v", err)
+	}
+	after, err := rd.GetContract(ctx, source.ID)
+	if err != nil || after.Status != model.ContractTerminated || after.TerminatedOn != "2026-12-31" {
+		t.Fatalf("source after replay = %+v err=%v", after, err)
+	}
+	if got := linkAuditCount(); got != before {
+		t.Fatalf("replay wrote another linkage entry: %d -> %d", before, got)
+	}
+}
+
+// TestContractExpiryWindowBoundary pins the 30-day reminder window: a lease
+// ending exactly 30 days out is expiring, day 31 is not.
+func TestContractExpiryWindowBoundary(t *testing.T) {
+	svc, rd, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "窗口租户")
+	in30 := mustContract(t, svc, service.ContractInput{
+		Year: time.Now().Year(), Title: "第 30 天到期合同", PartyBID: party.ID,
+		LeaseStart: dayOffset(-100), LeaseEnd: dayOffset(30), Status: "生效",
+	})
+	in31 := mustContract(t, svc, service.ContractInput{
+		Year: time.Now().Year(), Title: "第 31 天到期合同", PartyBID: party.ID,
+		LeaseStart: dayOffset(-100), LeaseEnd: dayOffset(31), Status: "生效",
+	})
+	if got, _ := rd.GetContract(ctx, in30.ID); got.ExpiryState != model.ExpiryStateExpiring {
+		t.Fatalf("day 30 expiry_state = %q, want expiring", got.ExpiryState)
+	}
+	if got, _ := rd.GetContract(ctx, in31.ID); got.ExpiryState != "" {
+		t.Fatalf("day 31 expiry_state = %q, want empty", got.ExpiryState)
+	}
+	stats, err := svc.Stats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.ExpiringContracts != 1 {
+		t.Fatalf("expiring counter = %d, want 1", stats.ExpiringContracts)
+	}
+}
+
+// TestTerminationFieldDiffAudited pins the field-level change log of a
+// termination: status, terminated_on and termination_reason are recorded.
+func TestTerminationFieldDiffAudited(t *testing.T) {
+	svc, rd, _ := openService(t)
+	ctx := context.Background()
+	party := mustParty(t, svc, "字段差异租户")
+	contract := mustContract(t, svc, service.ContractInput{
+		Year: 2026, Title: "字段差异合同", PartyBID: party.ID,
+		LeaseStart: "2026-01-01", LeaseEnd: "2026-12-31", Status: "生效",
+	})
+	if _, err := svc.TerminateContract(ctx, contract.ID, service.TerminationInput{
+		TerminatedOn: "2026-06-30", Reason: "提前退租", Note: "字段差异",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := rd.ListChangeLogs(ctx, store.ChangeFilter{EntityID: contract.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var changes []model.FieldChange
+	for _, entry := range logs.Items {
+		if strings.Contains(entry.Summary, "终止合同") {
+			changes = entry.Changes
+			break
+		}
+	}
+	if changes == nil {
+		t.Fatalf("termination audit entry missing: %+v", logs.Items)
+	}
+	byField := map[string]model.FieldChange{}
+	for _, change := range changes {
+		byField[change.Field] = change
+	}
+	if got := byField["status"]; got.New != "已终止" {
+		t.Fatalf("status change = %+v", got)
+	}
+	if got := byField["terminated_on"]; got.New != "2026-06-30" {
+		t.Fatalf("terminated_on change = %+v", got)
+	}
+	if got := byField["termination_reason"]; got.New != "提前退租" {
+		t.Fatalf("termination_reason change = %+v", got)
 	}
 }

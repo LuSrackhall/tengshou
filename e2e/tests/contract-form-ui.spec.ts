@@ -3,7 +3,8 @@
 // 覆盖 te-thrth 需求中此前没有自动化验证的界面行为：
 //   - 乙方「最近使用」与租户/房产的「快速新建」入口（REQ-002 / REQ-003）；
 //   - 选中同证件号档案时的判重警告（REQ-006 界面侧）；
-//   - 保存与在租房产重叠的租期时，toast 展示冲突合同编号（REQ-003 界面侧）。
+//   - 保存与在租房产重叠的租期时，草稿 toast / 生效硬拦都展示冲突合同编号
+//     （REQ-003 界面侧）。
 // 只驱动发布形态的 tengshou-cli serve；数据经页面接口准备，断言走界面。
 import { expect, test } from "./support/app-fixture";
 import { shot, trackConsoleErrors } from "./support/ui";
@@ -214,8 +215,39 @@ test.describe("场景 F：证件号判重与租期重叠的界面提示", () => 
     await expect(toast).toHaveClass(/show/);
     await shot(page, testInfo, "01-租期重叠提示");
 
+    await test.step("保存「生效」重叠合同：弹窗保留、错误含冲突编号、不新建合同", async () => {
+      const listResponse = await page.request.get(`${app.baseURL}/app/api/v1/contracts`);
+      expect(listResponse.ok()).toBeTruthy();
+      const totalBefore = ((await listResponse.json()) as { total: number }).total;
+
+      const activeDialog = await openNewContract(page);
+      await activeDialog.locator("#f_contract_title").fill(`E2E 重叠生效合同 ${stamp}`);
+      await choosePartyB(activeDialog, tenant.name);
+      await chooseAsset(activeDialog, assetName);
+      await activeDialog.locator("#f_contract_lease_start").fill("2026-06-01");
+      await activeDialog.locator("#f_contract_lease_end").fill("2027-05-31");
+      await activeDialog.locator("#f_contract_status").selectOption("生效");
+      await activeDialog.getByRole("button", { name: "保存", exact: true }).click();
+
+      // 硬拦：弹窗保持并显示冲突合同编号，不跳转、不关闭。
+      await expect(activeDialog).toBeVisible();
+      await expect(activeDialog.locator("#contractErrors")).toContainText(
+        `租期与生效合同（编号 ${first.contract_no}）重叠`,
+      );
+      await shot(page, testInfo, "02-生效重叠硬拦");
+      await activeDialog.getByRole("button", { name: "取消" }).click();
+      await expect(activeDialog).toBeHidden();
+
+      const afterResponse = await page.request.get(`${app.baseURL}/app/api/v1/contracts`);
+      expect(afterResponse.ok()).toBeTruthy();
+      const totalAfter = ((await afterResponse.json()) as { total: number }).total;
+      expect(totalAfter).toBe(totalBefore);
+    });
+
+    // 「生效」硬拦是预期行为：浏览器会把 409 记为一条资源加载错误，
+    // 这里只忽略这条，其余控制台错误仍必须为空。
     expect(
-      consoleErrors,
+      consoleErrors.filter((text) => !text.includes("409 (Conflict)")),
       `浏览器控制台出现错误：\n${consoleErrors.join("\n")}`,
     ).toEqual([]);
   });

@@ -235,6 +235,8 @@ test.describe("场景 G：终止 → 重新出租 → 续签", () => {
     const row = page.locator(`#contractTable tr[data-id="${contract.id}"]`);
     await expect(row).toContainText("即将到期");
     await expect(page.locator("#contractSummary")).toContainText("即将到期 1 份");
+    // 顶栏计数同样来自 bootstrap 的 stats（REQ-002）。
+    await expect(page.locator("#meta")).toContainText("即将到期 1 份");
     // 提醒不改状态。
     expect((await contractStatus(page, app, contract.id)).status).toBe("active");
     await shot(page, testInfo, "04-到期提醒徽标");

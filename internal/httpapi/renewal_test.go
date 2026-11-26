@@ -13,6 +13,7 @@ type renewalDraftPayload struct {
 		ContractNo string `json:"contract_no"`
 		Title      string `json:"title"`
 		Year       int    `json:"year"`
+		Status     string `json:"status"`
 	} `json:"source"`
 	Input struct {
 		ContractNo       string         `json:"contract_no"`
@@ -58,6 +59,9 @@ func TestAppRenewalDraftAndSourceTrace(t *testing.T) {
 	if draft.Source.ID != f.contractID || draft.Source.ContractNo == "" ||
 		draft.Source.Title != "幸福村房屋租赁合同" {
 		t.Fatalf("source = %+v", draft.Source)
+	}
+	if draft.Source.Status != "active" {
+		t.Fatalf("source status = %q, want active", draft.Source.Status)
 	}
 	if draft.Input.ContractNo != "" || draft.Input.Status != "draft" ||
 		draft.Input.SignedOn != "" || draft.Input.ValidFrom != "" || draft.Input.ValidTo != "" {

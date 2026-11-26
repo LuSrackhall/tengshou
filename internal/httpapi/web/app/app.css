@@ -153,6 +153,15 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .field .help { font-size: 12.5px; color: var(--muted); }
 .field .help.warn { color: var(--warn); }
 
+/* 金额大写（te-7c5v1）：自动预览一行 +「改」；手填时输入框与「恢复自动」。 */
+.money-words {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
+  font-size: 12.5px; color: var(--muted);
+}
+.money-words label { flex: 1 1 100%; font-size: 12.5px; color: var(--muted); }
+.money-words .money-words-auto { flex: 1 1 auto; }
+.money-words input { flex: 1 1 200px; }
+
 /* 合同三方选择器：乙方（租户）与租赁房产 */
 .picker-field { position: relative; }
 .picker-list {

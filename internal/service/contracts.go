@@ -401,7 +401,9 @@ func (s *Service) buildContract(ctx context.Context, in ContractInput, existing 
 		validation.add(model.FieldPartyB, "相对方", "不能为空")
 	}
 
-	applyDynamicFieldInput(fields, contract.Data, in.Data, existing == nil, validation)
+	// 金额大写覆盖（te-7c5v1）先于动态字段处理：保留键不是字段定义，空值表示
+	// 清除覆盖、恢复自动大写；其余输入键照旧由 applyDynamicFieldInput 校验。
+	applyDynamicFieldInput(fields, contract.Data, applyMoneyWordsInput(fields, contract.Data, in.Data, validation), existing == nil, validation)
 	if contract.ContractNo == "" && !dryRun {
 		validation.add(model.FieldContractNo, "合同编号", "不能为空")
 	}

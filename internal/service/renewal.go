@@ -97,6 +97,11 @@ func (s *Service) RenewalDraft(ctx context.Context, contractID string) (RenewalD
 	}
 	keys := make([]string, 0, len(input.Data))
 	for key := range input.Data {
+		// 金额大写覆盖随 data 原样带出（te-7c5v1），但它不是用户字段，
+		// 不计入「已带出 N 项信息」的字段清单。
+		if _, reserved := moneyWordsFieldKey(key); reserved {
+			continue
+		}
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)

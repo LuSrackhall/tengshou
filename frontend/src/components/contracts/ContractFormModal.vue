@@ -54,8 +54,10 @@ import {
   collectContractInput,
   renewalSeed,
   syncContractValues,
+  syncWordsValues,
   type ContractSeed,
 } from "./form";
+import { moneyWordsKey } from "./moneyWords";
 import { useContractTermination, useRenewalSource } from "./useContractTermination";
 
 const props = defineProps<{
@@ -272,6 +274,7 @@ const contractFields = computed(() =>
 );
 
 syncContractValues(values, props.fields, seed.value, partyBName.value, props.currentYear);
+syncWordsValues(values, props.fields, seed.value);
 
 // 租期默认一年：新建（含续签）时带出今天 → 一年后的前一天，用户可改。
 const leaseAutoEnd = ref("");
@@ -550,8 +553,10 @@ onBeforeUnmount(() => {
               :key="field.key"
               :field="field"
               :model-value="values[field.key] ?? ''"
+              :words-value="values[moneyWordsKey(field.key)] ?? ''"
               :readonly="mode === 'edit' && field.key === 'contract_no'"
               @update:model-value="setFieldValue(field.key, $event)"
+              @update:words-value="values[moneyWordsKey(field.key)] = $event"
             />
             <TerminationFields
               v-if="values.status === '已终止'"

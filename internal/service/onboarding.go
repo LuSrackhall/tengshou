@@ -545,6 +545,10 @@ func bindingField(key string, contractFields, partyFields map[string]model.Field
 	if dataKey, ok := strings.CutPrefix(rest, "data."); ok {
 		rest = dataKey
 	}
+	// 金额大写绑定（te-7c5v1）指向同一个字段定义：archived 检查仍按字段键。
+	if fieldKey, ok := strings.CutSuffix(rest, ".words"); ok {
+		rest = fieldKey
+	}
 	field, exists := fields[rest]
 	return field, exists
 }

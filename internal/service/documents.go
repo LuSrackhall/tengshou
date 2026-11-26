@@ -399,10 +399,11 @@ func (s *Service) generateContractDocument(ctx context.Context, tpl model.Templa
 		return TemplateRenderResult{}, err
 	}
 	built, err := overlay.Build(overlay.Options{
-		Pages:      pages,
-		Placements: placements,
-		Font:       family,
-		Resolver:   &templateResolver{rc: rc},
+		Pages:           pages,
+		Placements:      placements,
+		Font:            family,
+		Resolver:        &templateResolver{rc: rc},
+		MaskFieldValues: tpl.MaskFieldValues,
 	})
 	if err != nil {
 		message := "生成 PDF 失败：" + err.Error()

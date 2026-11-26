@@ -440,6 +440,18 @@ button.link {
 .tpl-status { font-size: 12.5px; color: var(--muted); }
 .tpl-status.ok { color: var(--accent); }
 .tpl-status.warn { color: var(--warn); }
+.tpl-hint {
+  font-size: 12.5px; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; display: grid; gap: 6px;
+}
+.tpl-hint p { margin: 0; }
+.tpl-hint ul { margin: 0; padding-left: 18px; color: var(--ink); }
+.tpl-hint-note { font-size: 12px; color: var(--muted); margin: 0; }
+.tpl-mask-toggle { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink); }
+.tpl-overlap { cursor: pointer; }
+.tpl-overlap:hover, .tpl-overlap:focus-visible { outline: 1px solid var(--warn); }
+.tpl-list-item.overlap:not(.selected) { border-color: var(--warn); }
+.tpl-list-item .tpl-overlap-badge { color: var(--warn); font-size: 12px; }
 
 .tpl-preview-overlay {
   position: absolute; inset: 0; z-index: 5; background: color-mix(in srgb, var(--card) 97%, transparent);

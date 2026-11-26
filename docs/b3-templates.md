@@ -79,6 +79,21 @@ pdfcpu 使用 `api.PDFMultiWatermarkForReadSeeker` + `api.AddWatermarks`：套�
   返回 `text_overflow` 警告。日期自动显示为「2026年1月1日」，金额显示为
   「1,200.00」。
 
+### 标定辅助（te-rccn0）
+
+- **占位符提示**：编辑器加载模板后扫描 PDF 文字，发现【…】或连续下划线时，
+  在侧栏显示数量与前 5 个示例，提醒为占位符预留空白。只提示，不阻断保存、
+  预览或生成。
+- **重叠提醒**：保存标定时，公章/签名框与字段框的重叠面积超过较小框的 30%
+  会返回 `overlaps` 并在 `warnings` 里提示；保存仍然成功，侧栏「重叠提醒」
+  可点击定位到对应框。
+- **字段值白底遮盖**（每模板开关，默认关）：开启后套印时先在字段框内铺白色
+  矩形再写字，用来遮住模板里保留的【…】占位符。开关随「保存为新版本」一起
+  持久化，并计入预览摘要；旧版本保持原样。
+- **必填体检去误报**：模板体检中，已有任意 `party_b.*` 绑定即视为「相对方」
+  已标定；已有 `contract.year` 或 `contract.signed_on` 绑定即视为「年度」已
+  标定（规则表可扩展）。
+
 ## 5. 版本模型
 
 - 每个版本是 `templates` 表中的一行：`name` 相同、`version` 递增、`kind=pdf`，
@@ -102,7 +117,7 @@ pdfcpu 使用 `api.PDFMultiWatermarkForReadSeeker` + `api.AddWatermarks`：套�
 | GET | `/app/api/v1/templates?kind=pdf` | 模板版本列表（元数据） |
 | GET | `/app/api/v1/templates/{id}` | 模板详情（含 placements） |
 | POST | `/app/api/v1/templates/import` | `{name, file_name, file_base64}` 导入 `.docx`/`.pdf`，同名递增版本 |
-| PUT | `/app/api/v1/templates/{id}/mapping` | `{placements}` 保存标定，生成新版本 |
+| PUT | `/app/api/v1/templates/{id}/mapping` | `{placements, mask_field_values}` 保存标定与白底开关，生成新版本；响应含 `overlaps` |
 | GET | `/app/api/v1/templates/{id}/usage` | 影响范围统计 |
 | GET | `/app/api/v1/templates/{id}/pdf` | 模板 PDF（PDF.js 使用） |
 | GET | `/app/api/v1/templates/{id}/source` | 原始 `.docx` / `.pdf` 下载 |

@@ -462,15 +462,17 @@ func (s *Service) CheckTemplate(ctx context.Context, id string) (TemplateCheck, 
 		if field.Archived || !field.Required || field.Type == model.FieldTypeImage {
 			continue
 		}
-		if !bound[bindingKey("contract", field)] {
-			result.Issues = append(result.Issues, TemplateCheckIssue{
-				Code:     "missing_required_field",
-				Severity: CheckStatusWarn,
-				Field:    bindingKey("contract", field),
-				Message:  fmt.Sprintf("必填合同字段「%s」还没有标定位置", field.Label),
-				Action:   "到模板标定页添加该字段的位置，或确认这个字段不需要出现在合同正文中",
-			})
+		key := bindingKey("contract", field)
+		if bound[key] || requiredFieldCovered(key, bound) {
+			continue
 		}
+		result.Issues = append(result.Issues, TemplateCheckIssue{
+			Code:     "missing_required_field",
+			Severity: CheckStatusWarn,
+			Field:    bindingKey("contract", field),
+			Message:  fmt.Sprintf("必填合同字段「%s」还没有标定位置", field.Label),
+			Action:   "到模板标定页添加该字段的位置，或确认这个字段不需要出现在合同正文中",
+		})
 	}
 	for _, field := range partyFields {
 		if field.Archived || !field.Required || field.Type == model.FieldTypeImage {
@@ -525,6 +527,52 @@ func (s *Service) CheckTemplate(ctx context.Context, id string) (TemplateCheck, 
 		}
 	}
 	return result, nil
+}
+
+// requiredFieldCoverRules lists indirect bindings that satisfy a required
+// contract field in the template check. Some required fields (相对方 / 年度)
+// often are not printed as themselves; the template shows the same information
+// through another binding instead. Keys use the canonical binding key of the
+// required field; exact entries match one bound key and prefixes match any
+// binding starting with them. Add new exception rules to this table only.
+var requiredFieldCoverRules = map[string]requiredCoverRule{
+	// 相对方只要用任意 party_b.* 绑定显示（如 party_b.name）即视为已标定。
+	"contract." + model.FieldPartyB: {prefixes: []string{"party_b."}},
+	// 年度可由签订日期覆盖：正文写了签订日期时不再要求单独印出年度。
+	"contract." + model.FieldYear: {exact: []string{"contract." + model.FieldSignedOn}},
+}
+
+// requiredCoverRule is one entry of requiredFieldCoverRules.
+type requiredCoverRule struct {
+	exact    []string
+	prefixes []string
+}
+
+// covers reports whether any binding in bound satisfies the rule.
+func (r requiredCoverRule) covers(bound map[string]bool) bool {
+	for _, key := range r.exact {
+		if bound[key] {
+			return true
+		}
+	}
+	for key := range bound {
+		for _, prefix := range r.prefixes {
+			if strings.HasPrefix(key, prefix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// requiredFieldCovered reports whether a required field's canonical binding is
+// indirectly covered by another placement binding.
+func requiredFieldCovered(key string, bound map[string]bool) bool {
+	rule, ok := requiredFieldCoverRules[key]
+	if !ok {
+		return false
+	}
+	return rule.covers(bound)
 }
 
 // bindingField resolves a placement binding key to its field definition.

@@ -189,6 +189,8 @@ export interface TemplateImportInput {
 export interface TemplateMappingInput {
   placements: Placement[];
   is_active?: boolean;
+  /** 字段值白底遮盖开关；省略时沿用当前版本的设置。 */
+  mask_field_values?: boolean;
 }
 
 /** POST /templates/{id}/preview。 */

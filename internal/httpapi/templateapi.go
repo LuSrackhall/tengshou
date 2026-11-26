@@ -131,6 +131,7 @@ func (s *Server) handleAppSaveTemplateMapping(w http.ResponseWriter, r *http.Req
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"item": res.Template, "usage": res.Usage, "warnings": res.Warnings,
+		"overlaps": res.Overlaps,
 	})
 }
 

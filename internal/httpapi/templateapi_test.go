@@ -198,6 +198,83 @@ func TestTemplateAPIImportCalibratePreviewGenerate(t *testing.T) {
 	}
 }
 
+// te-rccn0：保存标定时返回结构化重叠提醒（不阻断），并持久化白底遮盖开关。
+func TestTemplateAPISaveMappingOverlapsAndMask(t *testing.T) {
+	f := newFixture(t)
+	resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/templates/import", map[string]any{
+		"name":        "重叠提醒模板",
+		"file_name":   "overlap-template.pdf",
+		"file_base64": base64.StdEncoding.EncodeToString(testTemplatePDF(t)),
+	}, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("import status=%d body=%s", resp.StatusCode, body)
+	}
+	templateID, _ := decodeAppItem(t, body)["id"].(string)
+	if templateID == "" {
+		t.Fatalf("imported template id missing: %s", body)
+	}
+
+	placements := []map[string]any{
+		{"id": "field", "page": 1, "x": 100, "y": 100, "w": 100, "h": 20,
+			"type": "field", "field": "contract.contract_no"},
+		{"id": "seal", "page": 1, "x": 120, "y": 100, "w": 100, "h": 100,
+			"type": "seal", "seal_mode": "contract"},
+	}
+	resp, body = f.appRequest(t, http.MethodPut, "/app/api/v1/templates/"+templateID+"/mapping",
+		map[string]any{"placements": placements, "mask_field_values": true}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save mapping status=%d body=%s", resp.StatusCode, body)
+	}
+	var saved struct {
+		Item struct {
+			ID              string `json:"id"`
+			MaskFieldValues bool   `json:"mask_field_values"`
+		} `json:"item"`
+		Warnings []string `json:"warnings"`
+		Overlaps []struct {
+			A     string  `json:"a"`
+			B     string  `json:"b"`
+			Ratio float64 `json:"ratio"`
+		} `json:"overlaps"`
+	}
+	if err := json.Unmarshal(body, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if !saved.Item.MaskFieldValues {
+		t.Fatalf("mask flag not saved: %s", body)
+	}
+	if len(saved.Overlaps) != 1 || saved.Overlaps[0].A != "seal" || saved.Overlaps[0].B != "field" {
+		t.Fatalf("overlaps = %s", body)
+	}
+	if saved.Overlaps[0].Ratio != 0.8 {
+		t.Fatalf("overlap ratio = %v, want 0.8", saved.Overlaps[0].Ratio)
+	}
+	overlapWarned := false
+	for _, warning := range saved.Warnings {
+		if strings.Contains(warning, "重叠") {
+			overlapWarned = true
+		}
+	}
+	if !overlapWarned {
+		t.Fatalf("warnings = %s", body)
+	}
+
+	// The saved version keeps the flag when read back.
+	resp, body = f.appRequest(t, http.MethodGet, "/app/api/v1/templates/"+saved.Item.ID, nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get template status=%d body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		MaskFieldValues bool `json:"mask_field_values"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.MaskFieldValues {
+		t.Fatalf("mask flag lost on read: %s", body)
+	}
+}
+
 func TestTemplateAPIImportRejectsInvalidFile(t *testing.T) {
 	f := newFixture(t)
 	resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/templates/import",

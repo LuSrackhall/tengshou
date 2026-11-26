@@ -16,6 +16,7 @@ import (
 
 	"github.com/LuSrackhall/tengshou/internal/model"
 	"github.com/LuSrackhall/tengshou/internal/service"
+	"github.com/LuSrackhall/tengshou/internal/store"
 )
 
 func testPNG(t *testing.T, w, h int) []byte {
@@ -243,6 +244,35 @@ func TestReusePartySignatureOnContract(t *testing.T) {
 	}
 	if reused.Source != model.SignatureSourceArchive || reused.AssetPath != sig.AssetPath {
 		t.Fatalf("reused signature = %+v", reused)
+	}
+	// REQ-002: the change log distinguishes the two signature sources. The
+	// archive reuse is audited as such, while the on-site capture that created
+	// the archive signature stays labelled 现场手写.
+	reuseLogs, err := rd.ListChangeLogs(ctx, store.ChangeFilter{EntityID: contract.ID, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reuseAudit := false
+	for _, entry := range reuseLogs.Items {
+		if strings.Contains(entry.Summary, "来源：档案复用") {
+			reuseAudit = true
+		}
+	}
+	if !reuseAudit {
+		t.Fatalf("missing archive-reuse source change log: %+v", reuseLogs.Items)
+	}
+	captureLogs, err := rd.ListChangeLogs(ctx, store.ChangeFilter{EntityID: party.ID, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureAudit := false
+	for _, entry := range captureLogs.Items {
+		if strings.Contains(entry.Summary, "来源：现场手写") {
+			captureAudit = true
+		}
+	}
+	if !captureAudit {
+		t.Fatalf("missing on-site capture source change log: %+v", captureLogs.Items)
 	}
 	// v0.2 D3=B: archive reuse stamps as-is and is not bound to one content
 	// version, so the reused row carries no content digest.

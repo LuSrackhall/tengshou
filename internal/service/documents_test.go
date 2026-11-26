@@ -92,6 +92,22 @@ func TestArchiveSignatureReuseBypassesContentGate(t *testing.T) {
 	if reused.Source != model.SignatureSourceArchive || reused.ContentSHA256 != "" {
 		t.Fatalf("reused signature = %+v", reused)
 	}
+	// REQ-002 pins the signature source into the audit trail too, not only into
+	// the generation snapshot: the contract change log must name the archive
+	// reuse explicitly.
+	reuseLogs, err := f.rd.ListChangeLogs(ctx, store.ChangeFilter{EntityID: contract.ID, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reuseAudit := false
+	for _, entry := range reuseLogs.Items {
+		if strings.Contains(entry.Summary, "来源：档案复用") {
+			reuseAudit = true
+		}
+	}
+	if !reuseAudit {
+		t.Fatalf("missing archive-reuse source change log: %+v", reuseLogs.Items)
+	}
 
 	preflight, err := f.svc.PreflightContractGeneration(ctx, tpl.ID, contract.ID)
 	if err != nil {

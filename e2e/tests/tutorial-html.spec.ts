@@ -54,8 +54,8 @@ function minimalModel(): TutorialModel {
         startedAtSeconds: 12.3,
       },
     ],
-    artifactLink: "农产品购销合同-已签字盖章.pdf",
-    artifactName: "农产品购销合同-已签字盖章.pdf",
+    artifactLink: "房屋租赁合同-已签字盖章.pdf",
+    artifactName: "房屋租赁合同-已签字盖章.pdf",
   };
 }
 
@@ -90,7 +90,7 @@ test("教程 HTML：三段式、目录、章节跳转、录像与示例 PDF 链�
 
   // 结尾给出示例最终 PDF 的下载链接，步数不含「准备」。
   expect(html).toContain('class="pdf-link"');
-  expect(html).toContain("打开本示例最终合同 PDF（农产品购销合同-已签字盖章.pdf）");
+  expect(html).toContain("打开本示例最终合同 PDF（房屋租赁合同-已签字盖章.pdf）");
   expect(html).toContain("走完这 1 步");
 
   // 教程是用户读物，不能混入测试元信息；分镜图以 base64 内嵌。

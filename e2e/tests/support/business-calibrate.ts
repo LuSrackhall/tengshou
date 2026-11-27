@@ -146,8 +146,8 @@ function roundPt(value: number): number {
 
 /**
  * 从模板 PDF 定位全部锚点：标签必须在整份文档中唯一，否则给出可排查的中文
- * 错误（列出重复位置或文档文字片段）。标签后的 x 优先取独立下划线项，否则
- * 按全角字符占比估算（夹具的「字段名：＿＿」都是全角）。
+ * 错误（列出重复位置或文档文字片段）。标签可以跨视觉行甚至跨页（按阅读
+ * 顺序拼接全文检索）；标签后的 x 优先取空白下划线项，否则按字符占比估算。
  */
 export async function locateAnchors(
   page: Page,
@@ -170,46 +170,109 @@ export async function locateAnchors(
     return btoa(binary);
   }, templateId);
   const analysis = await analyzePdf(page, Buffer.from(base64, "base64"));
-  const lines: Array<{ page: number; line: PdfLine }> = [];
-  analysis.pages.forEach((pdfPage, index) => {
-    for (const line of pdfLines(pdfPage)) {
-      lines.push({ page: index + 1, line });
+  // 模板按页宽折行时，一个标签（如「建筑面积」）可能被拆到两行甚至跨页
+  // （P2 末尾「拖欠租」→ P3 行首「金超过」）。因此把整份文档所有视觉行按
+  // 阅读顺序拼成扁平文本检索，再把命中位置映射回「页/行/行内偏移」。
+  const pages = analysis.pages.map((pdfPage, index) => ({
+    page: index + 1,
+    lines: pdfLines(pdfPage),
+    width: pdfPage.width,
+    height: pdfPage.height,
+  }));
+  interface DocLine {
+    page: number;
+    line: PdfLine;
+    offset: number;
+  }
+  const docLines: DocLine[] = [];
+  let flatAll = "";
+  for (const pdfPage of pages) {
+    for (const line of pdfPage.lines) {
+      docLines.push({ page: pdfPage.page, line, offset: flatAll.length });
+      flatAll += line.text;
     }
-  });
+  }
+  const lineOfDoc = (index: number): number => {
+    let low = 0;
+    let high = docLines.length - 1;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (docLines[mid]!.offset <= index) {
+        low = mid;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return low;
+  };
   const anchors = new Map<string, LabelAnchor>();
   for (const label of labels) {
     const want = label.replace(/\s+/g, "");
-    const matches = lines.filter(({ line }) => line.text.includes(want));
+    interface AnchorMatch {
+      startDoc: number;
+      startLocal: number;
+      endDoc: number;
+      endLocal: number;
+    }
+    const matches: AnchorMatch[] = [];
+    let from = 0;
+    while (from <= flatAll.length - want.length) {
+      const at = flatAll.indexOf(want, from);
+      if (at < 0) {
+        break;
+      }
+      const startDoc = lineOfDoc(at);
+      const endDoc = lineOfDoc(at + want.length - 1);
+      matches.push({
+        startDoc,
+        startLocal: at - docLines[startDoc]!.offset,
+        endDoc,
+        endLocal: at + want.length - 1 - docLines[endDoc]!.offset,
+      });
+      from = at + 1;
+    }
     if (matches.length === 0) {
       const snippet = analysis.text.replace(/\s+/g, " ").slice(0, 240);
       throw new Error(`模板 PDF 中找不到锚点「${label}」。文档文字片段：${snippet}`);
     }
     if (matches.length > 1) {
       const where = matches
-        .map(
-          ({ page, line }) =>
-            `第 ${page} 页 x=${lineXAt(line, line.text.indexOf(want)).toFixed(0)}`,
-        )
+        .map((match) => {
+          const end = docLines[match.endDoc]!;
+          return `第 ${end.page} 页 x=${lineXAt(end.line, match.endLocal + 1).toFixed(0)}`;
+        })
         .join("、");
       throw new Error(`锚点「${label}」不唯一：${where}`);
     }
     const match = matches[0]!;
-    const line = match.line;
-    const index = line.text.indexOf(want);
-    const start = lineEntryAt(line, index);
+    const startEntry = docLines[match.startDoc]!;
+    const start = lineEntryAt(startEntry.line, match.startLocal);
     if (!start) {
       throw new Error(`模板 PDF 中无法定位锚点「${label}」的坐标`);
     }
-    const startX = lineXAt(line, index);
-    const endX = lineXAt(line, index + want.length);
-    const blank = line.items.find(
-      (entry) => entry.item.x >= startX && /^[_＿]+$/.test(entry.text),
+    const endEntry = docLines[match.endDoc]!;
+    const endX = lineXAt(endEntry.line, match.endLocal + 1);
+    // 空白下划线优先取标签结束后的同一视觉行；标签恰好折行到行尾（甚至页尾）
+    // 时，取下一行行首的下划线（如「…止。甲方应于」→ 换行后的填空）。
+    let blankDoc = endEntry;
+    let blank = endEntry.line.items.find(
+      (entry) => entry.item.x >= endX - 1 && /^[_＿]+$/.test(entry.text),
     );
-    const pdfPage = analysis.pages[match.page - 1]!;
+    if (!blank) {
+      const next = docLines[match.endDoc + 1];
+      const first = next?.line.items[0];
+      if (next && first && first.item.x <= 160 && /^[_＿]+$/.test(first.text)) {
+        blank = first;
+        blankDoc = next;
+      }
+    }
+    // 标定框必须落在空白所在页：标签跨页时取空白所在页。
+    const anchorPage = blankDoc.page;
+    const pdfPage = pages[anchorPage - 1]!;
     anchors.set(label, {
-      page: match.page,
+      page: anchorPage,
       x: blank ? blank.item.x : endX,
-      baseline: start.item.y,
+      baseline: blank ? blank.item.y : start.item.y,
       fontSize: start.item.height || 10.5,
       pageWidth: pdfPage.width,
       pageHeight: pdfPage.height,

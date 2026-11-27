@@ -1,6 +1,7 @@
 // 生成 E2E 真实业务场景使用的白底红色公章图片（虚构单位）。
 //
-// 产物：e2e/fixtures/contracts/采购方公章.png（400×400，白底 RGB）。
+// 产物：e2e/fixtures/contracts/出租方公章.png（400×400，白底 RGB）。
+// 章面文字：幸福村股份经济合作社（上弧）+ 合同专用章（中下）+ 虚构编号（下弧）。
 // 白底是刻意的：产品导入公章时会自动去白底并裁剪边距，本夹具用来验证这条
 // 真实处理链路。图片内容全部虚构，仅用于界面端到端验收。
 //
@@ -9,7 +10,7 @@
 import { chromium } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
-const output = fileURLToPath(new URL("./采购方公章.png", import.meta.url));
+const output = fileURLToPath(new URL("./出租方公章.png", import.meta.url));
 
 const html = `<!doctype html>
 <html lang="zh-CN">

@@ -310,6 +310,19 @@ export async function renderPdfPages(
           line.push(item);
           lines.set(key, line);
         }
+        // 先找与整段文本项完全一致的值（如套印的面积「80」）：证件号等
+        // 长数字里也可能含「80」，子串匹配会先命中错误位置。
+        for (const line of lines.values()) {
+          const exact = line.find((item) => item.str.trim() === value.trim());
+          if (exact) {
+            return {
+              x: exact.x,
+              y: exact.y - exact.height,
+              w: exact.width,
+              h: exact.height * 1.25,
+            };
+          }
+        }
         for (const line of lines.values()) {
           line.sort((left, right) => left.x - right.x);
           for (let start = 0; start < line.length; start += 1) {

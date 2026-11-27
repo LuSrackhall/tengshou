@@ -1,9 +1,10 @@
 // 场景 C：真实业务场景验收（E2E-2a）。
 //
-// 业务主线：一份农产品购销合同从 Word 模板 → 界面标定字段/签名/公章 →
-// 建合同 → 手机扫码手写签名 → 导入公章并关联 → 预览 → 生成 → 下载。
-// 每一步记录「业务动作 / 预期结果 / 实际结果 / 判定 + 截图」，测试结束
-// （含失败与跳过）生成自包含中文报告 `业务验收报告.html` 与最终合同 PDF。
+// 业务主线：一份房屋租赁合同从 Word 模板 → 界面标定字段/签名/公章 →
+// 建合同（出租方/承租方/房产三方选择 + 租期与租金押金）→ 手机扫码手写签名 →
+// 导入公章并关联 → 预览 → 生成 → 下载。每一步记录「业务动作 / 预期结果 /
+// 实际结果 / 判定 + 截图」，测试结束（含失败与跳过）生成自包含中文报告
+// `业务验收报告.html` 与最终合同 PDF。
 //
 // 本场景在 Linux / Windows / macOS 三端 CI 都真实运行（e2e job 安装
 // LibreOffice，Windows 亦可使用已安装的 Microsoft Word）。本机没有可用
@@ -18,6 +19,7 @@ import type { FrameRecorder } from "./support/business-frames";
 import type { PlacementBox } from "./support/business-pdf";
 import { AcceptanceReport } from "./support/business-report";
 import {
+  ASSET_NAME,
   CONTRACT_TITLE,
   PARTY_A_NAME,
   PARTY_A_VALUES,
@@ -28,6 +30,7 @@ import {
 } from "./support/business-scenario";
 import {
   calibrateTemplate,
+  createAsset,
   createContract,
   createFields,
   createParty,
@@ -46,7 +49,7 @@ import { trackConsoleErrors } from "./support/ui";
 const REQUIRE_DOCX = process.env.E2E_REQUIRE_DOCX === "1";
 const TUTORIAL = isTutorialMode();
 const OUTPUT_DIR = join(repoRoot(), "e2e", "test-results", "business-acceptance");
-const PDF_NAME = "农产品购销合同-已签字盖章.pdf";
+const PDF_NAME = "房屋租赁合同-已签字盖章.pdf";
 
 /** 报告里用人类可读的平台名，而不是 process.platform 的 node 取值。 */
 function platformLabel(): string {
@@ -168,7 +171,7 @@ async function captureFirstOpen(
 test.describe.configure({ timeout: TUTORIAL ? 900_000 : 600_000 });
 
 test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖章 → 最终 PDF）", () => {
-  test("Word 模板导入 → 标定字段/签名/公章 → 建合同 → 扫码签名 → 公章 → 预览 → 生成 → 下载", async ({
+  test("Word 模板导入 → 标定字段/签名/公章 → 建合同（三方）→ 扫码签名 → 公章 → 预览 → 生成 → 下载", async ({
     app,
     page,
   }, testInfo) => {
@@ -178,10 +181,11 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
     }
     const consoleErrors = trackConsoleErrors(page);
     const report = new AcceptanceReport({
-      title: "业务验收报告 · 农产品购销合同",
+      title: "业务验收报告 · 房屋租赁合同",
       scenario:
-        "真实业务场景：幸福村股份经济合作社向农户王建国采购红富士苹果，从 Word 合同模板开始，" +
-        "在腾手里完成字段标定、双方档案、合同录入、手机手写签名、公章落位，最终生成并下载可打开的合同 PDF。",
+        "真实业务场景：幸福村股份经济合作社把幸福村 3 组 12 号 101 出租给王建国，" +
+        "从 Word 租赁合同模板开始，在腾手里完成字段标定、双方与房产档案、合同录入" +
+        "（三方选择 + 租期租金）、手机手写签名、公章落位，最终生成并下载可打开的合同 PDF。",
       environment:
         `${platformLabel()} · ${browserLabel(testInfo.project.name)} · ` +
         "发布形态 tengshou-cli serve",
@@ -250,14 +254,14 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         "e2e",
         "fixtures",
         "contracts",
-        "农产品购销合同.docx",
+        "房屋租赁合同.docx",
       );
       const sealPath = join(
         repoRoot(),
         "e2e",
         "fixtures",
         "contracts",
-        "采购方公章.png",
+        "出租方公章.png",
       );
       let templateId = "";
       let templatePageCount = 0;
@@ -265,6 +269,7 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
       let contractId = "";
       let contractNo = "";
       let partyAId = "";
+      let assetId = "";
 
       await report.runStep(
         page,
@@ -316,9 +321,9 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         page,
         testInfo,
         {
-          action: "建立合同字段与相对方联系人字段",
+          action: "建立租赁合同字段与业务分组",
           expected:
-            "在「字段」页建立合同专有字段（≥6 个）和相对方联系人字段，保存后立即可用。",
+            "在「字段」页建立 12 个租赁合同字段，并按「租期 / 租金与押金 / 费用与违约 / 其他约定」分组，保存后立即可用。",
         },
         async (frames) => await createFields(page, frames),
       );
@@ -327,9 +332,9 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         page,
         testInfo,
         {
-          action: "建立甲方（单位）与乙方（个人）档案",
+          action: "建立出租方、承租方档案",
           expected:
-            "甲方合作社与乙方农户的姓名、证件号、地址、电话、联系人分别保存为两份档案。",
+            "出租方（单位）与承租方（个人）的名称、证件号、地址、电话分别保存为两份档案。",
         },
         async (frames) => {
           partyAId = await createParty(page, PARTY_A_VALUES, frames);
@@ -340,8 +345,26 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
             region: page.locator("#view-parties"),
           });
           return (
-            `甲方档案「${PARTY_A_NAME}（单位）」与乙方档案「${PARTY_B_NAME}（个人）」已保存；` +
-            "联系人李国强写入甲方档案。"
+            `出租方档案「${PARTY_A_NAME}（单位）」与承租方档案「${PARTY_B_NAME}（个人）」已保存；` +
+            "证件号、地址与电话写入各自档案。"
+          );
+        },
+      );
+
+      await report.runStep(
+        page,
+        testInfo,
+        {
+          action: "建立房产档案",
+          expected:
+            "出租房产的地址、房号与面积保存为房产档案，新建合同时可直接选择。",
+        },
+        async (frames) => {
+          assetId = await createAsset(page, frames);
+          expect(assetId).not.toBe("");
+          return (
+            `房产档案「${ASSET_NAME}」已保存（房号 101、建筑面积 80 平方米）；` +
+            "新建合同时可从房产档案选择这套房。"
           );
         },
       );
@@ -352,7 +375,7 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         {
           action: "在 PDF 页面上逐框标定字段、签名与公章位置",
           expected:
-            "按 Word 里的「字段名：＿＿」位置，把 24 个字段、乙方签名与甲方公章位置逐个拖到对应框内。",
+            "按定稿模板的 24 个锚点，把 22 个字段、乙方签名与甲方公章位置逐个拖到对应框内。",
         },
         async (frames) =>
           await calibrateTemplate(page, templateId, PLACEMENTS, frames),
@@ -363,7 +386,7 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         testInfo,
         {
           action: "保存标定为新模板版本",
-          expected: "点击「保存为新版本」后生成 v2，位置列表保留全部 26 个位置。",
+          expected: "点击「保存为新版本」后生成 v2，位置列表保留全部 24 个位置。",
         },
         async (frames) => {
           const saved = await saveCalibration(
@@ -380,12 +403,13 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         page,
         testInfo,
         {
-          action: "新建合同：选择甲方、相对方并填写标的与金额",
+          action: "新建合同：选择出租方、承租方与房产，填写租期与租金",
           expected:
-            "合同保存为草稿，编号自动分配；甲方=幸福村合作社，相对方=王建国，金额 160,000.00 元，标的与交付信息齐全。",
+            "合同保存为草稿，编号自动分配；出租方=幸福村股份经济合作社，承租方=王建国，房产=幸福村 3 组 12 号 101；" +
+            "租期 2026-12-01 → 2027-11-30，月租金/押金/违约金各 1,500.00 元，月租金与押金大写自动生成。",
         },
         async (frames) => {
-          const created = await createContract(page, partyAId, frames);
+          const created = await createContract(page, partyAId, assetId, frames);
           contractId = created.contractId;
           contractNo = created.contractNo;
           // 教程分镜：台账默认关键列与「列设置」入口（te-iuns4）。
@@ -402,8 +426,9 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
           await expect(columnsDialog).toBeHidden();
           return (
             `合同 ${contractNo}「${CONTRACT_TITLE}」已保存为草稿；` +
-            `甲方=${created.detail.party_a?.name}，相对方=${created.detail.party_b?.name}，` +
-            "金额 160,000.00 元。台账默认显示 10 个关键列，列设置弹层可增减列。"
+            `出租方=${created.detail.party_a?.name}，承租方=${created.detail.party_b?.name}，` +
+            `房产=${created.detail.asset?.name}；租期 2026-12-01 → 2027-11-30，` +
+            "月租金 1,500.00 元、押金 1,500.00 元、违约金 1,500.00 元。台账默认显示 10 个关键列，列设置弹层可增减列。"
           );
         },
       );
@@ -485,7 +510,7 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         {
           action: "核对最终合同 PDF",
           expected:
-            "页数与模板一致；文本包含合同编号、金额、双方名称、标的等关键值；签名与公章两张图片确实套印。",
+            "页数与模板一致；文本包含双方名称与证件号、房产地址/房号/面积、租期、月租金/押金及大写；签名与公章两张图片确实套印。",
           requirePdfPages: true,
         },
         async (frames) => {

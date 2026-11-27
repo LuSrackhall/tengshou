@@ -113,7 +113,7 @@ export async function calibrateTemplate(
   await page.locator("#tplZoom").selectOption("1");
   await expect(page.locator('.tpl-page[data-page="1"]')).toBeVisible();
   await expect(
-    page.locator('#tplAddField option[value="contract.data.product_name"]'),
+    page.locator('#tplAddField option[value="contract.data.rental_use"]'),
   ).toHaveCount(1);
   await frames?.capture(
     "① 在『新增位置』选择页码、类型（字段/签名/公章）与绑定值",
@@ -141,17 +141,17 @@ export async function calibrateTemplate(
     await dragPlacementToAnchor(page, id, placement);
     const box = page.locator(`.tpl-box[data-id="${id}"]`);
     const pageRegion = page.locator(`.tpl-page[data-page="${anchor.page}"]`);
-    if (spec.label === "标的名称：") {
+    if (spec.label === "月租金为人民币") {
       await frames?.capture(
-        "② 新增字段框后，用鼠标拖到 Word 的填空位置（示例：标的名称）",
+        "② 新增字段框后，用鼠标拖到 Word 的填空位置（示例：月租金）",
         { region: pageRegion, targets: [box] },
       );
     }
-    if (spec.label === "争议解决：") {
-      await frames?.capture("③ 跨页字段同样标定（第 2 页：争议解决）", {
-        region: pageRegion,
-        targets: [box],
-      });
+    if (spec.label === "等费用由") {
+      await frames?.capture(
+        "③ 换页后的字段同样标定（第 2 页：费用承担方）",
+        { region: pageRegion, targets: [box] },
+      );
     }
     if (spec.kind === "signature") {
       await frames?.capture("④ 新增『签名·乙方』框，拖到签字位置", {
@@ -208,7 +208,7 @@ export async function calibrateTemplate(
 }
 
 export interface SavedCalibration {
-  /** 例如「v2 · 3 页 · 26 个位置」。 */
+  /** 例如「v2 · 3 页 · 24 个位置」。 */
   label: string;
   /** 保存后生成的新版本模板 id（用于读取 placements 渲染 PDF 标定框）。 */
   templateId: string;

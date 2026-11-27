@@ -11,9 +11,15 @@ import {
   type PlacementBox,
 } from "./business-pdf";
 import {
-  AMOUNT_DISPLAY,
-  CONTRACT_DATA,
+  ASSET_ADDRESS,
+  ASSET_AREA,
+  DEPOSIT_DISPLAY,
+  DEPOSIT_WORDS,
+  MONTHLY_RENT_DISPLAY,
+  MONTHLY_RENT_WORDS,
+  PARTY_A_ID_NUMBER,
   PARTY_A_NAME,
+  PARTY_B_ID_NUMBER,
   PARTY_B_NAME,
   SEAL_NAME,
   TEMPLATE_NAME,
@@ -308,18 +314,37 @@ export async function verifyFinalPdf(
 ): Promise<{ actual: string; details: string[] }> {
   const analysis = await analyzePdf(page, bytes);
   expect(analysis.pageCount).toBe(templatePageCount);
-  const required = requiredPdfValues(contractNo);
+  const required = requiredPdfValues();
+  const normalizedText = analysis.text.replace(/\s+/g, "");
   for (const value of required) {
-    expect(analysis.text, `最终 PDF 文本缺少「${value}」`).toContain(value);
+    expect(
+      normalizedText,
+      `最终 PDF 文本缺少「${value}」`,
+    ).toContain(value.replace(/\s+/g, ""));
   }
   expect(
     analysis.imageDraws,
     "最终 PDF 中签名与公章图片绘制次数不足 2 次",
   ).toBeGreaterThanOrEqual(2);
+  // 月租金/押金/违约金都是 1,500.00，押金与押金大写各再出现一次：
+  // 用出现次数确认三处金额与两处大写都套印，而不是只看有值。
+  const occurrences = (needle: string): number =>
+    needle === "" ? 0 : normalizedText.split(needle).length - 1;
+  expect(
+    occurrences(MONTHLY_RENT_DISPLAY),
+    "月租金、押金与违约金金额应各出现一次",
+  ).toBeGreaterThanOrEqual(3);
+  expect(
+    occurrences(MONTHLY_RENT_WORDS),
+    "月租金与押金大写应各出现一次",
+  ).toBeGreaterThanOrEqual(2);
   const details = [
     `页数：${analysis.pageCount} 页（与模板一致）`,
     `图片绘制：${analysis.imageDraws} 次（含乙方签名与甲方公章）`,
     `关键文字齐全：${required.join("、")}`,
+    `金额出现次数：${MONTHLY_RENT_DISPLAY} × ${occurrences(MONTHLY_RENT_DISPLAY)}、` +
+      `${MONTHLY_RENT_WORDS} × ${occurrences(MONTHLY_RENT_WORDS)}`,
+    `合同编号：${contractNo}（定稿模板没有编号位置，编号在台账与生成记录核对）`,
   ];
   // 签名/公章所在页由模板 v2 的标定框决定（CI 的 3 页模板是第 3 页；
   // 不同 LibreOffice 版本可能把签署页压到第 2 页，报告按实际页渲染）。
@@ -334,19 +359,20 @@ export async function verifyFinalPdf(
       {
         page: 1,
         values: [
-          contractNo,
           PARTY_A_NAME,
+          PARTY_A_ID_NUMBER,
           PARTY_B_NAME,
-          CONTRACT_DATA.product_name ?? "",
-          CONTRACT_DATA.quantity ?? "",
-          CONTRACT_DATA.unit_price ?? "",
-          AMOUNT_DISPLAY,
-          CONTRACT_DATA.amount_words ?? "",
+          PARTY_B_ID_NUMBER,
+          ASSET_ADDRESS,
+          ASSET_AREA,
+          "2026年12月1日",
+          MONTHLY_RENT_DISPLAY,
+          MONTHLY_RENT_WORDS,
         ].filter((value) => value !== ""),
       },
       {
         page: 2,
-        values: [CONTRACT_DATA.dispute_resolution ?? ""].filter(
+        values: [DEPOSIT_DISPLAY, DEPOSIT_WORDS].filter(
           (value) => value !== "",
         ),
       },
@@ -364,15 +390,14 @@ export async function verifyFinalPdf(
   });
   if (rendered) {
     const captions: Record<number, string> = {
-      1: "第 1 页：合同编号、双方名称、标的、数量、单价、金额、大写金额逐项比对全部正确（红框处）",
+      1: "第 1 页：双方名称与证件号、房号/面积、租期、月租金及大写逐项比对全部正确（红框处）",
     };
     if (analysis.pageCount >= 2) {
-      captions[2] =
-        "第 2 页：争议解决条款与录入一致（红框处）";
+      captions[2] = "第 2 页：押金及大写与录入一致（红框处）；费用承担条款文字齐全";
     }
     captions[signaturePage] =
       signaturePage === 2
-        ? "第 2 页：争议解决条款与录入一致；红框处为乙方手写签名与甲方公章，已套印"
+        ? "第 2 页：押金与费用条款核对一致；红框处为乙方手写签名与甲方公章，已套印"
         : `第 ${signaturePage} 页：红框处为乙方手写签名与甲方公章，已套印`;
     for (const image of rendered.pages) {
       options.frames?.addImage(
@@ -400,7 +425,7 @@ export async function verifyFinalPdf(
   return {
     actual:
       `最终 PDF 共 ${analysis.pageCount} 页（与模板一致）；` +
-      `文本含编号 ${contractNo}、金额 ${AMOUNT_DISPLAY}、双方名称、标的与大写金额；` +
+      "文本含双方名称与证件号、房产地址/房号/面积、租期、月租金/押金及大写；" +
       `检测到 ${analysis.imageDraws} 次图片绘制（签名 + 公章）。`,
     details,
   };

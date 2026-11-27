@@ -533,7 +533,7 @@ jobs:
           import sys
           import zipfile
 
-          names = ["腾手使用教程.html", "验收过程录像.webm", "农产品购销合同-已签字盖章.pdf"]
+          names = ["腾手使用教程.html", "验收过程录像.webm", "房屋租赁合同-已签字盖章.pdf"]
           with open("SHA256SUMS", "w", encoding="utf-8") as out:
               for name in names:
                   with open(name, "rb") as handle:
@@ -755,7 +755,7 @@ jobs:
           files = [
               "腾手使用教程.html",
               "验收过程录像.webm",
-              "农产品购销合同-已签字盖章.pdf",
+              "房屋租赁合同-已签字盖章.pdf",
           ]
           expected = sorted(files + ["SHA256SUMS"])
           with zipfile.ZipFile(zip_path) as z:

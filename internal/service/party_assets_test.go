@@ -420,20 +420,37 @@ func TestPartyArchiveSealRoundTripAndReuse(t *testing.T) {
 	if err != nil || len(got) == 0 {
 		t.Fatalf("read party seal: %v", err)
 	}
-	// The archive seal is included in the contract's applicable seals even
-	// without an explicit contract_seals link.
+	// The archive seal only participates through an explicit contract link:
+	// unchecking "使用档案公章" in the form must keep it off the PDF.
 	all, _, err := svc.SealsForContract(ctx, contract)
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
+	for _, item := range all {
+		if item.ID == record.ID {
+			t.Fatalf("archive seal %s must not apply before being attached: %+v", record.ID, all)
+		}
+	}
+	if _, err := svc.AttachSealToContracts(ctx, record.ID, []string{contract.ID}); err != nil {
+		t.Fatalf("attach archive seal: %v", err)
+	}
+	all, attached, err := svc.SealsForContract(ctx, contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, linked := false, false
 	for _, item := range all {
 		if item.ID == record.ID {
 			found = true
 		}
 	}
-	if !found {
-		t.Fatalf("archive seal %s missing from SealsForContract: %+v", record.ID, all)
+	for _, item := range attached {
+		if item.ID == record.ID {
+			linked = true
+		}
+	}
+	if !found || !linked {
+		t.Fatalf("attached archive seal %s missing from SealsForContract: all=%+v attached=%+v", record.ID, all, attached)
 	}
 
 	cleared, err := svc.ClearPartySeal(ctx, party.ID)

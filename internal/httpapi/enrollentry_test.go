@@ -220,3 +220,35 @@ func TestAppReusePartySignatureSeal(t *testing.T) {
 		t.Fatalf("reuse source = %v", item["source"])
 	}
 }
+
+// The phone submission without either a handwritten signature or a signature
+// stamp is rejected at the HTTP surface with a field-level 422, not a 500 and
+// not a half-created archive.
+func TestEnrollSubmitRequiresSignatureOrSeal(t *testing.T) {
+	f := newFixtureWithOptions(t, fixtureOptions{allowLAN: true, lanHosts: []string{"192.168.1.50"}})
+	resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/enroll-entry/rotate", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("rotate entry: %d %s", resp.StatusCode, body)
+	}
+	token, _ := decodeAppItem(t, body)["token"].(string)
+	payload, err := json.Marshal(map[string]any{
+		"name":      "无签名租户",
+		"id_number": "330102198001016001",
+		"id_front":  photoDataURL(t, 50, 30),
+		"id_back":   photoDataURL(t, 50, 30),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := signRaw(t, f, http.MethodPost, "/enroll/"+token+"/submit", payload, "192.168.1.23:5000",
+		map[string]string{"Content-Type": "application/json", "X-Tengshou-Sign": "1"})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("missing signature = %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "请手写签名或上传签名章图片") {
+		t.Fatalf("missing signature message = %s", rec.Body.String())
+	}
+	if stored, _ := f.reader.FindPartiesByIDNumber(context.Background(), "330102198001016001"); len(stored) != 0 {
+		t.Fatalf("rejected submission must not create a party: %+v", stored)
+	}
+}

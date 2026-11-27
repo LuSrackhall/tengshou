@@ -136,6 +136,13 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 签名会话响应中的 `urls` 是手机可访问的局域网签名页地址，`qr_url` 是二维码
 PNG。二维码中的一次性 token 只出现在 URL 里，不出现在 JSON 响应中。
 
+长操作另有 `/app/api/v1/jobs/*` 后台任务端点（模板导入、合同预览/生成、
+批量预检/生成、Excel 预览/提交）：POST 与同步端点同构并返回 202
+`{"job_id"}`；GET `/app/api/v1/jobs/{id}` 返回 `status`、`stage`、中文
+`message`、真实 `current/total`、`elapsed_ms` 与同构 `result`（失败时
+`error` 与同步错误信封一致）。任务只在内存保留 10 分钟、最多 100 条，服务
+关闭时取消运行中任务；同步端点与 MCP 工具保持原样。
+
 v0.2 租户档案升级新增（同样仅限回环的应用写入面）：
 
 | 方法 | 路径 | 说明 |

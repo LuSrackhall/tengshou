@@ -60,6 +60,12 @@ type Server struct {
 	// promptly instead of holding Shutdown open until its timeout.
 	eventsCtx    context.Context
 	eventsCancel context.CancelFunc
+	// jobs runs long operations in the background with staged progress.
+	// jobsCtx is the parent of every job context; cancelling it on shutdown
+	// terminates Word→PDF conversions promptly.
+	jobs       *jobRegistry
+	jobsCtx    context.Context
+	jobsCancel context.CancelFunc
 
 	mu   sync.RWMutex
 	urls []string
@@ -68,8 +74,10 @@ type Server struct {
 // New constructs the server and its routes.
 func New(opts Options) *Server {
 	eventsCtx, eventsCancel := context.WithCancel(context.Background())
+	jobsCtx, jobsCancel := context.WithCancel(context.Background())
 	s := &Server{opts: opts, mux: http.NewServeMux(), sign: opts.Sign,
-		eventsCtx: eventsCtx, eventsCancel: eventsCancel}
+		eventsCtx: eventsCtx, eventsCancel: eventsCancel,
+		jobs: newJobRegistry(), jobsCtx: jobsCtx, jobsCancel: jobsCancel}
 	if s.sign == nil {
 		ttl := time.Duration(opts.Config.Signature.TTLMinutes) * time.Minute
 		s.sign = sign.NewManager(ttl, nil)
@@ -130,9 +138,16 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 }
 
 // Shutdown stops the server. Open SSE streams are ended first so Shutdown
-// does not wait for them to time out.
+// does not wait for them to time out, and running background jobs are
+// cancelled so a Word conversion cannot outlive the process.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.eventsCancel()
+	if s.jobs != nil {
+		s.jobs.CancelAll()
+	}
+	if s.jobsCancel != nil {
+		s.jobsCancel()
+	}
 	return s.srv.Shutdown(ctx)
 }
 
@@ -304,6 +319,18 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /app/api/v1/converters", s.handleAppConverters)
 	m.HandleFunc("GET /app/api/v1/documents", s.handleAppListDocuments)
 	m.HandleFunc("GET /app/api/v1/documents/{id}/file", s.handleAppDocumentFile)
+
+	// Long operations as background jobs with real staged progress. Start
+	// requests accept the same body as their synchronous counterpart; the UI
+	// polls GET /jobs/{id} and keeps the synchronous endpoints for MCP.
+	m.HandleFunc("POST /app/api/v1/jobs/templates/import", s.handleAppStartTemplateImportJob)
+	m.HandleFunc("POST /app/api/v1/jobs/contracts/{id}/preview", s.handleAppStartContractPreviewJob)
+	m.HandleFunc("POST /app/api/v1/jobs/contracts/{id}/generate", s.handleAppStartContractGenerateJob)
+	m.HandleFunc("POST /app/api/v1/jobs/templates/{id}/batch-preview", s.handleAppStartBatchPreviewJob)
+	m.HandleFunc("POST /app/api/v1/jobs/templates/{id}/batch-generate", s.handleAppStartBatchGenerateJob)
+	m.HandleFunc("POST /app/api/v1/jobs/excel/preview", s.handleAppStartExcelPreviewJob)
+	m.HandleFunc("POST /app/api/v1/jobs/excel/commit", s.handleAppStartExcelCommitJob)
+	m.HandleFunc("GET /app/api/v1/jobs/{id}", s.handleAppGetJob)
 
 	// B9 data security: complete backup export, staged restore, consistency
 	// report and audited signature export.

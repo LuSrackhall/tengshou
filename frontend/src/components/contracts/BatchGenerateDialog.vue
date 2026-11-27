@@ -13,11 +13,11 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ApiError } from "../../api/client";
 import {
-  batchGenerateContracts,
-  batchPreviewGeneration,
   downloadDocumentFile,
   getArchiveReuseSettings,
   listTemplates,
+  startBatchGenerateJob,
+  startBatchPreviewJob,
 } from "../../api/endpoints";
 import type {
   ApiFieldError,
@@ -31,8 +31,11 @@ import type {
   Template,
 } from "../../api/types";
 import { errorMessage, refreshAfterWrite, toast } from "../../bridge/app";
+import { isJobCancelled, useJob } from "../../composables/useJob";
 import PdfOverlay from "../pdf/PdfOverlay.vue";
+import ProgressPanel from "../common/ProgressPanel.vue";
 import { base64ToBytes } from "../pdf/pdf";
+import { retryBatchItem as retryBatchItemRequest } from "./useBatchGenerateRetry";
 import { saveDownloadedFile } from "./download";
 
 const props = defineProps<{
@@ -92,8 +95,18 @@ const errorState = ref<ErrorState | null>(null);
 /* 状态标签保留上一次预检结果：迁移前勾选变化不清空 chip。 */
 const chips = ref<Record<string, ChipState>>({});
 const issues = ref<{ id: string; text: string }[]>([]);
-const preflighting = ref(false);
-const generating = ref(false);
+/* 批量预检/生成走后台任务：current/total 是服务端逐份累加的真实 i/N，
+   ProgressPanel 据此渲染确定进度条；失败重试仍走同步单份端点（存量行为）。 */
+const {
+  job: previewJob,
+  running: preflighting,
+  start: startPreflightJob,
+} = useJob<BatchPreviewResponse>();
+const {
+  job: generateJob,
+  running: generating,
+  start: startGenerateJob,
+} = useJob<BatchGenerateResult>();
 const archiveNotify = ref(false); // 档案复用告知开关（Q6 修正）：预检提示随之显隐。
 /* 一次生成尝试后按钮保持禁用（与迁移前的 finally 行为一致），
    重新预检或切换勾选 / 模板时恢复。 */
@@ -253,14 +266,18 @@ async function runPreflight(): Promise<void> {
     toast("一次最多预检 200 份合同，请减少勾选", true);
     return;
   }
-  preflighting.value = true;
+  if (preflighting.value) {
+    return;
+  }
   errorState.value = null;
   summaryText.value = "正在逐份预检…";
   try {
-    const res = await batchPreviewGeneration(templateID.value, {
-      contract_ids: ids,
-      sample: true,
-    });
+    const res = await startPreflightJob(() =>
+      startBatchPreviewJob(templateID.value, {
+        contract_ids: ids,
+        sample: true,
+      }),
+    );
     preview.value = res;
     sampleBytes.value = res.pdf_base64 ? base64ToBytes(res.pdf_base64) : null;
     staleAvailable.value = (res.items ?? []).some(
@@ -287,9 +304,10 @@ async function runPreflight(): Promise<void> {
       toast("预检通过；可查看样例预览后开始批量生成");
     }
   } catch (error) {
+    if (isJobCancelled(error)) {
+      return;
+    }
     errorState.value = describeError(error);
-  } finally {
-    preflighting.value = false;
   }
 }
 
@@ -333,27 +351,32 @@ async function runGenerate(): Promise<void> {
   if (!window.confirm(`将用「${label}」生成 ${ready.length} 份合同 PDF，继续吗？${staleNote}`)) {
     return;
   }
-  generating.value = true;
+  if (generating.value) {
+    return;
+  }
   generateLocked.value = true;
   errorState.value = null;
   summaryText.value = `正在生成 ${ready.length} 份 PDF…`;
   try {
-    const res = await batchGenerateContracts(templateID.value, {
-      items: ready.map((item) => ({
-        contract_id: item.contract_id,
-        preview_sha256: item.preview_sha256,
-      })),
-      kind: props.kind || undefined,
-      allow_stale_signature: allowStale.value,
-    });
+    const res = await startGenerateJob(() =>
+      startBatchGenerateJob(templateID.value, {
+        items: ready.map((item) => ({
+          contract_id: item.contract_id,
+          preview_sha256: item.preview_sha256,
+        })),
+        kind: props.kind || undefined,
+        allow_stale_signature: allowStale.value,
+      }),
+    );
     results.value = res;
     preview.value = null;
     summaryText.value = `生成完成：成功 ${res.summary.success} 份 · 失败 ${res.summary.failed} 份`;
     await refreshLists();
   } catch (error) {
+    if (isJobCancelled(error)) {
+      return;
+    }
     errorState.value = describeError(error);
-  } finally {
-    generating.value = false;
   }
 }
 
@@ -371,58 +394,18 @@ async function download(item: BatchGenerateItemResult): Promise<void> {
   }
 }
 
+/** 失败行重试委托给 useBatchGenerateRetry（复用本对话框的 job runner）。 */
 async function retryItem(contractID: string): Promise<void> {
-  try {
-    const previewRes = await batchPreviewGeneration(templateID.value, {
-      contract_ids: [contractID],
-      sample: false,
-    });
-    const item = (previewRes.items ?? [])[0];
-    const eligible = Boolean(
-      item &&
-        (item.ready ||
-          (allowStale.value &&
-            (item.issues ?? []).every((issue) => issue.code === "content_changed"))),
-    );
-    if (!item || !eligible) {
-      const reason = item
-        ? (item.issues ?? []).map((issue) => issue.message).join("；")
-        : "预检失败";
-      toast(`仍不能生成：${reason}`, true);
-      return;
-    }
-    const res = await batchGenerateContracts(templateID.value, {
-      items: [{ contract_id: contractID, preview_sha256: item.preview_sha256 }],
-      kind: props.kind || undefined,
-      allow_stale_signature: allowStale.value,
-    });
-    const outcome = (res.items ?? [])[0];
-    if (!outcome) {
-      throw new Error("批次没有返回结果");
-    }
-    const current = results.value;
-    if (current) {
-      const items = (current.items ?? []).map((entry) =>
-        entry.contract_id === contractID ? outcome : entry,
-      );
-      results.value = {
-        ...current,
-        items,
-        summary: {
-          total: items.length,
-          success: items.filter((entry) => entry.success).length,
-          failed: items.filter((entry) => !entry.success).length,
-        },
-      };
-    }
-    const summary = results.value?.summary;
-    summaryText.value =
-      `生成完成：成功 ${summary?.success ?? 0} 份 · 失败 ${summary?.failed ?? 0} 份`;
-    toast(outcome.success ? "已重试成功" : `重试失败：${outcome.error_message || ""}`, !outcome.success);
-    await refreshLists();
-  } catch (error) {
-    toast(errorMessage(error), true);
-  }
+  await retryBatchItemRequest(contractID, {
+    templateID,
+    allowStale,
+    kind: props.kind || "",
+    results,
+    summaryText,
+    refreshLists,
+    startPreview: startPreflightJob,
+    startGenerate: startGenerateJob,
+  });
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -512,6 +495,10 @@ onBeforeUnmount(() => {
             </label>
           </div>
           <div id="batchSummary" class="tpl-status">{{ summaryText }}</div>
+          <ProgressPanel
+            v-if="preflighting || generating"
+            :job="preflighting ? previewJob : generateJob"
+          />
           <label v-show="staleAvailable" id="batchStaleWrap" class="check-row">
             <input
               id="batchAllowStale"

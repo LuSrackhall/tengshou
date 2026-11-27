@@ -13,6 +13,7 @@ frontend/src/api/
     seals.ts           seals
     imports.ts         excel 导入导出
     templates.ts       templates / generation / batch / documents / converters
+    jobs.ts            长操作后台任务（导入/生成/批量/Excel 的 job 化端点）
     signing.ts         signature-sessions / signature export
     system.ts          mcp / backup / integrity
   types.ts             契约类型 barrel（统一从 `api/types` 引入）
@@ -22,6 +23,7 @@ frontend/src/api/
     common.ts          List / 错误信封 / Stats / ChangeLog / 查询基类
     documents.ts       Signature / OutputDocument / Preflight / Batch
     imports.ts         Excel 导入预览与提交
+    jobs.ts            后台任务快照与 202 启动响应
     onboarding.ts      Onboarding / 自检
     records.ts         Party / Contract / FieldDefinition / Seal / Template
     requests.ts        写入请求体与列表查询参数
@@ -101,6 +103,7 @@ async function load(): Promise<void> {
 | `types/assets.ts` | `internal/model/model.go`（Asset/AssetTypeHouse/LeaseStatus*） |
 | `types/documents.ts` | `internal/model/model.go`（Signature/OutputDocument/DocumentSignatureSnapshot）、`internal/overlay/overlay.go`（Warning）、`internal/service/documents.go`（Preflight/Batch） |
 | `types/imports.ts` | `internal/service/excel.go`、`internal/httpapi/appapi.go`（importRequest） |
+| `types/jobs.ts` | `internal/httpapi/jobs.go`（jobSnapshot）、`internal/service/progress.go`（Progress）、`internal/httpapi/jobapi.go`（启动请求体） |
 | `types/onboarding.ts` | `internal/httpapi/onboarding.go`、`internal/service/onboarding.go` |
 | `types/settings.ts` | `internal/httpapi/appapi.go`（MCP）、`internal/service/backup.go`、`internal/backup/backup.go`、`internal/httpapi/backupapi.go` |
 | `types/signing.ts` | `internal/sign/session.go`、`internal/httpapi/signapi.go` |
@@ -109,9 +112,9 @@ async function load(): Promise<void> {
 
 ## 端点覆盖清单
 
-`internal/httpapi/server.go` 的 `routes()` 注册了 71 条 `/app/api/v1`
-路由（`PUT` 与 `POST /settings/mcp` 共用同一个 handler）。客户端覆盖其中
-阶段 1 各域需要的 70 条：
+`internal/httpapi/server.go` 的 `routes()` 注册了 `/app/api/v1` 的全部
+路由（`PUT` 与 `POST /settings/mcp` 共用同一个 handler）。客户端按域封装
+界面需要的端点（自描述根路径 `GET /app/api/v1` 除外）：
 
 | 域 | 端点函数 | HTTP 路由 |
 | --- | --- | --- |
@@ -126,6 +129,7 @@ async function load(): Promise<void> {
 | 公章 | `listSeals`、`getSeal`、`importSeal`、`updateSeal`、`replaceSealImage`、`deleteSeal`、`getSealContracts`、`attachSeal`、`detachSeal`、`sealImageUrl` | GET/POST `/seals`；GET/PUT/DELETE `/seals/{id}`；GET `/seals/{id}/image`、`/contracts`；POST `/seals/{id}/replace`、`/attach`、`/detach` |
 | Excel | `excelTemplateUrl`、`excelLedgerUrl`、`downloadExcelTemplate`、`downloadExcelLedger`、`previewExcelImport`、`commitExcelImport` | GET `/excel/template`、`/excel/ledger`；POST `/excel/preview`、`/excel/commit` |
 | 模板 | `listTemplates`、`getTemplate`、`importTemplate`、`deleteTemplate`、`saveTemplateMapping`、`getTemplateUsage`、`checkTemplate`、`fetchTemplatePdf`、`downloadTemplateSource`、`previewTemplate`、`preflightGeneration`、`generateContract`、`batchPreviewGeneration`、`batchGenerateContracts` | GET/POST `/templates`、`/templates/import`；GET/DELETE `/templates/{id}`；PUT `/templates/{id}/mapping`；GET `/templates/{id}/usage`、`/check`、`/pdf`、`/source`；POST `/templates/{id}/preview`、`/preflight`、`/generate`、`/batch/preview`、`/batch/generate` |
+| 后台任务 | `startTemplateImportJob`、`startContractPreviewJob`、`startContractGenerateJob`、`startBatchPreviewJob`、`startBatchGenerateJob`、`startExcelPreviewJob`、`startExcelCommitJob`、`getJob` | POST `/jobs/templates/import`、`/jobs/contracts/{id}/preview`、`/jobs/contracts/{id}/generate`、`/jobs/templates/{id}/batch-preview`、`/jobs/templates/{id}/batch-generate`、`/jobs/excel/preview`、`/jobs/excel/commit`；GET `/jobs/{id}` |
 | 生成记录 | `listDocuments`、`documentFileUrl`、`downloadDocumentFile`、`fetchDocumentFile` | GET `/documents`、`/documents/{id}/file` |
 | 转换程序 | `listConverters` | GET `/converters` |
 | 扫码签名 | `createSignatureSession`、`getSignatureSession`、`cancelSignatureSession`、`signatureSessionQrUrl`、`exportSignature` | POST/GET/DELETE `/signature-sessions`、`/signature-sessions/{id}`；GET `/signature-sessions/{id}/qr.png`；POST `/signatures/{id}/export` |

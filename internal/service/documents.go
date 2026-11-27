@@ -35,6 +35,8 @@ type GenerateInput struct {
 	AllowStaleSignature bool `json:"allow_stale_signature,omitempty"`
 	// BatchID groups documents produced by one batch run.
 	BatchID string `json:"batch_id,omitempty"`
+	// Progress reports prepare/render/write stages for the background job path.
+	Progress ProgressFunc `json:"-"`
 }
 
 // Preflight issue/status values. The UI maps status to Chinese labels.
@@ -92,6 +94,8 @@ type BatchPreviewInput struct {
 	Limit  int    `json:"limit,omitempty"`
 	// Sample renders one sample-data PDF of the selected template version.
 	Sample bool `json:"sample"`
+	// Progress reports per-contract batch preview progress (true i/N).
+	Progress ProgressFunc `json:"-"`
 }
 
 // BatchPreviewSummary counts ready and blocked contracts.
@@ -125,6 +129,8 @@ type BatchGenerateInput struct {
 	Items               []BatchGenerateItemInput `json:"items"`
 	Kind                string                   `json:"kind,omitempty"`
 	AllowStaleSignature bool                     `json:"allow_stale_signature,omitempty"`
+	// Progress reports the real per-contract i/N progress for the job path.
+	Progress ProgressFunc `json:"-"`
 }
 
 // BatchGenerateItemResult is the outcome for one contract.
@@ -236,19 +242,28 @@ func (s *Service) PreflightBatchGeneration(ctx context.Context, in BatchPreviewI
 		return BatchPreviewResult{}, business("invalid_contracts", "没有可生成 PDF 的合同")
 	}
 	items := make([]PreflightResult, 0, len(contracts))
+	total := len(contracts)
 	for i := range contracts {
 		c := contracts[i]
+		in.Progress.Report(ProgressBatch,
+			fmt.Sprintf("正在预检第 %d/%d 份（%s）…", i+1, total, c.ContractNo), i, total)
 		rc, err := s.loadTemplateContext(ctx, tpl, c.ID, false)
 		if err != nil {
 			items = append(items, failedPreflight(c, tpl, err))
+			in.Progress.Report(ProgressBatch,
+				fmt.Sprintf("已预检第 %d/%d 份", i+1, total), i+1, total)
 			continue
 		}
 		pf, err := s.preflightRenderContext(rc)
 		if err != nil {
 			items = append(items, failedPreflight(c, tpl, err))
+			in.Progress.Report(ProgressBatch,
+				fmt.Sprintf("已预检第 %d/%d 份", i+1, total), i+1, total)
 			continue
 		}
 		items = append(items, s.preflightResult(ctx, tpl, rc, pf))
+		in.Progress.Report(ProgressBatch,
+			fmt.Sprintf("已预检第 %d/%d 份", i+1, total), i+1, total)
 	}
 	res := BatchPreviewResult{Template: tpl, Items: items}
 	for _, item := range items {
@@ -260,6 +275,7 @@ func (s *Service) PreflightBatchGeneration(ctx context.Context, in BatchPreviewI
 		}
 	}
 	if in.Sample {
+		in.Progress.Report(ProgressRendering, "正在生成样例预览…", 0, 0)
 		preview, err := s.PreviewTemplate(ctx, tpl.ID, TemplatePreviewInput{Sample: true})
 		if err != nil {
 			return res, err
@@ -297,17 +313,26 @@ func (s *Service) GenerateContractBatch(ctx context.Context, in BatchGenerateInp
 		BatchID: batchID, TemplateID: tpl.ID, TemplateName: tpl.Name,
 		TemplateVersion: tpl.Version, Items: []BatchGenerateItemResult{},
 	}
-	for _, item := range in.Items {
+	total := len(in.Items)
+	for idx, item := range in.Items {
 		ir := BatchGenerateItemResult{ContractID: strings.TrimSpace(item.ContractID)}
 		if ir.ContractID == "" {
 			ir.ErrorCode, ir.ErrorMessage = "invalid_contract", "合同标识为空"
 			res.Items = append(res.Items, ir)
 			res.Summary.Failed++
+			in.Progress.Report(ProgressBatch,
+				fmt.Sprintf("已处理第 %d/%d 份（合同标识为空）", idx+1, total), idx+1, total)
 			continue
 		}
 		if c, err := s.rd.GetContract(ctx, ir.ContractID); err == nil {
 			ir.ContractNo, ir.Title = c.ContractNo, c.Title
 		}
+		label := ir.ContractNo
+		if label == "" {
+			label = "未命名合同"
+		}
+		in.Progress.Report(ProgressBatch,
+			fmt.Sprintf("正在生成第 %d/%d 份（%s）…", idx+1, total, label), idx, total)
 		out, err := s.generateContractDocument(ctx, tpl, GenerateInput{
 			TemplateID: tpl.ID, ContractID: ir.ContractID,
 			PreviewSHA256: item.PreviewSHA256, Kind: in.Kind,
@@ -319,6 +344,8 @@ func (s *Service) GenerateContractBatch(ctx context.Context, in BatchGenerateInp
 			ir.ErrorMessage = err.Error()
 			res.Items = append(res.Items, ir)
 			res.Summary.Failed++
+			in.Progress.Report(ProgressBatch,
+				fmt.Sprintf("已处理第 %d/%d 份（失败）", idx+1, total), idx+1, total)
 			continue
 		}
 		doc := out.Document
@@ -327,6 +354,8 @@ func (s *Service) GenerateContractBatch(ctx context.Context, in BatchGenerateInp
 		ir.Warnings = out.Warnings
 		res.Items = append(res.Items, ir)
 		res.Summary.Success++
+		in.Progress.Report(ProgressBatch,
+			fmt.Sprintf("已处理第 %d/%d 份", idx+1, total), idx+1, total)
 	}
 	res.Summary.Total = len(res.Items)
 	return res, nil
@@ -348,6 +377,7 @@ func (s *Service) generateContractDocument(ctx context.Context, tpl model.Templa
 	if tpl.Kind != model.TemplateKindPDF {
 		return TemplateRenderResult{}, business("invalid_kind", "只有 PDF 模板可以生成套印 PDF")
 	}
+	in.Progress.Report(ProgressRendering, "正在准备数据…", 0, 0)
 	contractID := strings.TrimSpace(in.ContractID)
 	if contractID == "" {
 		return TemplateRenderResult{}, business("invalid_contract", "请选择要生成 PDF 的合同")
@@ -398,6 +428,7 @@ func (s *Service) generateContractDocument(ctx context.Context, tpl model.Templa
 		s.recordFailedDocument(ctx, tpl, rc, pf, kind, in.BatchID, sourceID, err.Error())
 		return TemplateRenderResult{}, err
 	}
+	in.Progress.Report(ProgressRendering, "正在套印并生成 PDF…", 0, 0)
 	built, err := overlay.Build(overlay.Options{
 		Pages:           pages,
 		Placements:      placements,
@@ -450,6 +481,7 @@ func (s *Service) generateContractDocument(ctx context.Context, tpl model.Templa
 		SourceDocumentID: sourceID,
 		CreatedAt:        now,
 	}
+	in.Progress.Report(ProgressWriting, "正在保存生成记录…", 0, 0)
 	if err := s.st.PutOutputDocument(ctx, &doc); err != nil {
 		s.removeAsset(outRel)
 		return TemplateRenderResult{}, err

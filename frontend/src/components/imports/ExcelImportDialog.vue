@@ -8,7 +8,7 @@
 
 import { computed, nextTick, onMounted, ref } from "vue";
 import { ApiError } from "../../api/client";
-import { commitExcelImport, previewExcelImport } from "../../api/endpoints";
+import { startExcelCommitJob, startExcelPreviewJob } from "../../api/endpoints";
 import type {
   ImportOptions,
   ImportPreview,
@@ -17,7 +17,9 @@ import type {
   ImportRow,
 } from "../../api/types";
 import { errorMessage, refreshAfterWrite, toast } from "../../bridge/app";
+import { isJobCancelled, useJob } from "../../composables/useJob";
 import ModalDialog from "../../ui/ModalDialog.vue";
+import ProgressPanel from "../common/ProgressPanel.vue";
 import {
   fieldLabelByKey,
   importActionLabel,
@@ -47,8 +49,18 @@ const options = ref<DialogOptions>({
 });
 const resolutions = ref<Record<string, ImportResolution>>({});
 const dirty = ref(false);
-const loading = ref(false);
-const submitting = ref(false);
+/* 预览与提交走后台任务：解析/校验/逐行写入阶段与行号进度由 ProgressPanel
+   展示（真实 current/total），不再只有静态「正在解析并校验…」。 */
+const {
+  job: previewJob,
+  running: loading,
+  start: startPreviewJob,
+} = useJob<ImportPreview>();
+const {
+  job: commitJob,
+  running: submitting,
+  start: startCommitJob,
+} = useJob<ImportResult>();
 const fatalError = ref("");
 const result = ref<ImportResult | null>(null);
 const resultBlocked = ref(false);
@@ -136,22 +148,19 @@ async function runPreview(useCurrentMapping: boolean): Promise<void> {
   if (loading.value) {
     return;
   }
-  loading.value = true;
-  try {
-    const response = await previewExcelImport({
+  const response = await startPreviewJob(() =>
+    startExcelPreviewJob({
       file_base64: base64.value,
       options: requestOptions(useCurrentMapping),
-    });
-    preview.value = response;
-    mapping.value = { ...response.mapping };
-    resolutions.value = defaultResolutions(response.rows);
-    dirty.value = false;
-    result.value = null;
-    resultBlocked.value = false;
-    fatalError.value = "";
-  } finally {
-    loading.value = false;
-  }
+    }),
+  );
+  preview.value = response;
+  mapping.value = { ...response.mapping };
+  resolutions.value = defaultResolutions(response.rows);
+  dirty.value = false;
+  result.value = null;
+  resultBlocked.value = false;
+  fatalError.value = "";
 }
 
 onMounted(() => {
@@ -166,6 +175,9 @@ onMounted(() => {
     try {
       await runPreview(false);
     } catch (error) {
+      if (isJobCancelled(error)) {
+        return;
+      }
       fatalError.value = errorMessage(error);
     }
   })();
@@ -173,6 +185,9 @@ onMounted(() => {
 
 function rePreview(): void {
   void runPreview(true).catch((error: unknown) => {
+    if (isJobCancelled(error)) {
+      return;
+    }
     toast(errorMessage(error), true);
   });
 }
@@ -198,29 +213,31 @@ async function commit(): Promise<void> {
   if (submitting.value) {
     return;
   }
-  submitting.value = true;
   try {
     const request: ImportOptions = {
       ...requestOptions(true),
       resolutions: { ...resolutions.value },
     };
-    const response = await commitExcelImport({
-      file_base64: base64.value,
-      options: request,
-    });
+    const response = await startCommitJob(() =>
+      startExcelCommitJob({
+        file_base64: base64.value,
+        options: request,
+      }),
+    );
     result.value = response;
     resultBlocked.value = false;
     toast(importResultToast(response));
     await refreshAfterWrite();
   } catch (error) {
+    if (isJobCancelled(error)) {
+      return;
+    }
     const blocked = commitErrorResult(error);
     if (blocked) {
       result.value = blocked;
       resultBlocked.value = true;
     }
     toast(errorMessage(error), true);
-  } finally {
-    submitting.value = false;
   }
   await nextTick();
   resultEl.value?.scrollIntoView({ block: "nearest" });
@@ -272,6 +289,7 @@ function setMode(event: Event): void {
 <template>
   <ModalDialog :title="title" wide @close="emit('close')">
     <div v-if="fatalError" class="form-errors">{{ fatalError }}</div>
+    <ProgressPanel v-if="loading" :job="previewJob" />
     <p v-else-if="!preview">正在解析并校验…</p>
     <template v-else>
       <div class="import-options">
@@ -305,6 +323,8 @@ function setMode(event: Event): void {
         <li v-for="(note, index) in preview.notes ?? []" :key="index">{{ note }}</li>
       </ul>
       <p v-if="dirty" id="importDirtyHint" class="hint">列映射已修改，建议先点「重新预览」确认结果。</p>
+
+      <ProgressPanel v-if="submitting" :job="commitJob" />
 
       <div id="importResult" ref="resultEl">
         <template v-if="result">

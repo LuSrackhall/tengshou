@@ -21,6 +21,7 @@ export type * from "./types/bootstrap";
 export type * from "./types/common";
 export type * from "./types/documents";
 export type * from "./types/imports";
+export type * from "./types/jobs";
 export type * from "./types/onboarding";
 export type * from "./types/records";
 export type * from "./types/requests";

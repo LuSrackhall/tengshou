@@ -8,6 +8,7 @@ export * from "./endpoints/onboarding";
 export * from "./endpoints/records";
 export * from "./endpoints/seals";
 export * from "./endpoints/imports";
+export * from "./endpoints/jobs";
 export * from "./endpoints/templates";
 export * from "./endpoints/signing";
 export * from "./endpoints/system";

@@ -12,11 +12,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ApiError } from "../../api/client";
 import {
   downloadDocumentFile,
-  generateContract,
   getArchiveReuseSettings,
   getContract,
   listTemplates,
-  previewTemplate,
+  startContractGenerateJob,
+  startContractPreviewJob,
 } from "../../api/endpoints";
 import type {
   ApiFieldError,
@@ -25,6 +25,8 @@ import type {
   OutputDocument,
   OverlayWarning,
   Template,
+  TemplateGenerateResponse,
+  TemplatePreviewResponse,
 } from "../../api/types";
 import {
   errorMessage,
@@ -32,9 +34,11 @@ import {
   subscribeDataChanged,
   toast,
 } from "../../bridge/app";
+import { isJobCancelled, useJob } from "../../composables/useJob";
 import type { DataChangedDetail } from "../../shell/events";
 import { fmtDate } from "../../ui/format";
 import PdfOverlay from "../pdf/PdfOverlay.vue";
+import ProgressPanel from "../common/ProgressPanel.vue";
 import { base64ToBytes } from "../pdf/pdf";
 import { saveDownloadedFile } from "./download";
 import {
@@ -103,8 +107,18 @@ const warnings = ref<OverlayWarning[]>([]);
 const generationErrors = ref<GenerationErrorState | null>(null);
 const documents = ref<OutputDocument[]>(props.detail.documents ?? []);
 const overlay = ref<OverlayRequest | null>(null);
-const previewing = ref(false);
-const generating = ref(false);
+/* 预览与生成走后台任务：阶段、已用时间与真实信号由 ProgressPanel 展示，
+   前端不再只靠按钮置灰表达「正在处理」。 */
+const {
+  job: previewJob,
+  running: previewing,
+  start: startPreviewJob,
+} = useJob<TemplatePreviewResponse>();
+const {
+  job: generateJob,
+  running: generating,
+  start: startGenerateJob,
+} = useJob<TemplateGenerateResponse>();
 /* 档案复用告知（Q6 修正）：与合同表单/批量预检同口径，只控制提示显隐；
    预览与生成本身始终按已关联的档案资产套印。 */
 const archiveNotify = ref(false);
@@ -234,13 +248,18 @@ async function runPreview(): Promise<void> {
     toast("请选择模板版本", true);
     return;
   }
-  previewing.value = true;
+  if (previewing.value) {
+    return;
+  }
   generationErrors.value = null;
   status.value = "正在生成预览…";
   try {
-    const result = await previewTemplate(templateID, {
-      contract_id: props.contract.id,
-    });
+    const result = await startPreviewJob(() =>
+      startContractPreviewJob(props.contract.id, {
+        template_id: templateID,
+        contract_id: props.contract.id,
+      }),
+    );
     const resultWarnings = result.warnings ?? [];
     preview.value = { templateID, sha: result.preview_sha256 };
     status.value = "预览已完成。确认版式与数据无误后点击「生成 PDF」。";
@@ -255,11 +274,12 @@ async function runPreview(): Promise<void> {
       warnings: resultWarnings,
     };
   } catch (error) {
+    if (isJobCancelled(error)) {
+      return;
+    }
     preview.value = null;
     status.value = "预览失败。";
     generationErrors.value = describeGenerationError(error);
-  } finally {
-    previewing.value = false;
   }
 }
 
@@ -274,17 +294,22 @@ async function runGenerate(allowStaleSignature = false): Promise<void> {
     toast("模板版本已更换，请重新预览", true);
     return;
   }
-  generating.value = true;
+  if (generating.value) {
+    return;
+  }
   generationErrors.value = null;
   status.value = "正在生成 PDF…";
   try {
-    const result = await generateContract(current.templateID, {
-      contract_id: props.contract.id,
-      preview_sha256: current.sha,
-      // 单份生成不指定 kind，沿用存量界面的空串（由服务端判断初次/重出）。
-      kind: "",
-      allow_stale_signature: allowStaleSignature,
-    });
+    const result = await startGenerateJob(() =>
+      startContractGenerateJob(props.contract.id, {
+        template_id: current.templateID,
+        contract_id: props.contract.id,
+        preview_sha256: current.sha,
+        // 单份生成不指定 kind，沿用存量界面的空串（由服务端判断初次/重出）。
+        kind: "",
+        allow_stale_signature: allowStaleSignature,
+      }),
+    );
     const doc = result.item;
     warnings.value = result.warnings ?? [];
     status.value = `已${generationKindLabel(doc.kind)} PDF：${doc.page_count} 页，模板 v${doc.template_version}。`;
@@ -293,6 +318,9 @@ async function runGenerate(allowStaleSignature = false): Promise<void> {
     await refreshHistory();
     await refreshLists();
   } catch (error) {
+    if (isJobCancelled(error)) {
+      return;
+    }
     if (
       error instanceof ApiError &&
       error.code === "content_changed" &&
@@ -300,7 +328,6 @@ async function runGenerate(allowStaleSignature = false): Promise<void> {
     ) {
       const confirmed = window.confirm(STALE_CONFIRM_TEXT);
       if (confirmed) {
-        generating.value = false;
         await runGenerate(true);
         return;
       }
@@ -308,8 +335,6 @@ async function runGenerate(allowStaleSignature = false): Promise<void> {
     status.value = "生成失败。";
     generationErrors.value = describeGenerationError(error);
     await refreshHistory();
-  } finally {
-    generating.value = false;
   }
 }
 
@@ -412,6 +437,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div id="genStatus" class="tpl-status">{{ status }}</div>
+        <ProgressPanel
+          v-if="previewing || generating"
+          :job="previewing ? previewJob : generateJob"
+        />
         <div id="genErrors">
           <template v-if="generationErrors">
             <div v-if="generationErrors.fieldErrors.length" class="form-errors">

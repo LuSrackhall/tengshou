@@ -11,6 +11,7 @@
 // tengshou:open-template-editor / -import 打开本域。
 // 外部写入经 shell/realtime.ts 派发的 tengshou:data-changed 到达后重取列表。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { ApiError } from "../../api/client";
 import {
   deleteTemplate as deleteTemplateRequest,
   downloadTemplateSource,
@@ -18,11 +19,13 @@ import {
   listContracts,
   listConverters,
   listTemplates,
+  startTemplateImportJob,
 } from "../../api/endpoints";
 import type {
   Contract,
   ConverterAvailability,
   Template,
+  TemplateMutationResponse,
 } from "../../api/types";
 import {
   errorMessage,
@@ -34,6 +37,7 @@ import {
   toast,
   type TemplateEditorAction,
 } from "../../bridge/app";
+import { isJobCancelled, useJob } from "../../composables/useJob";
 import TemplateEditor from "./TemplateEditor.vue";
 import TemplateImportModal from "./TemplateImportModal.vue";
 import {
@@ -43,6 +47,7 @@ import {
   saveBlob,
   templateSourceName,
 } from "./format";
+import type { ImportErrorState } from "./import";
 
 /** 导入上限与迁移前一致：40MB。 */
 const IMPORT_MAX_BYTES = 40 * 1024 * 1024;
@@ -75,6 +80,14 @@ const search = ref("");
 const activeQuery = ref("");
 const loaded = ref(false);
 const importPayload = ref<ImportPayload | null>(null);
+const importError = ref<ImportErrorState | null>(null);
+/* 导入任务由本域持有而不是弹窗：关闭弹窗后轮询继续，完成后按「后台完成」
+   链路刷新列表；弹窗仍在时保持原有「导入后自动打开标定编辑器」。 */
+const {
+  job: importJob,
+  running: importRunning,
+  start: startImportJob,
+} = useJob<TemplateMutationResponse>();
 const editor = ref<EditorPayload | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 
@@ -166,6 +179,7 @@ async function onImportFile(event: Event): Promise<void> {
     return;
   }
   const converterData = await listConverters().catch(() => null);
+  importError.value = null;
   importPayload.value = {
     file,
     base64,
@@ -177,14 +191,72 @@ function openEditor(template: Template, action?: TemplateEditorAction): void {
   editor.value = { template, action };
 }
 
-async function onImported(template: Template): Promise<void> {
+function describeImportError(error: unknown): ImportErrorState {
+  if (error instanceof ApiError) {
+    return { fieldErrors: error.fields, message: error.message };
+  }
+  return { fieldErrors: [], message: errorMessage(error) };
+}
+
+/** 启动后台导入任务；弹窗保持打开时展示阶段进度与错误。 */
+async function startImport(name: string): Promise<void> {
+  const payload = importPayload.value;
+  if (!payload || importRunning.value) {
+    return;
+  }
+  importError.value = null;
+  try {
+    const result = await startImportJob(() =>
+      startTemplateImportJob({
+        name,
+        file_name: payload.file.name,
+        file_base64: payload.base64,
+      }),
+    );
+    await finishImport(result);
+  } catch (error) {
+    if (isJobCancelled(error)) {
+      return;
+    }
+    const state = describeImportError(error);
+    if (importPayload.value) {
+      importError.value = state;
+    } else {
+      toast(state.message, true);
+    }
+  }
+}
+
+/**
+ * 导入完成：弹窗仍在时沿用存量行为（toast 后自动打开标定编辑器）；
+ * 已关闭（转到后台）时只提示并刷新列表——模板会自动出现在列表里。
+ */
+async function finishImport(result: TemplateMutationResponse): Promise<void> {
+  const warnings = result.warnings ?? [];
+  toast(warnings.length ? warnings[0] ?? "" : `模板已导入（v${result.item.version}）`);
+  if (warnings.length > 1) {
+    setTimeout(() => toast(warnings.slice(1).join("；")), 400);
+  }
+  const modalOpen = importPayload.value !== null;
   importPayload.value = null;
+  importError.value = null;
   try {
     await refreshAfterWrite();
   } catch (error) {
     toast(errorMessage(error), true);
   }
-  openEditor(template);
+  if (modalOpen) {
+    openEditor(result.item);
+  }
+}
+
+/** 关闭导入弹窗：任务继续在后台跑，明确告知完成后的去向。 */
+function closeImport(): void {
+  if (importRunning.value) {
+    toast("转换在后台继续，完成后模板会自动出现在列表。");
+  }
+  importPayload.value = null;
+  importError.value = null;
 }
 
 async function openEditorFromEvent(
@@ -385,10 +457,11 @@ onBeforeUnmount(() => {
   <TemplateImportModal
     v-if="importPayload"
     :file="importPayload.file"
-    :base64="importPayload.base64"
     :converters="importPayload.converters"
-    @close="importPayload = null"
-    @imported="onImported"
+    :job="importJob"
+    :errors="importError"
+    @close="closeImport"
+    @submit="startImport"
   />
   <TemplateEditor
     v-if="editor"

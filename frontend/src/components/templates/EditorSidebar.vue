@@ -6,11 +6,13 @@ import { computed, ref, watch } from "vue";
 import type {
   Contract,
   FieldsByEntityResponse,
+  JobSnapshot,
   OverlayWarning,
   Placement,
   PlacementOverlap,
   Seal,
 } from "../../api/types";
+import ProgressPanel from "../common/ProgressPanel.vue";
 import { bindingLabel, fieldOptionGroups, sealOptionLabel } from "./labels";
 import type {
   AddPlacementPayload,
@@ -40,6 +42,8 @@ const props = defineProps<{
   previewStatusText: string;
   previewStatusClass: string;
   canGenerate: boolean;
+  /** 正在运行的合同预览/生成任务快照（阶段 + 已用秒数）；空闲时 null。 */
+  activeJob: JobSnapshot<unknown> | null;
   /** null 表示尚未预览过（警告区为空）。 */
   warnings: OverlayWarning[] | null;
   result: GeneratedResult | null;
@@ -405,6 +409,7 @@ function onMaskChange(event: Event): void {
       生成 PDF
     </button>
     <div id="tplPreviewStatus" :class="previewStatusClass">{{ previewStatusText }}</div>
+    <ProgressPanel v-if="activeJob" :job="activeJob" />
     <div id="tplWarnings" class="tpl-warnings">
       <template v-if="warnings">
         <div v-if="!warnings.length" class="tpl-status ok">预览未发现缺失字段或越界问题。</div>

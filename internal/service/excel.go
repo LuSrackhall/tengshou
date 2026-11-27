@@ -39,6 +39,9 @@ type ImportOptions struct {
 	// "use_excel". Every conflict row needs an explicit choice before commit
 	// writes anything.
 	Resolutions map[string]string `json:"resolutions"`
+	// Progress reports parse/validate/write stages and row counters for the
+	// background job path. The synchronous endpoints leave it nil.
+	Progress ProgressFunc `json:"-"`
 }
 
 // ImportColumn describes one header column and its resolved field.
@@ -330,7 +333,11 @@ func (s *Service) previewPlan(ctx context.Context, data []byte, opts ImportOptio
 	preview.Columns = buildColumns(parsed.Headers, ictx.mapping, ictx.byKey)
 	preview.Notes = mappingNotes(parsed.Headers, ictx.mapping, ictx.byKey, ictx.fields)
 	seen := map[string]bool{}
-	for _, row := range parsed.Rows {
+	opts.Progress.Report(ProgressParsing, "正在校验…", 0, 0)
+	totalRows := len(parsed.Rows)
+	for idx, row := range parsed.Rows {
+		opts.Progress.Report(ProgressParsing,
+			fmt.Sprintf("正在校验第 %d/%d 行…", idx+1, totalRows), idx+1, totalRows)
 		previewRow, snapshotRow, err := s.previewRow(ctx, row, ictx)
 		if err != nil {
 			return ImportPreview{}, nil, xlsx.ReadResult{}, err
@@ -391,6 +398,7 @@ func (s *Service) previewPlan(ctx context.Context, data []byte, opts ImportOptio
 }
 
 func (s *Service) buildImportContext(ctx context.Context, data []byte, opts ImportOptions) (xlsx.ReadResult, *importContext, error) {
+	opts.Progress.Report(ProgressParsing, "正在解析表格…", 0, 0)
 	parsed, err := xlsx.Read(data)
 	if err != nil {
 		return xlsx.ReadResult{}, nil, business("invalid_excel", "%s", err.Error())
@@ -745,8 +753,11 @@ func (s *Service) CommitImport(ctx context.Context, data []byte, opts ImportOpti
 		parsedByNumber[row.Number] = row
 	}
 
+	totalRows := len(result.Rows)
 	for i := range result.Rows {
 		row := &result.Rows[i]
+		opts.Progress.Report(ProgressWriting,
+			fmt.Sprintf("正在写入第 %d/%d 行…", i+1, totalRows), i+1, totalRows)
 		switch row.Action {
 		case "unchanged":
 			result.Unchanged++

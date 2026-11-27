@@ -77,6 +77,9 @@ type TemplateImportInput struct {
 	Name     string `json:"name"`
 	FileName string `json:"file_name"`
 	Data     []byte `json:"-"`
+	// Progress reports save/convert/parse stages for the background job path.
+	// The synchronous import endpoint and MCP calls leave it nil.
+	Progress ProgressFunc `json:"-"`
 }
 
 // TemplateSaveInput replaces the calibrated positions of a PDF template,
@@ -223,6 +226,7 @@ func (s *Service) ImportTemplate(ctx context.Context, in TemplateImportInput) (T
 		cleanup()
 		return TemplateImportResult{}, err
 	}
+	in.Progress.Report(ProgressSaving, "正在保存文件…", 0, 0)
 	if err := writeFileAtomic(sourceAbs, in.Data, 0o600); err != nil {
 		cleanup()
 		return TemplateImportResult{}, fmt.Errorf("保存模板源文件失败：%w", err)
@@ -233,6 +237,9 @@ func (s *Service) ImportTemplate(ctx context.Context, in TemplateImportInput) (T
 	pdfRel := sourceRel
 	pdfAbs := sourceAbs
 	if !isPDF {
+		// Word COM / LibreOffice can take 5–30 seconds and report no percentage;
+		// the stage switch is the real, honest signal.
+		in.Progress.Report(ProgressConverting, "正在转换为 PDF（Microsoft Word / LibreOffice）…", 0, 0)
 		convertCtx, cancel := context.WithTimeout(ctx, conversionTimeout)
 		converted := filepath.Join(dirAbs, "converted.pdf")
 		converter, err = s.converters.Convert(convertCtx, sourceAbs, converted)
@@ -262,6 +269,7 @@ func (s *Service) ImportTemplate(ctx context.Context, in TemplateImportInput) (T
 		cleanup()
 		return TemplateImportResult{}, err
 	}
+	in.Progress.Report(ProgressParsing, "正在解析 PDF…", 0, 0)
 	pages, err := overlay.PageSizes(pdfAbs)
 	if err != nil {
 		cleanup()
@@ -284,6 +292,7 @@ func (s *Service) ImportTemplate(ctx context.Context, in TemplateImportInput) (T
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
+	in.Progress.Report(ProgressSaving, "正在保存模板…", 0, 0)
 	if err := s.st.PutTemplate(ctx, &record); err != nil {
 		cleanup()
 		return TemplateImportResult{}, err

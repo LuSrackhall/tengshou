@@ -88,6 +88,14 @@ func (s *Server) handleAppAPIRoot(w http.ResponseWriter, r *http.Request) {
 			"/app/api/v1/excel/ledger",
 			"/app/api/v1/excel/preview",
 			"/app/api/v1/excel/commit",
+			"/app/api/v1/jobs/templates/import",
+			"/app/api/v1/jobs/contracts/{id}/preview",
+			"/app/api/v1/jobs/contracts/{id}/generate",
+			"/app/api/v1/jobs/templates/{id}/batch-preview",
+			"/app/api/v1/jobs/templates/{id}/batch-generate",
+			"/app/api/v1/jobs/excel/preview",
+			"/app/api/v1/jobs/excel/commit",
+			"/app/api/v1/jobs/{id}",
 			"/app/api/v1/signature-sessions",
 			"/app/api/v1/signature-sessions/{id}",
 			"/app/api/v1/signature-sessions/{id}/qr.png",
@@ -844,44 +852,10 @@ func (s *Server) readAppJSON(w http.ResponseWriter, r *http.Request, dst any) bo
 }
 
 func (s *Server) writeServiceError(w http.ResponseWriter, msg string, err error) {
-	var validation *service.ValidationErrors
-	if errors.As(err, &validation) {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-			"error": map[string]any{
-				"code":    "validation",
-				"message": validation.Error(),
-				"fields":  validation.Items,
-			},
-		})
+	status, body := describeServiceError(err)
+	if body == nil {
+		s.internalError(w, msg, err)
 		return
 	}
-	var businessErr *service.Error
-	if errors.As(err, &businessErr) {
-		status := http.StatusBadRequest
-		switch businessErr.Code {
-		case "not_found":
-			status = http.StatusNotFound
-		case "conflict", "immutable", "in_use", "duplicate", "ambiguous_party",
-			"preview_required", "missing_asset", "invalid_template", "content_changed",
-			"duplicate_id_number", "lease_conflict", "renewal_termination_confirm":
-			status = http.StatusConflict
-		case "import_errors", "converter_unavailable", "convert_failed",
-			"invalid_pdf", "invalid_kind", "too_many_placements",
-			"invalid_backup", "confirm_required", "conflict_unresolved",
-			"missing_signature", "missing_field", "missing_party", "missing_seal",
-			"preflight_failed", "too_many_contracts":
-			status = http.StatusUnprocessableEntity
-		case "file_too_large", "backup_too_large":
-			status = http.StatusRequestEntityTooLarge
-		case "font_unavailable":
-			status = http.StatusServiceUnavailable
-		}
-		writeError(w, status, businessErr.Code, businessErr.Message)
-		return
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "记录不存在")
-		return
-	}
-	s.internalError(w, msg, err)
+	writeJSON(w, status, map[string]any{"error": body})
 }

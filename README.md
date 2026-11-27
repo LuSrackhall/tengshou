@@ -180,6 +180,7 @@ go run ./tools/tengshoubuild build cli          # 只构建 CLI
 go run ./tools/tengshoubuild build -goos windows -goarch amd64  # Windows 目标（GUI/控制台子系统同一处收口）
 go run ./tools/tengshoubuild package-windows-zip dist  # 用已构建的 Windows 桌面 exe 打发布 zip
 go run ./tools/tengshoubuild smoke-mcp dist/tengshou dist/tengshou-cli  # stdio MCP 发布形态冒烟
+go run ./tools/tengshoubuild release-plan --tag v0.1.0  # 按版本号推导发布资产清单（正式/预发布）
 ```
 
 构建 / 冒烟 / 打包三端共用 `tools/tengshoubuild` 一个实现，不再维护
@@ -208,10 +209,18 @@ GitHub Actions：
 - 构建 Linux / macOS CLI 与 macOS / Windows 桌面壳（统一调用
   `tools/tengshoubuild`），并在 linux（CLI 自连）、windows-latest（GUI
   子系统）、macos-15 三端用发布形态二进制做 MCP stdio 管道冒烟；
-- `v*` 标签：发布固定 5 个资产 = 4 个客户端资产（Windows zip、Windows 桌面
-  exe、macOS 桌面二进制与 tar.gz）+ 1 个使用教程包（教程 HTML、过程录像、
-  示例 PDF 与 SHA256SUMS，由 CI 在 macOS 上真实运行自动生成）；完整 CLI
-  不进发布页，仅作为 CI 构建产物；Windows zip 由发布任务用同一工具组装。
+- `v*` 标签：发布资产按版本号（唯一事实源 = git tag，清单由
+  `go run ./tools/tengshoubuild release-plan` 统一推导）分两档：
+  - 正式版 `vX.Y.Z`：固定 5 个资产 = 4 个客户端资产（Windows zip、Windows
+    桌面 exe、macOS 桌面二进制与 tar.gz）+ 1 个使用教程包（教程 HTML、过程
+    录像、示例 PDF 与 SHA256SUMS，由 CI 在 macOS 上真实运行自动生成）；
+  - 预发布 `vX.Y.Z-(alpha|beta|rc).N`：8 个资产 = 上述 5 个 + 三端各一个业务
+    验收包 `tengshou-acceptance-<tag>-<platform>.zip`（验收报告 HTML、过程
+    录像、示例 PDF 与 SHA256SUMS）。验收包来自 main 上同一 commit 的 CI 工件
+    （不重跑 E2E）；发布任务会等待该 run 全绿，把「打 tag 前 main 已全绿」
+    的发版前提变成机制。
+  完整 CLI 不进发布页，仅作为 CI 构建产物；Windows zip 与验收包由发布任务
+  用同一套工具组装。
 
 ## 开发
 

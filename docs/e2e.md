@@ -99,8 +99,21 @@ e2e/test-results/business-acceptance/房屋租赁合同-已签字盖章.pdf
 
 发版标签会额外运行一个 macOS · WebKit 的教程任务（单平台即可），把
 `腾手使用教程.html`、`验收过程录像.webm`、`房屋租赁合同-已签字盖章.pdf` 与
-`SHA256SUMS` 打成 `tengshou-tutorial-<tag>.zip` 作为发布资产。发布清单断言
-从「4 个客户端资产」改为「4 个客户端 + 1 个教程包」。
+`SHA256SUMS` 打成 `tengshou-tutorial-<tag>.zip` 作为发布资产。
+
+预发布标签还会额外运行一个「汇总验收证据」任务：先在 `main` 上找到同一
+commit 的 push run，等它 completed 且 conclusion=success（把「打 tag 前
+main 已全绿」的发版前提变成机制，不重跑 E2E），再用 `gh run download`
+取回三端 `business-acceptance-*` 工件，按平台各打一个
+`tengshou-acceptance-<tag>-<platform>.zip`（只保留业务验收报告、过程录像、
+示例 PDF 与 SHA256SUMS；工件里重复的教程 HTML 不进入）。
+
+发布资产按版本号分两档，清单唯一事实源 = `tengshoubuild release-plan`：
+
+| 版本 | 资产数 | 内容 |
+| --- | --- | --- |
+| 正式 `vX.Y.Z` | 5 | 4 个客户端资产 + 1 个教程包 |
+| 预发布 `vX.Y.Z-(alpha\|beta\|rc).N` | 8 | 上述 5 个 + 三端各一个验收包 |
 
 主流程：
 
@@ -263,7 +276,8 @@ CI 在 `e2e` job 中**始终**上传 `e2e/playwright-report` 与 `e2e/test-resul
 最终合同 PDF）。产品负责人按平台下载对应工件，解压后双击
 `业务验收报告.html` 或 `腾手使用教程.html`，无需安装任何软件；报告内的逐页
 PDF 图已内嵌，过程视频为同目录相对引用。报告「运行环境」行标明平台与浏览器，
-转换器步骤与实际转换器信息随平台如实呈现。
+转换器步骤与实际转换器信息随平台如实呈现。预发布时，这些工件还会被发布任务
+汇总为三端各一个验收包（见上文「汇总验收证据」），随 Release 一起发布。
 
 ## 定位界面回归
 

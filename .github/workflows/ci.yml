@@ -1,9 +1,15 @@
 name: CI
 
 # 发版流程约束：只对已合入 main 且 main 上 CI 全绿的 commit 打 v* tag。
+# 发布资产由版本号（唯一事实源 = git tag）决定，清单统一由
+# `tengshoubuild release-plan` 推导：
+#   - 正式版 vX.Y.Z：5 个资产（4 个客户端 + 1 个教程包）；
+#   - 预发布 vX.Y.Z-(alpha|beta|rc).N：8 个资产（再加三端各一个验收包）。
+# 预发布验收包来自 main 上同一 commit 的 CI 工件（不重跑 E2E；job 会等待
+# 该 run 全绿，把「main 全绿」的发版前提变成机制）。验收 job 与三端构建
+# 并行，发版墙钟预计只多 1~2 分钟。
 # tag run 跳过单测与三端 E2E（同一 commit 已在 main 上验证），只保留
-# 前端构建 + CLI/桌面构建 + 教程 + 发布，把发版墙钟压到 ≤9 分钟
-# （教程的慢速录制是硬底）。
+# 前端构建 + CLI/桌面构建 + 教程 + 验收汇总 + 发布。
 on:
   push:
     branches: [main]
@@ -29,6 +35,9 @@ concurrency:
 
 permissions:
   contents: write
+  # 预发布「汇总验收证据」job 用 gh run list/download 读取 main 上的 CI run
+  # 与业务验收工件。
+  actions: read
 
 jobs:
   test:
@@ -91,6 +100,51 @@ jobs:
               got = sorted(z.namelist())
           if got != expected:
               sys.exit(f"错误：Windows zip 内容不符：{got} != {expected}")
+          PY
+          rm -rf "$tmp"
+      - name: 验收包打包工具冒烟测试
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          for platform in linux-chromium macos-webkit windows-chromium; do
+            mkdir -p "$tmp/evidence/$platform"
+            printf 'report' > "$tmp/evidence/$platform/业务验收报告.html"
+            printf 'video' > "$tmp/evidence/$platform/验收过程录像.webm"
+            printf 'pdf' > "$tmp/evidence/$platform/房屋租赁合同-已签字盖章.pdf"
+            # 工件里重复的教程 HTML 必须被丢弃，不进入验收包。
+            printf 'tutorial' > "$tmp/evidence/$platform/腾手使用教程.html"
+          done
+          python3 -I scripts/package-acceptance.py --tag v0.0.0-alpha.1 \
+            --evidence-dir "$tmp/evidence" --out-dir "$tmp/acceptance"
+          # 独立校验（不复用打包脚本自身的断言）。
+          python3 -I - "$tmp/acceptance" <<'PY'
+          import glob
+          import hashlib
+          import sys
+          import zipfile
+
+          files = [
+              "业务验收报告.html",
+              "验收过程录像.webm",
+              "房屋租赁合同-已签字盖章.pdf",
+          ]
+          expected = sorted(files + ["SHA256SUMS"])
+          paths = sorted(glob.glob(sys.argv[1] + "/tengshou-acceptance-*.zip"))
+          if len(paths) != 3:
+              sys.exit(f"错误：应生成 3 个验收包，实际 {len(paths)} 个")
+          for zip_path in paths:
+              with zipfile.ZipFile(zip_path) as z:
+                  names = sorted(z.namelist())
+                  if names != expected:
+                      sys.exit(f"错误：验收包内容不符：{names} != {expected}")
+                  sums = {}
+                  for line in z.read("SHA256SUMS").decode("utf-8").splitlines():
+                      digest, name = line.split("  ", 1)
+                      sums[name] = digest
+                  for name in files:
+                      if hashlib.sha256(z.read(name)).hexdigest() != sums.get(name):
+                          sys.exit(f"错误：{zip_path} 内 {name} 的 SHA256 与 SHA256SUMS 不一致")
+          print("验收包内容校验通过：" + "、".join(paths))
           PY
           rm -rf "$tmp"
 
@@ -677,11 +731,100 @@ jobs:
             dist/tengshou-cli-windows-amd64.exe
           if-no-files-found: error
 
-  release:
-    name: 发布预发布版
+  acceptance:
+    name: 汇总验收证据（预发布）
+    # 只在 tag 上运行；正式版解析完发布计划就结束，不下载/打包任何东西。
     if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 解析发布计划（唯一事实源）
+        id: plan
+        run: |
+          set -euo pipefail
+          go run ./tools/tengshoubuild release-plan --tag "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+      - name: 等待 main 上同一 commit 的 CI run 全绿
+        id: main-run
+        if: steps.plan.outputs.prerelease == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 发版前提：tag 指向的 commit 必须已在 main 上全绿。这里轮询 main 上
+          # 同一 commit 的 push run，不重跑 E2E；找不到 / 未完成 / 结论非
+          # success 一律失败（按发版规则不应打 tag）。
+          for attempt in $(seq 1 40); do
+            line="$(gh run list --commit "$GITHUB_SHA" --branch main --workflow CI \
+              --json databaseId,event,status,conclusion --limit 20 \
+              --jq 'first(.[] | select(.event == "push")) | "\(.databaseId) \(.status) \(.conclusion // "")"')"
+            run_id="${line%% *}"
+            status="${line#* }"
+            status="${status%% *}"
+            if [ -n "$run_id" ] && [ "$status" = "completed" ]; then
+              conclusion="${line##* }"
+              if [ "$conclusion" != "success" ]; then
+                echo "错误：main 上同一 commit 的 CI run $run_id 结论为 $conclusion，按发版规则不应打 tag；请 rerun main 后重跑本 job" >&2
+                exit 1
+              fi
+              echo "main 上 CI run $run_id 已全绿"
+              echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "第 $attempt/40 次：main 上同一 commit 的 CI run 尚未完成（${line:-未找到}），30 秒后重试..."
+            sleep 30
+          done
+          echo "错误：20 分钟内未等到 main 上同一 commit 的 CI 全绿（找不到 run 或未完成）；按发版规则不应打 tag；请 rerun main 后重跑本 job" >&2
+          exit 1
+      - name: 下载三端业务验收工件（来自 main run，失败重试 3 次）
+        if: steps.plan.outputs.prerelease == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAIN_RUN_ID: ${{ steps.main-run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          for platform in linux-chromium macos-webkit windows-chromium; do
+            ok=0
+            for attempt in 1 2 3; do
+              if gh run download "$MAIN_RUN_ID" -n "business-acceptance-$platform" -D "evidence/$platform"; then
+                ok=1
+                break
+              fi
+              echo "下载 business-acceptance-$platform 失败（第 $attempt/3 次），重试..." >&2
+              sleep 10
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "错误：无法从 main run $MAIN_RUN_ID 下载 business-acceptance-$platform" >&2
+              exit 1
+            fi
+          done
+      - name: 重新打包验收包（每端四件套，去掉重复教程 HTML）
+        if: steps.plan.outputs.prerelease == 'true'
+        run: |
+          set -euo pipefail
+          python3 -I scripts/package-acceptance.py \
+            --tag "$GITHUB_REF_NAME" \
+            --evidence-dir evidence \
+            --out-dir acceptance
+      - name: 上传验收包（3 个 zip）
+        if: steps.plan.outputs.prerelease == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-packages
+          path: acceptance/tengshou-acceptance-*.zip
+          if-no-files-found: error
+
+  release:
+    name: 发布（正式 5 资产 / 预发布 8 资产）
+    # acceptance 在正式版只解析计划后绿色结束；用显式状态条件保证它不影响
+    # release 运行，同时任一构建 / 验收失败仍会阻断发布。
+    if: always() && startsWith(github.ref, 'refs/tags/v') && !cancelled() && !failure()
     # tag run 不再等待单测（同 commit 在 main 上已全绿）；三端 E2E 也不在 tag 上运行。
-    needs: [cli, desktop, tutorial]
+    # acceptance：预发布时提供三端验收包；正式版空跑。
+    needs: [cli, desktop, tutorial, acceptance]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -690,7 +833,8 @@ jobs:
           go-version-file: go.mod
           cache: true
       # 只取构建产物：frontend-dist 是 cli/desktop 的构建输入，不属于发布资产。
-      # dist 共 8 个构建产物；其中完整 CLI 4 个不进发布页，发布页只上传 4 个客户端资产与 1 个使用教程包。
+      # dist 共 7 个下载文件（3 个 CLI + 4 个桌面文件），加 Windows 分发 zip 与
+      # 教程包共 9 个构建产物；发布页只上传客户端资产、教程包与（预发布）验收包。
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -701,26 +845,46 @@ jobs:
         with:
           name: tutorial-package
           path: dist
+      - name: 解析发布计划（唯一事实源，供断言与发布共用）
+        id: plan
+        run: |
+          set -euo pipefail
+          plan="$(go run ./tools/tengshoubuild release-plan --tag "$GITHUB_REF_NAME")"
+          printf '%s\n' "$plan" >> "$GITHUB_OUTPUT"
+          # softprops/action-gh-release 的 files 相对仓库根：把 planner 的
+          # dist 相对清单转成带 dist/ 前缀的第二个输出，资产清单仍只有一份。
+          {
+            echo 'release_paths<<EOF'
+            awk '/^release_files<<EOF$/{flag=1;next} flag&&/^EOF$/{exit} flag {print "dist/" $0}' <<< "$plan"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+      - name: 取回三端验收包（仅预发布）
+        if: steps.plan.outputs.prerelease == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: acceptance-packages
+          path: dist
       - name: 列出产物
         run: ls -lh dist
       - name: 打包 Windows 分发包（仅桌面 exe）
         run: go run ./tools/tengshoubuild package-windows-zip dist
-      - name: 校验构建产物（9 个）、发布清单（5 个：4 客户端 + 1 教程包）与包内容
+      - name: 校验产物总数、发布清单与包内容
+        env:
+          RELEASE_FILES: ${{ steps.plan.outputs.release_files }}
+          PRERELEASE: ${{ steps.plan.outputs.prerelease }}
+          EXPECTED_TOTAL: ${{ steps.plan.outputs.expected_total }}
         run: |
           set -euo pipefail
-          # 7 个下载产物 + Windows zip + 教程包 = 9。
-          test "$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 9
-          # 发布页只上传客户端资产与使用教程包；完整 CLI（serve/backup/restore/
-          # demo 等运维用途）仅作为 CI 构建产物，不进发布页。
-          release_files=(
-            dist/tengshou-windows-amd64.zip
-            dist/tengshou-windows-amd64.exe
-            dist/tengshou-darwin-arm64
-            dist/tengshou-darwin-arm64.tar.gz
-            "dist/tengshou-tutorial-${GITHUB_REF_NAME}.zip"
-          )
-          test "${#release_files[@]}" -eq 5
-          for f in "${release_files[@]}"; do test -f "$f"; done
+          # dist 文件总数：正式 9 / 预发布 12（planner 的 expected_total）。
+          test "$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq "$EXPECTED_TOTAL"
+          mapfile -t release_files < <(printf '%s\n' "$RELEASE_FILES")
+          # 发布清单：正式 5 项 / 预发布 8 项，全部来自 planner。
+          if [ "$PRERELEASE" = "true" ]; then
+            test "${#release_files[@]}" -eq 8
+          else
+            test "${#release_files[@]}" -eq 5
+          fi
+          for f in "${release_files[@]}"; do test -f "dist/$f"; done
           if printf '%s\n' "${release_files[@]}" | grep -q 'tengshou-cli'; then
             echo "错误：发布清单不得包含 CLI" >&2
             exit 1
@@ -772,15 +936,45 @@ jobs:
                       sys.exit(f"错误：{name} 的 SHA256 与 SHA256SUMS 不一致")
           print("教程包校验通过：" + "、".join(expected))
           PY
+          if [ "$PRERELEASE" = "true" ]; then
+            # 预发布验收包必须每端恰好四件套（报告、录像、示例 PDF、SHA256SUMS），
+            # 且 SHA256SUMS 与包内文件真实一致。
+            python3 -I - <<'PY'
+          import glob
+          import hashlib
+          import sys
+          import zipfile
+
+          files = [
+              "业务验收报告.html",
+              "验收过程录像.webm",
+              "房屋租赁合同-已签字盖章.pdf",
+          ]
+          expected = sorted(files + ["SHA256SUMS"])
+          paths = sorted(glob.glob("dist/tengshou-acceptance-*.zip"))
+          if len(paths) != 3:
+              sys.exit(f"错误：应恰有 3 个验收包，实际 {len(paths)} 个")
+          for zip_path in paths:
+              with zipfile.ZipFile(zip_path) as z:
+                  names = sorted(z.namelist())
+                  if names != expected:
+                      sys.exit(f"错误：{zip_path} 内容不符：{names} != {expected}")
+                  sums = {}
+                  for line in z.read("SHA256SUMS").decode("utf-8").splitlines():
+                      digest, name = line.split("  ", 1)
+                      sums[name] = digest
+                  for name in files:
+                      got = hashlib.sha256(z.read(name)).hexdigest()
+                      if got != sums.get(name):
+                          sys.exit(f"错误：{zip_path} 内 {name} 的 SHA256 与 SHA256SUMS 不一致")
+          print("验收包校验通过：" + "、".join(paths))
+          PY
+          fi
       - uses: softprops/action-gh-release@v2
         with:
-          prerelease: true
+          prerelease: ${{ steps.plan.outputs.prerelease == 'true' }}
           generate_release_notes: true
-          # 只发布客户端资产与使用教程包；完整 CLI 不发布（需要时从 CI 构建产物或源码构建获取）。
-          files: |
-            dist/tengshou-windows-amd64.zip
-            dist/tengshou-windows-amd64.exe
-            dist/tengshou-darwin-arm64
-            dist/tengshou-darwin-arm64.tar.gz
-            dist/tengshou-tutorial-${{ github.ref_name }}.zip
+          # 发布清单来自 planner（dist 相对清单加 dist/ 前缀）：正式 5 项 /
+          # 预发布 8 项；完整 CLI 不发布（需要时从 CI 构建产物或源码构建获取）。
+          files: ${{ steps.plan.outputs.release_paths }}
           fail_on_unmatched_files: true

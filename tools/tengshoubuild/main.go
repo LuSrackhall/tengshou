@@ -5,6 +5,7 @@
 //	go run ./tools/tengshoubuild build [-goos GOOS] [-goarch GOARCH] [desktop|cli|all]
 //	go run ./tools/tengshoubuild smoke-mcp <被测二进制> <tengshou-cli>
 //	go run ./tools/tengshoubuild package-windows-zip [dist 目录]
+//	go run ./tools/tengshoubuild release-plan [--tag vX.Y.Z]
 //
 // 历史背景：构建与冒烟曾由 build.sh / build-windows.ps1 /
 // smoke-mcp-desktop.sh / smoke-mcp-desktop.ps1 / package-windows-zip.sh 两套脚本
@@ -23,6 +24,10 @@ const usage = `用法：
   go run ./tools/tengshoubuild build [-goos GOOS] [-goarch GOARCH] [desktop|cli|all]
   go run ./tools/tengshoubuild smoke-mcp <被测二进制> <tengshou-cli>
   go run ./tools/tengshoubuild package-windows-zip [dist 目录]
+  go run ./tools/tengshoubuild release-plan [--tag vX.Y.Z]
+
+release-plan 环境变量：
+  GITHUB_REF_NAME / VERSION   --tag 缺省时的版本 tag 来源（前者优先）
 
 build 环境变量：
   VERSION       版本号（默认 git describe --tags --abbrev=0，否则 0.1.0-dev）
@@ -55,6 +60,8 @@ func run(args []string) error {
 		return runSmokeMCP(args[1:])
 	case "package-windows-zip":
 		return runPackageWindowsZip(args[1:])
+	case "release-plan":
+		return runReleasePlan(args[1:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return nil

@@ -37,7 +37,7 @@ import SealSummary from "../seals/SealSummary.vue";
 import SignatureSummary from "../signatures/SignatureSummary.vue";
 import FormErrors from "../../ui/FormErrors.vue";
 import AssetPicker from "./AssetPicker.vue";
-import ContractArchiveReuse from "./ContractArchiveReuse.vue";
+import ContractArchiveReusePair from "./ContractArchiveReusePair.vue";
 import ContractAuditHistory from "./ContractAuditHistory.vue";
 import ContractFieldControl from "./ContractFieldControl.vue";
 import ContractFormSection from "./ContractFormSection.vue";
@@ -202,6 +202,11 @@ const partyBID = ref(initialPartyBID());
 /** 当前选中的乙方档案：档案复用区块据此显示可复用的签名/公章。 */
 const partyBArchive = computed(
   () => allParties.value.find((item) => item.id === partyBID.value) ?? null,
+);
+
+/** 出租方（甲方）档案：Q5 同样默认复用其档案签名/签名章与公章。 */
+const partyAArchive = computed(
+  () => allParties.value.find((item) => item.id === partyAID.value) ?? null,
 );
 
 const archiveReuseRef = ref<{ apply: (contractId: string) => Promise<void> } | null>(null);
@@ -565,10 +570,11 @@ onBeforeUnmount(() => {
             />
           </ContractFormSection>
 
-          <ContractArchiveReuse
+          <ContractArchiveReusePair
             v-if="mode === 'create'"
             ref="archiveReuseRef"
-            :party="partyBArchive"
+            :party-a="partyAArchive"
+            :party-b="partyBArchive"
           />
 
           <ContractGenerationPanel

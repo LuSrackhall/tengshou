@@ -5,12 +5,21 @@
 // 告知提示：开启时显示「将复用…（来源：档案）」与回退提示；关闭时不显示
 // 任何来源/回退文案，但仍按勾选静默复用。取消勾选则回退现场扫码手写。
 import { computed, onMounted, ref, watch } from "vue";
-import { attachSeal } from "../../api/endpoints";
-import { getArchiveReuseSettings, reusePartySignature } from "../../api/endpoints";
+import {
+  attachSeal,
+  getArchiveReuseSettings,
+  reusePartySignature,
+} from "../../api/endpoints";
 import type { ArchiveSignatureKind, Party } from "../../api/types";
 import { errorMessage, refreshAfterWrite, toast } from "../../bridge/app";
 
-const props = defineProps<{ party: Party | null }>();
+const props = defineProps<{
+  party: Party | null;
+  /** 区块标题；甲方/乙方各一个实例时用于区分。 */
+  title?: string;
+  /** 区块 DOM id，默认 contractArchiveReuse（既有选择器不变）。 */
+  sectionId?: string;
+}>();
 
 const notifyEnabled = ref(false);
 const useSignature = ref(false);
@@ -47,7 +56,17 @@ function applyDefaults(): void {
   useSeal.value = Boolean(party?.seal_asset_id);
 }
 
-watch(() => props.party?.id, applyDefaults, { immediate: true });
+/** 档案 id 或可复用资产变化时重置默认勾选（列表异步刷新也会带出资产）。 */
+const partyKey = computed(() =>
+  [
+    props.party?.id ?? "",
+    props.party?.signature_id ?? "",
+    props.party?.signature_seal_id ?? "",
+    props.party?.seal_asset_id ?? "",
+  ].join("|"),
+);
+
+watch(partyKey, applyDefaults, { immediate: true });
 
 onMounted(() => {
   getArchiveReuseSettings()
@@ -103,8 +122,12 @@ defineExpose({ apply });
 </script>
 
 <template>
-  <section v-if="party && hasAny" id="contractArchiveReuse" class="archive-reuse">
-    <h3>档案复用</h3>
+  <section
+    v-if="party && hasAny"
+    :id="sectionId ?? 'contractArchiveReuse'"
+    class="archive-reuse"
+  >
+    <h3>{{ title ?? "档案复用" }}</h3>
     <p v-if="notifyEnabled" class="help">
       {{ notifyText }}
     </p>

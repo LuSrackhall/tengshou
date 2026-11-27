@@ -494,7 +494,7 @@ onBeforeUnmount(() => {
             勾选要生成的合同。预检会逐份检查必填字段、相对方档案、签名（现场手写核对内容版本，档案复用直接套印）与公章，再开始生成。
           </div>
           <div v-if="archiveNotify" id="batchArchiveReuseNotice" class="hint">
-            档案复用告知：预检会直接套印档案签名/公章（来源：档案）。如对方不同意，请先到合同表单取消复用，改为现场扫码手写。
+            档案复用告知：已复用档案签名/公章的合同会直接套印（来源：档案）；未复用档案资产的合同不受影响。如对方不同意，请先到合同表单取消复用，改为现场扫码手写。
           </div>
           <div id="batchContractList" class="batch-contract-list">
             <label v-for="contract in contracts" :key="contract.id" class="batch-contract-row">

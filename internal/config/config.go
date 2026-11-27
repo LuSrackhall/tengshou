@@ -138,15 +138,17 @@ type Config struct {
 	Operator string `json:"operator,omitempty"`
 }
 
-// ArchiveReuse is the settings-page master switch for reusing archive
-// signatures, signature stamps (私章) and official seals in contracts (Q6).
-// Enabled defaults to true when the key is absent, so existing installations
-// get the new behaviour without a migration; the UI always shows the risk
-// notice next to the switch.
+// ArchiveReuse is the settings-page notice switch for archive signature,
+// signature stamp (私章) and official seal reuse (Q6 修正). Reuse itself is
+// always available; Notify only controls whether the contract form shows the
+// "will reuse archive assets (source: archive)" notice and the fallback hint.
+// Notify defaults to true when the key is absent, so existing installations
+// get the informing behaviour without a migration; the settings page always
+// shows the legal-risk notice next to the switch.
 type ArchiveReuse struct {
-	// Enabled is a pointer so "unset" (older config.json) can mean true while
+	// Notify is a pointer so "unset" (older config.json) can mean true while
 	// an explicit false from the settings page stays false after restart.
-	Enabled *bool `json:"enabled,omitempty"`
+	Notify *bool `json:"notify,omitempty"`
 }
 
 // EnrollEntry is the long-lived self-enrollment entry printed on the wall

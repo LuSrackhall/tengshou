@@ -58,22 +58,26 @@ export interface MCPSettingsResponse {
   write_enabled: boolean;
 }
 
-// ---------- 档案签名/公章复用开关（te-48hkl，Q6） ----------
+// ---------- 档案签名/公章复用告知开关（te-48hkl，Q6 修正） ----------
 
-/** GET /settings/archive-reuse。 */
+/**
+ * GET /settings/archive-reuse。复用功能始终可用；`notify` 只控制合同表单
+ * 是否展示「将复用档案签名/公章（来源：档案）」与回退提示。
+ */
 export interface ArchiveReuseSettings {
-  enabled: boolean;
+  /** true = 展示告知提示；false = 静默复用，不展示来源与回退提示。 */
+  notify: boolean;
   /** 开关旁必须展示的风险提示。 */
   risk_notice: string;
 }
 
 /** PUT/POST /settings/archive-reuse 的请求体与响应。 */
 export interface ArchiveReuseUpdateInput {
-  enabled: boolean;
+  notify: boolean;
 }
 
 export interface ArchiveReuseUpdateResponse {
-  enabled: boolean;
+  notify: boolean;
 }
 
 // ---------- 备份与恢复 ----------

@@ -1,10 +1,11 @@
 // 场景 F：贴墙二维码 → 手机自助建档（含签名章/公章）→ 合同默认复用 →
-// 生成 PDF，以及总开关关闭后的回退路径（te-48hkl）。
+// 生成 PDF，以及设置页「复用告知提示」开关的两种形态（te-48hkl，Q6 修正）。
 //
 // 业务含义：出租方打印长期二维码海报贴墙；企业租户用手机扫码，不上手写也
 // 可以上传签名章（私章）与公章。档案建好后，建合同选择该档案时默认勾选
-// 「复用档案签名章」「使用档案公章」，保存即套印；设置页关闭总开关后，
-// 新合同不再默认复用，回到现场扫码手写 / 上传公章的旧路径。
+// 「复用档案签名章」「使用档案公章」，保存即套印。设置页开关只控制是否
+// 展示「将复用…（来源：档案）」与回退提示：开启时展示；关闭时不展示但仍
+// 静默复用。取消勾选则回到现场扫码手写的回退路径。
 // 全程只驱动发布形态 tengshou-cli serve，不访问公网。
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -248,7 +249,10 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
 
       const reuse = dialog.locator("#contractArchiveReuse");
       await expect(reuse).toBeVisible({ timeout: 15_000 });
-      await expect(reuse).toContainText("来源：档案");
+      // 告知开关默认开启：展示来源与回退提示。
+      await expect(reuse).toContainText("将复用档案签名（来源：档案）");
+      await expect(reuse).toContainText("将复用档案签名（来源：档案）与档案公章（来源：档案）");
+      await expect(reuse).toContainText("如对方不同意，请取消勾选并改用现场扫码手写");
       const checkboxes = reuse.locator('input[type="checkbox"]');
       await expect(checkboxes).toHaveCount(2);
       await expect(checkboxes.nth(0)).toBeChecked();
@@ -286,7 +290,7 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
       await shot(page, testInfo, "07-已生成带签名章与公章的 PDF");
     });
 
-    await test.step("设置页关闭总开关：新合同不再默认复用", async () => {
+    await test.step("设置页关闭告知：静默复用仍生效（Q6 修正）", async () => {
       page.once("dialog", (dialog) => dialog.accept());
       await page.locator('#tabs button[data-tab="settings"]').click();
       const toggle = page.locator("#archiveReuseToggle");
@@ -295,7 +299,7 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
       await toggle.uncheck();
       await expect(toggle).not.toBeChecked();
       await expect(page.locator("#view-settings")).toContainText("风险提示");
-      await shot(page, testInfo, "08-设置页关闭档案复用");
+      await shot(page, testInfo, "08-设置页关闭档案复用告知");
 
       await page.locator('#tabs button[data-tab="contracts"]').click();
       await page.locator("#newContractBtn").click();
@@ -303,7 +307,7 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
         has: page.getByRole("heading", { name: "新建合同", exact: true }),
       });
       await expect(dialog).toBeVisible();
-      await dialog.locator("#f_contract_title").fill(`${contractTitle}（关闭复用）`);
+      await dialog.locator("#f_contract_title").fill(`${contractTitle}（静默复用）`);
       const partyB = dialog.locator('.picker-field[data-key="party_b"]');
       await partyB.locator("#f_contract_party_b").fill(tenantName);
       await partyB
@@ -311,16 +315,61 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
         .click();
       const reuse = dialog.locator("#contractArchiveReuse");
       await expect(reuse).toBeVisible({ timeout: 15_000 });
-      await expect(reuse).toContainText("设置页已关闭");
-      await expect(reuse.locator('input[type="checkbox"]')).toHaveCount(0);
+      // 告知关闭：不显示来源与回退提示，但默认勾选与静默复用保留。
+      await expect(reuse).not.toContainText("来源：档案");
+      const checkboxes = reuse.locator('input[type="checkbox"]');
+      await expect(checkboxes).toHaveCount(2);
+      await expect(checkboxes.nth(0)).toBeChecked();
+      await expect(checkboxes.nth(1)).toBeChecked();
       await dialog.getByRole("button", { name: "保存", exact: true }).click();
       await expect(dialog).toBeHidden();
 
       const row = page
-        .locator(`#contractTable tr[data-id]:has-text("${contractTitle}（关闭复用）")`)
+        .locator(`#contractTable tr[data-id]:has-text("${contractTitle}（静默复用）")`)
         .first();
       await expect(row).toBeVisible();
-      const fallbackID = (await row.getAttribute("data-id")) ?? "";
+      const silentID = (await row.getAttribute("data-id")) ?? "";
+      expect(silentID).not.toBe("");
+      await expect
+        .poll(async () => {
+          const res = await page.request.get(
+            appUrl(page, `/app/api/v1/contracts/${silentID}`),
+          );
+          const detail = (await res.json()) as {
+            signatures?: Array<{ source?: string }>;
+            seals?: unknown[];
+          };
+          return {
+            signatures: (detail.signatures ?? []).map((item) => item.source),
+            seals: (detail.seals ?? []).length,
+          };
+        })
+        .toEqual({ signatures: ["archive_seal"], seals: 1 });
+
+      // 对方不同意时取消勾选：合同不套印档案资产，回退现场扫码手写。
+      await page.locator("#newContractBtn").click();
+      const fallbackDialog = page.getByRole("dialog").filter({
+        has: page.getByRole("heading", { name: "新建合同", exact: true }),
+      });
+      await expect(fallbackDialog).toBeVisible();
+      await fallbackDialog.locator("#f_contract_title").fill(`${contractTitle}（现场签名）`);
+      const fallbackPartyB = fallbackDialog.locator('.picker-field[data-key="party_b"]');
+      await fallbackPartyB.locator("#f_contract_party_b").fill(tenantName);
+      await fallbackPartyB
+        .locator(`#partyBPickerList button[data-party-id="${tenantID}"]`)
+        .click();
+      const fallbackReuse = fallbackDialog.locator("#contractArchiveReuse");
+      await expect(fallbackReuse).toBeVisible({ timeout: 15_000 });
+      await fallbackReuse.locator('input[type="checkbox"]').nth(0).uncheck();
+      await fallbackReuse.locator('input[type="checkbox"]').nth(1).uncheck();
+      await fallbackDialog.getByRole("button", { name: "保存", exact: true }).click();
+      await expect(fallbackDialog).toBeHidden();
+
+      const fallbackRow = page
+        .locator(`#contractTable tr[data-id]:has-text("${contractTitle}（现场签名）")`)
+        .first();
+      await expect(fallbackRow).toBeVisible();
+      const fallbackID = (await fallbackRow.getAttribute("data-id")) ?? "";
       expect(fallbackID).not.toBe("");
       const detail = (await (
         await page.request.get(appUrl(page, `/app/api/v1/contracts/${fallbackID}`))
@@ -328,8 +377,7 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
       expect(detail.signatures ?? []).toHaveLength(0);
       expect(detail.seals ?? []).toHaveLength(0);
 
-      // 回退路径仍可现场手写签名：签名对话框回到二维码，而不是档案复用。
-      await row.getByRole("button", { name: "扫码签名" }).click();
+      await fallbackRow.getByRole("button", { name: "扫码签名" }).click();
       const signDialog = page.getByRole("dialog").filter({
         has: page.getByRole("heading", { name: /扫码签名/ }),
       });
@@ -337,7 +385,7 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
       await expect(signDialog.getByRole("button", { name: "生成签名二维码" })).toBeVisible();
       await signDialog.locator(".modal-foot").getByRole("button", { name: "关闭" }).click();
       await expect(signDialog).toBeHidden();
-      await shot(page, testInfo, "09-关闭复用后回退现场扫码");
+      await shot(page, testInfo, "09-取消复用后回退现场扫码");
     });
 
     expect(

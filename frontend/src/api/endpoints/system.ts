@@ -38,14 +38,14 @@ export function updateMCPSettings(
   return post("/settings/mcp", input, options);
 }
 
-/** GET /settings/archive-reuse：档案签名/公章复用总开关（含风险提示）。 */
+/** GET /settings/archive-reuse：档案复用告知开关（含风险提示）。 */
 export function getArchiveReuseSettings(
   options: RequestOptions = {},
 ): Promise<ArchiveReuseSettings> {
   return get("/settings/archive-reuse", options);
 }
 
-/** POST /settings/archive-reuse：切换档案复用总开关。 */
+/** POST /settings/archive-reuse：切换是否展示档案复用告知提示。 */
 export function updateArchiveReuseSettings(
   input: ArchiveReuseUpdateInput,
   options: RequestOptions = {},

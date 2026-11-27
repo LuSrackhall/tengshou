@@ -58,11 +58,12 @@ async function loadArchiveReuse(): Promise<void> {
 
 async function onArchiveReuseToggle(event: Event): Promise<void> {
   const toggle = event.target as HTMLInputElement;
-  const enabled = toggle.checked;
+  const notify = toggle.checked;
   if (
-    !enabled &&
+    !notify &&
     !window.confirm(
-      "关闭后，新建合同不再默认复用档案签名、签名章与公章，改为现场扫码手写或上传。确定关闭？",
+      "关闭后，建合同时不再展示「将复用档案签名/公章（来源：档案）」与回退提示；" +
+        "复用功能仍然可用，会按档案静默复用，法律风险由使用者自行承担。确定关闭告知？",
     )
   ) {
     toggle.checked = true;
@@ -73,11 +74,11 @@ async function onArchiveReuseToggle(event: Event): Promise<void> {
   }
   archiveReuseSaving.value = true;
   try {
-    await updateArchiveReuseSettings({ enabled });
-    toast(enabled ? "已开启档案复用（即时生效）" : "已关闭档案复用（即时生效）");
+    await updateArchiveReuseSettings({ notify });
+    toast(notify ? "已开启档案复用告知（即时生效）" : "已关闭档案复用告知（仍可静默复用）");
     await loadArchiveReuse();
   } catch (error) {
-    toggle.checked = !enabled;
+    toggle.checked = !notify;
     toast(errorMessage(error), true);
   } finally {
     archiveReuseSaving.value = false;
@@ -236,29 +237,29 @@ onBeforeUnmount(() => {
         <p class="hint">开启后，MCP agent 写入时界面会切到对应页面，并用模拟光标、点击波纹与目标行高亮回放这次操作；关闭后只保留顶部「agent 操作」徽标。本开关只影响本机界面的展示，不改变 agent 的读写权限。</p>
       </div>
       <div class="mcp-card">
-        <h3>档案签名 / 公章复用</h3>
+        <h3>档案签名 / 公章复用告知</h3>
         <div class="switch-row">
           <label class="switch">
             <input
               id="archiveReuseToggle"
               type="checkbox"
-              :checked="archiveReuse?.enabled ?? false"
+              :checked="archiveReuse?.notify ?? false"
               :disabled="archiveReuse === null || archiveReuseSaving"
               @change="onArchiveReuseToggle"
             >
-            <span>新建合同时默认复用档案签名/签名章/公章（{{ archiveReuse?.enabled ? "已开启" : "已关闭" }}）</span>
+            <span>建合同时展示档案复用告知提示（{{ archiveReuse?.notify ? "已开启" : "已关闭" }}）</span>
           </label>
         </div>
         <p class="hint warning-list">
-          风险提示：复用档案签名、签名章与公章的法律风险由使用者自行承担。请确认已获得租户/单位授权；不认可时在合同表单取消勾选，改为现场扫码手写或上传公章。
+          风险提示：复用功能始终可用，本开关只控制是否展示告知提示。关闭后合同表单不再显示来源与回退提示，但仍会按档案静默复用签名、签名章与公章。复用档案签名、签名章与公章的法律风险由使用者自行承担，请确认已获得租户/单位授权。
         </p>
         <p class="hint">
-          开启后：建合同选好租户档案即默认套印其档案签名或签名章（二选一）与档案公章，合同详情标注来源；关闭后行为与旧版一致，需要时仍可在签名对话框手动选择档案签名。
+          开启：选好租户档案后，合同表单显示「将复用档案签名/公章（来源：档案）」与「如对方不同意，请取消勾选并改用现场扫码手写」；关闭：不显示上述提示，但仍默认勾选并按档案复用，可在合同表单取消勾选改用现场扫码手写。
         </p>
         <p class="hint">
-          {{ archiveReuse?.risk_notice || "" }}
+          {{ archiveReuse?.risk_notice || "设置读取失败时，合同表单按不告知处理；复用功能仍可用。" }}
         </p>
-        <p class="hint">改动即时生效并写入 config.json；档案图片仍只保存在本机数据目录。</p>
+        <p class="hint">改动即时生效并写入 config.json；档案图片仍只保存在本机数据目录，变更记录仅本机内部可见。</p>
       </div>
     </div>
   </div>

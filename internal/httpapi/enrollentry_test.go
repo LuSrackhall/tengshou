@@ -162,21 +162,21 @@ func TestAppArchiveReuseSettings(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get settings: %d %s", resp.StatusCode, body)
 	}
-	if !strings.Contains(string(body), `"enabled":true`) || !strings.Contains(string(body), "风险") {
+	if !strings.Contains(string(body), `"notify":true`) || !strings.Contains(string(body), "风险") {
 		t.Fatalf("default settings = %s", body)
 	}
 	resp, body = f.appRequest(t, http.MethodPost, "/app/api/v1/settings/archive-reuse",
-		map[string]any{"enabled": false}, nil)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"enabled":false`) {
-		t.Fatalf("disable settings: %d %s", resp.StatusCode, body)
+		map[string]any{"notify": false}, nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"notify":false`) {
+		t.Fatalf("disable notice: %d %s", resp.StatusCode, body)
 	}
 	resp, body = f.appRequest(t, http.MethodGet, "/app/api/v1/settings/archive-reuse", nil, nil)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"enabled":false`) {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"notify":false`) {
 		t.Fatalf("persisted settings = %d %s", resp.StatusCode, body)
 	}
 	resp, body = f.appRequest(t, http.MethodPost, "/app/api/v1/settings/archive-reuse", map[string]any{}, nil)
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("missing enabled = %d %s", resp.StatusCode, body)
+		t.Fatalf("missing notify = %d %s", resp.StatusCode, body)
 	}
 }
 

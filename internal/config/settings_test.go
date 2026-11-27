@@ -84,7 +84,7 @@ func TestCurrentMCPWriteEnabledDefaultsOnMissingFile(t *testing.T) {
 	}
 }
 
-func TestArchiveReuseDefaultsOnAndPersistsOff(t *testing.T) {
+func TestArchiveReuseNotifyDefaultsOnAndPersistsOff(t *testing.T) {
 	paths, err := ResolvePaths(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -94,30 +94,30 @@ func TestArchiveReuseDefaultsOnAndPersistsOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings := NewSettings(paths, cfg)
-	if !settings.ArchiveReuseEnabled() {
-		t.Fatal("archive reuse should default to enabled")
+	if !settings.ArchiveReuseNotify() {
+		t.Fatal("archive reuse notice should default to shown")
 	}
-	if err := settings.SetArchiveReuseEnabled(false); err != nil {
+	if err := settings.SetArchiveReuseNotify(false); err != nil {
 		t.Fatal(err)
 	}
-	if settings.ArchiveReuseEnabled() {
-		t.Fatal("in-memory switch did not flip")
+	if settings.ArchiveReuseNotify() {
+		t.Fatal("in-memory notice switch did not flip")
 	}
 	reloaded, err := Load(paths)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if NewSettings(paths, reloaded).ArchiveReuseEnabled() {
+	if NewSettings(paths, reloaded).ArchiveReuseNotify() {
 		t.Fatal("explicit false was not persisted")
 	}
-	if err := settings.SetArchiveReuseEnabled(true); err != nil {
+	if err := settings.SetArchiveReuseNotify(true); err != nil {
 		t.Fatal(err)
 	}
 	reloaded, err = Load(paths)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !NewSettings(paths, reloaded).ArchiveReuseEnabled() {
+	if !NewSettings(paths, reloaded).ArchiveReuseNotify() {
 		t.Fatal("re-enable was not persisted")
 	}
 }

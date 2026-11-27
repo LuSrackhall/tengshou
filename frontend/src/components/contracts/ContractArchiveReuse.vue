@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// 合同表单「档案复用」区块（te-48hkl）：总开关开启时，按租户档案默认勾选
-// 复用签名（手写签名或签名章二选一）与公章；保存合同后由本组件调用复用
-// 接口，变更记录标注来源。总开关关闭时不显示勾选项，合同行为与旧版一致
-// （现场扫码手写 / 上传公章）。
+// 合同表单「档案复用」区块（te-48hkl，Q6 修正）：复用功能始终可用——选好
+// 租户档案后默认勾选其可复用的签名（手写签名或签名章二选一）与公章，保存
+// 合同后由本组件调用复用接口，变更记录标注来源。设置页开关只控制是否展示
+// 告知提示：开启时显示「将复用…（来源：档案）」与回退提示；关闭时不显示
+// 任何来源/回退文案，但仍按勾选静默复用。取消勾选则回退现场扫码手写。
 import { computed, onMounted, ref, watch } from "vue";
 import { attachSeal } from "../../api/endpoints";
 import { getArchiveReuseSettings, reusePartySignature } from "../../api/endpoints";
@@ -11,8 +12,7 @@ import { errorMessage, refreshAfterWrite, toast } from "../../bridge/app";
 
 const props = defineProps<{ party: Party | null }>();
 
-const settingsEnabled = ref(false);
-const settingsLoaded = ref(false);
+const notifyEnabled = ref(false);
 const useSignature = ref(false);
 const signatureKind = ref<ArchiveSignatureKind>("archive");
 const useSeal = ref(false);
@@ -22,6 +22,21 @@ const hasSignature = computed(() => Boolean(props.party?.signature_id));
 const hasSignatureSeal = computed(() => Boolean(props.party?.signature_seal_id));
 const hasSeal = computed(() => Boolean(props.party?.seal_asset_id));
 const hasAny = computed(() => hasSignature.value || hasSignatureSeal.value || hasSeal.value);
+
+/** 告知提示：只列出该档案实际可复用的资产（来源标注为档案）。 */
+const notifyText = computed(() => {
+  const parts: string[] = [];
+  if (hasSignature.value || hasSignatureSeal.value) {
+    parts.push("档案签名（来源：档案）");
+  }
+  if (hasSeal.value) {
+    parts.push("档案公章（来源：档案）");
+  }
+  return (
+    `保存合同时将复用${parts.join("与")}。如对方不同意，请取消勾选并改用现场扫码手写。` +
+    "复用档案签名、签名章与公章的法律风险由使用者自行承担。"
+  );
+});
 
 function applyDefaults(): void {
   const party = props.party;
@@ -37,24 +52,17 @@ watch(() => props.party?.id, applyDefaults, { immediate: true });
 onMounted(() => {
   getArchiveReuseSettings()
     .then((settings) => {
-      settingsEnabled.value = settings.enabled;
-      if (!settings.enabled) {
-        useSignature.value = false;
-        useSeal.value = false;
-      }
+      notifyEnabled.value = settings.notify;
     })
     .catch(() => {
-      // 读取失败按关闭处理：不确定时不做默认复用，用户可到档案页或签名对话框手动复用。
-      settingsEnabled.value = false;
-    })
-    .finally(() => {
-      settingsLoaded.value = true;
+      // 读取失败按「不告知」处理：复用照常可用，只是不展示来源与回退提示。
+      notifyEnabled.value = false;
     });
 });
 
 /** 保存合同成功后调用：按勾选项复用档案签名与公章。失败只提示，不回滚合同。 */
 async function apply(contractId: string): Promise<void> {
-  if (!settingsLoaded.value || !settingsEnabled.value || !props.party || applying.value) {
+  if (!props.party || applying.value) {
     return;
   }
   const failures: string[] = [];
@@ -86,7 +94,7 @@ async function apply(contractId: string): Promise<void> {
   if (failures.length) {
     toast(`合同已保存，但档案复用未完成：${failures.join("；")}`, true);
   } else if (applied) {
-    toast("已按档案复用签名/公章（合同详情会标注来源）");
+    toast("已按档案复用签名/公章（变更记录已标注来源）");
     await refreshAfterWrite();
   }
 }
@@ -95,34 +103,29 @@ defineExpose({ apply });
 </script>
 
 <template>
-  <section v-if="party && hasAny && settingsLoaded" id="contractArchiveReuse" class="archive-reuse">
+  <section v-if="party && hasAny" id="contractArchiveReuse" class="archive-reuse">
     <h3>档案复用</h3>
-    <template v-if="settingsEnabled">
-      <p class="help">
-        总开关已开启：保存合同时按下列勾选复用租户档案。复用档案签名、签名章与公章的法律风险由使用者自行承担；不认可时取消勾选，改为现场扫码手写或上传公章。
-      </p>
-      <label v-if="hasSignature || hasSignatureSeal" class="switch archive-reuse-row">
-        <input v-model="useSignature" type="checkbox">
-        <span>复用档案{{ signatureKind === "archive_seal" ? "签名章" : "签名" }}（来源：档案）</span>
-      </label>
-      <div v-if="hasSignature && hasSignatureSeal && useSignature" class="archive-reuse-kinds">
-        <label class="inline">
-          <input v-model="signatureKind" type="radio" value="archive">
-          <span>手写签名</span>
-        </label>
-        <label class="inline">
-          <input v-model="signatureKind" type="radio" value="archive_seal">
-          <span>签名章（私章）</span>
-        </label>
-      </div>
-      <label v-if="hasSeal" class="switch archive-reuse-row">
-        <input v-model="useSeal" type="checkbox">
-        <span>使用档案公章（来源：档案）</span>
-      </label>
-    </template>
-    <p v-else class="hint">
-      设置页已关闭「档案签名/公章复用」：本合同不会默认复用档案资产；需要时可在签名对话框手动选择档案签名。
+    <p v-if="notifyEnabled" class="help">
+      {{ notifyText }}
     </p>
+    <label v-if="hasSignature || hasSignatureSeal" class="switch archive-reuse-row">
+      <input v-model="useSignature" type="checkbox">
+      <span>复用档案{{ signatureKind === "archive_seal" ? "签名章" : "签名" }}<template v-if="notifyEnabled">（来源：档案）</template></span>
+    </label>
+    <div v-if="hasSignature && hasSignatureSeal && useSignature" class="archive-reuse-kinds">
+      <label class="inline">
+        <input v-model="signatureKind" type="radio" value="archive">
+        <span>手写签名</span>
+      </label>
+      <label class="inline">
+        <input v-model="signatureKind" type="radio" value="archive_seal">
+        <span>签名章（私章）</span>
+      </label>
+    </div>
+    <label v-if="hasSeal" class="switch archive-reuse-row">
+      <input v-model="useSeal" type="checkbox">
+      <span>使用档案公章<template v-if="notifyEnabled">（来源：档案）</template></span>
+    </label>
   </section>
 </template>
 

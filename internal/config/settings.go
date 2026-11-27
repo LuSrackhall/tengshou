@@ -94,29 +94,31 @@ func cloneOnboarding(in Onboarding) Onboarding {
 	return out
 }
 
-// ArchiveReuseEnabled reports whether contracts should reuse archive
-// signatures, signature stamps and seals by default. An absent key means the
-// recommended default (enabled) so older config.json files keep working.
-func (s *Settings) ArchiveReuseEnabled() bool {
+// ArchiveReuseNotify reports whether the contract form should show the
+// archive-reuse notice (source: archive) and the fallback hint before applying
+// archived signatures, signature stamps and seals. Reuse itself is always
+// available; an absent key means the recommended default (notice shown so
+// older config.json files keep working).
+func (s *Settings) ArchiveReuseNotify() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.cfg.ArchiveReuse.Enabled == nil {
+	if s.cfg.ArchiveReuse.Notify == nil {
 		return true
 	}
-	return *s.cfg.ArchiveReuse.Enabled
+	return *s.cfg.ArchiveReuse.Notify
 }
 
-// SetArchiveReuseEnabled persists the master switch. The in-memory value only
+// SetArchiveReuseNotify persists the notice switch. The in-memory value only
 // changes after the atomic config write succeeds.
-func (s *Settings) SetArchiveReuseEnabled(enabled bool) error {
+func (s *Settings) SetArchiveReuseNotify(notify bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	value := enabled
-	if s.cfg.ArchiveReuse.Enabled != nil && *s.cfg.ArchiveReuse.Enabled == enabled {
+	value := notify
+	if s.cfg.ArchiveReuse.Notify != nil && *s.cfg.ArchiveReuse.Notify == notify {
 		return nil
 	}
 	next := s.cfg
-	next.ArchiveReuse.Enabled = &value
+	next.ArchiveReuse.Notify = &value
 	if err := Save(s.paths, next); err != nil {
 		return err
 	}

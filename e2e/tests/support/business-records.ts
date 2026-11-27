@@ -254,9 +254,7 @@ export async function createContract(
   );
   const asset = dialog.locator('.picker-field[data-key="asset"]');
   await asset.locator("#f_contract_asset").fill(ASSET_NAME);
-  await asset
-    .locator(`#assetPickerList button[data-asset-id]:has-text("${ASSET_NAME}")`)
-    .click();
+  await asset.locator(`#assetPickerList button[data-asset-id="${assetId}"]`).click();
   await expect(asset.locator(".picker-selected")).toContainText(ASSET_NAME);
   await frames?.capture(
     `② 三方选择：出租方=${PARTY_A_NAME}，承租方=${CONTRACT_VALUES.partyB}，房产=${ASSET_NAME}`,

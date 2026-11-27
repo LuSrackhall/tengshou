@@ -218,12 +218,19 @@ Windows 预发布版提供一个分发包 `tengshou-windows-amd64.zip`，解压�
 （即 `%LOCALAPPDATA%\Tengshou`）。Claude Desktop 配置见上一节的 Windows
 示例：`command` 填桌面 exe 的完整路径，反斜杠写成 `\\`。
 
-发布固定 5 个资产 = 4 个客户端资产（上述 zip、独立的 Windows 桌面 exe、
-macOS 桌面二进制与 tar.gz）+ 1 个使用教程包（`tengshou-tutorial-<tag>.zip`：
-教程 HTML、过程录像、示例 PDF 与 SHA256SUMS）。完整 CLI（`serve` /
-`backup` / `restore` / `demo` 等运维用途）**不进发布页**，需要时用
-`go run ./tools/tengshoubuild build` 从源码构建，或从 CI 构建产物获取；
-Linux 用户没有桌面壳，只能以这种方式获得 CLI。客户只需要桌面 exe。
+发布资产按版本号（唯一事实源 = git tag，清单由
+`go run ./tools/tengshoubuild release-plan` 推导）分两档：
+
+| 版本 | 资产数 | 内容 |
+| --- | --- | --- |
+| 正式版 `vX.Y.Z` | 5 | 上述 zip、独立的 Windows 桌面 exe、macOS 桌面二进制与 tar.gz、使用教程包 `tengshou-tutorial-<tag>.zip`（教程 HTML、过程录像、示例 PDF 与 SHA256SUMS） |
+| 预发布 `vX.Y.Z-(alpha\|beta\|rc).N` | 8 | 上述 5 个 + 三端各一个业务验收包 `tengshou-acceptance-<tag>-<platform>.zip`（验收报告 HTML、过程录像、示例 PDF 与 SHA256SUMS） |
+
+预发布验收包来自 main 上同一 commit 的 CI 工件，不重跑 E2E；发布任务会
+等待该 run 全绿，把「打 tag 前 main 已全绿」的发版前提变成机制。完整 CLI
+（`serve` / `backup` / `restore` / `demo` 等运维用途）**不进发布页**，需要
+时用 `go run ./tools/tengshoubuild build` 从源码构建，或从 CI 构建产物
+获取；Linux 用户没有桌面壳，只能以这种方式获得 CLI。客户只需要桌面 exe。
 
 本地复现同一个包（Windows，dev 与 CI 调用同一 Go 工具）：
 

@@ -250,6 +250,7 @@ export function useTemplateEditor(
     currentText,
     previewStatus,
     canGenerate,
+    activeJob: actions.activeJob,
     placeholderScan: placeholderScan.view,
     maskFieldValues,
     setMaskFieldValues,

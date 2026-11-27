@@ -77,7 +77,7 @@ func New(opts Options) *Server {
 	jobsCtx, jobsCancel := context.WithCancel(context.Background())
 	s := &Server{opts: opts, mux: http.NewServeMux(), sign: opts.Sign,
 		eventsCtx: eventsCtx, eventsCancel: eventsCancel,
-		jobs: newJobRegistry(), jobsCtx: jobsCtx, jobsCancel: jobsCancel}
+		jobs: newJobRegistry(opts.Logger), jobsCtx: jobsCtx, jobsCancel: jobsCancel}
 	if s.sign == nil {
 		ttl := time.Duration(opts.Config.Signature.TTLMinutes) * time.Minute
 		s.sign = sign.NewManager(ttl, nil)

@@ -56,6 +56,46 @@ type templateBatchGenerateRequest struct {
 	AllowStaleSignature bool                             `json:"allow_stale_signature"`
 }
 
+// The job endpoints return exactly these payloads as their job result, so both
+// surfaces build the JSON through one function and cannot drift apart.
+
+func templateImportPayload(res service.TemplateImportResult) map[string]any {
+	return map[string]any{
+		"item": res.Template, "usage": res.Usage, "warnings": res.Warnings,
+	}
+}
+
+func contractPreviewPayload(res service.TemplatePreviewResult) map[string]any {
+	return map[string]any{
+		"pdf_base64":     base64.StdEncoding.EncodeToString(res.PDF),
+		"preview_sha256": res.PreviewSHA256,
+		"warnings":       res.Warnings,
+		"page_count":     res.PageCount,
+		"sample":         res.Sample,
+		"contract_id":    res.ContractID,
+	}
+}
+
+func contractGeneratePayload(res service.TemplateRenderResult) map[string]any {
+	return map[string]any{
+		"item": res.Document, "usage": res.Usage, "warnings": res.Warnings,
+	}
+}
+
+func batchPreviewPayload(res service.BatchPreviewResult) map[string]any {
+	payload := map[string]any{
+		"template":              res.Template,
+		"items":                 res.Items,
+		"summary":               res.Summary,
+		"sample_preview_sha256": res.SamplePreviewSHA256,
+		"warnings":              res.Warnings,
+	}
+	if len(res.SamplePDF) > 0 {
+		payload["pdf_base64"] = base64.StdEncoding.EncodeToString(res.SamplePDF)
+	}
+	return payload
+}
+
 func (s *Server) handleAppListTemplates(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.appService(w)
 	if !ok {
@@ -110,9 +150,7 @@ func (s *Server) handleAppImportTemplate(w http.ResponseWriter, r *http.Request)
 		s.writeServiceError(w, "import template", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"item": res.Template, "usage": res.Usage, "warnings": res.Warnings,
-	})
+	writeJSON(w, http.StatusCreated, templateImportPayload(res))
 }
 
 func (s *Server) handleAppSaveTemplateMapping(w http.ResponseWriter, r *http.Request) {
@@ -274,14 +312,7 @@ func (s *Server) handleAppPreviewTemplate(w http.ResponseWriter, r *http.Request
 		s.writeServiceError(w, "preview template", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"pdf_base64":     base64.StdEncoding.EncodeToString(res.PDF),
-		"preview_sha256": res.PreviewSHA256,
-		"warnings":       res.Warnings,
-		"page_count":     res.PageCount,
-		"sample":         res.Sample,
-		"contract_id":    res.ContractID,
-	})
+	writeJSON(w, http.StatusOK, contractPreviewPayload(res))
 }
 
 func (s *Server) handleAppGenerateContract(w http.ResponseWriter, r *http.Request) {
@@ -305,9 +336,7 @@ func (s *Server) handleAppGenerateContract(w http.ResponseWriter, r *http.Reques
 		s.writeServiceError(w, "generate contract pdf", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"item": res.Document, "usage": res.Usage, "warnings": res.Warnings,
-	})
+	writeJSON(w, http.StatusOK, contractGeneratePayload(res))
 }
 
 // handleAppPreflightGeneration reports whether one contract can be generated
@@ -353,17 +382,7 @@ func (s *Server) handleAppBatchPreviewGeneration(w http.ResponseWriter, r *http.
 		s.writeServiceError(w, "batch preview", err)
 		return
 	}
-	payload := map[string]any{
-		"template":              res.Template,
-		"items":                 res.Items,
-		"summary":               res.Summary,
-		"sample_preview_sha256": res.SamplePreviewSHA256,
-		"warnings":              res.Warnings,
-	}
-	if len(res.SamplePDF) > 0 {
-		payload["pdf_base64"] = base64.StdEncoding.EncodeToString(res.SamplePDF)
-	}
-	writeJSON(w, http.StatusOK, payload)
+	writeJSON(w, http.StatusOK, batchPreviewPayload(res))
 }
 
 // handleAppBatchGenerate renders several contracts with one template version.

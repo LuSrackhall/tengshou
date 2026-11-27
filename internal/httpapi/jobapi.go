@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/base64"
 	"net/http"
 	"strings"
 
@@ -107,9 +106,7 @@ func (s *Server) handleAppStartTemplateImportJob(w http.ResponseWriter, r *http.
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{
-			"item": res.Template, "usage": res.Usage, "warnings": res.Warnings,
-		}, nil
+		return templateImportPayload(res), nil
 	})
 }
 
@@ -134,14 +131,7 @@ func (s *Server) handleAppStartContractPreviewJob(w http.ResponseWriter, r *http
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{
-			"pdf_base64":     base64.StdEncoding.EncodeToString(res.PDF),
-			"preview_sha256": res.PreviewSHA256,
-			"warnings":       res.Warnings,
-			"page_count":     res.PageCount,
-			"sample":         res.Sample,
-			"contract_id":    res.ContractID,
-		}, nil
+		return contractPreviewPayload(res), nil
 	})
 }
 
@@ -171,9 +161,7 @@ func (s *Server) handleAppStartContractGenerateJob(w http.ResponseWriter, r *htt
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{
-			"item": res.Document, "usage": res.Usage, "warnings": res.Warnings,
-		}, nil
+		return contractGeneratePayload(res), nil
 	})
 }
 
@@ -204,17 +192,7 @@ func (s *Server) handleAppStartBatchPreviewJob(w http.ResponseWriter, r *http.Re
 		if err != nil {
 			return nil, err
 		}
-		payload := map[string]any{
-			"template":              res.Template,
-			"items":                 res.Items,
-			"summary":               res.Summary,
-			"sample_preview_sha256": res.SamplePreviewSHA256,
-			"warnings":              res.Warnings,
-		}
-		if len(res.SamplePDF) > 0 {
-			payload["pdf_base64"] = base64.StdEncoding.EncodeToString(res.SamplePDF)
-		}
-		return payload, nil
+		return batchPreviewPayload(res), nil
 	})
 }
 

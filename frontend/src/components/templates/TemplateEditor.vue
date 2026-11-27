@@ -39,6 +39,7 @@ const {
   currentText,
   previewStatus,
   canGenerate,
+  activeJob,
   placeholderScan,
   maskFieldValues,
   setMaskFieldValues,
@@ -133,6 +134,7 @@ const {
                 :preview-status-text="previewStatus.text"
                 :preview-status-class="previewStatus.cls"
                 :can-generate="canGenerate"
+                :active-job="activeJob"
                 :warnings="warnings"
                 :result="result"
                 @update:contractId="contractId = $event"

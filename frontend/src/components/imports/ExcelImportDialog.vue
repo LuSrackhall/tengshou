@@ -4,7 +4,8 @@
 //
 // 交互与文案逐字保留：模式/跳过错误/自动建档、列映射与「重新预览」提示、
 // 冲突逐行决议、删除候选、逐行错误/警告、提交结果与 422 逐行错误回显。
-// 数据走 typed 端点（previewExcelImport / commitExcelImport）。
+// 数据走后台任务端点（startExcelPreviewJob / startExcelCommitJob），阶段与
+// 逐行写入进度由 ProgressPanel 展示；同步端点保留给 MCP 与既有调用方。
 
 import { computed, nextTick, onMounted, ref } from "vue";
 import { ApiError } from "../../api/client";

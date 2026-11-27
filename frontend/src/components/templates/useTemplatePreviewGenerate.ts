@@ -1,14 +1,26 @@
 // 预览、生成、下载与预览层编排：样例/合同预览、生成 PDF、查看/下载生成结果、
 // 预览层下载与引导进度记录。逐条对应拆分前 useTemplateEditor 的 297-438 行
 // （请求、文案、时序与错误处理不变）。
-import { nextTick, ref, shallowRef, type Ref } from "vue";
+//
+// 合同预览与生成 PDF 走后台任务（`/jobs/contracts/{id}/*`），阶段与已用秒数
+// 由侧栏 ProgressPanel 展示；样例预览没有合同，保持同步端点（瞬时路径）。
+import { computed, nextTick, ref, shallowRef, type Ref } from "vue";
 import {
   fetchDocumentFile,
-  generateContract as generateContractRequest,
   previewTemplate as previewTemplateRequest,
+  startContractGenerateJob,
+  startContractPreviewJob,
   updateOnboardingState,
 } from "../../api/endpoints";
-import type { Contract, OverlayWarning, Template } from "../../api/types";
+import type {
+  Contract,
+  JobSnapshot,
+  OverlayWarning,
+  Template,
+  TemplateGenerateResponse,
+  TemplatePreviewResponse,
+} from "../../api/types";
+import { isJobCancelled, useJob } from "../../composables/useJob";
 import {
   errorMessage,
   refreshAfterWrite,
@@ -44,6 +56,30 @@ export function useTemplatePreviewGenerate(options: PreviewGenerateOptions) {
   const previewOverlay = shallowRef<PreviewOverlayState | null>(null);
   const previewOverlayKey = ref(0);
 
+  // 合同预览与生成 PDF 走后台任务：阶段、已用秒数与不确定进度由侧栏面板
+  // 展示；卸载时 useJob 只停轮询，不取消服务端任务。
+  const {
+    job: previewJob,
+    running: previewRunning,
+    start: startPreview,
+  } = useJob<TemplatePreviewResponse>();
+  const {
+    job: generateJob,
+    running: generating,
+    start: startGenerate,
+  } = useJob<TemplateGenerateResponse>();
+
+  /** 侧栏进度面板的快照：有生成任务时优先展示生成，否则展示预览。 */
+  const activeJob = computed<JobSnapshot<unknown> | null>(() => {
+    if (generating.value) {
+      return generateJob.value;
+    }
+    if (previewRunning.value) {
+      return previewJob.value;
+    }
+    return null;
+  });
+
   function labelError(error: unknown): void {
     toast(errorMessage(error), true);
   }
@@ -70,6 +106,9 @@ export function useTemplatePreviewGenerate(options: PreviewGenerateOptions) {
   }
 
   async function previewTemplate(sample: boolean): Promise<void> {
+    if (previewRunning.value) {
+      return;
+    }
     try {
       if (options.dirty.value) {
         await options.saveMapping();
@@ -79,10 +118,18 @@ export function useTemplatePreviewGenerate(options: PreviewGenerateOptions) {
         toast("请先选择用于预览的合同", true);
         return;
       }
-      const response = await previewTemplateRequest(
-        options.templateItem.value.id,
-        sample ? { sample: true } : { contract_id: targetId },
-      );
+      // 合同预览走 job（真实阶段 + 已用秒数）；样例预览没有合同，job 端点
+      // 按合同路径定位，故样例仍用同步端点。
+      const response = sample
+        ? await previewTemplateRequest(options.templateItem.value.id, {
+            sample: true,
+          })
+        : await startPreview(() =>
+            startContractPreviewJob(targetId, {
+              template_id: options.templateItem.value.id,
+              contract_id: targetId,
+            }),
+          );
       const bytes = base64ToBytes(response.pdf_base64);
       preview.value = {
         sample,
@@ -109,6 +156,9 @@ export function useTemplatePreviewGenerate(options: PreviewGenerateOptions) {
         await recordSampleStep("sample_preview");
       }
     } catch (error) {
+      if (isJobCancelled(error)) {
+        return;
+      }
       labelError(error);
     }
   }
@@ -161,6 +211,9 @@ export function useTemplatePreviewGenerate(options: PreviewGenerateOptions) {
   }
 
   async function generate(): Promise<void> {
+    if (generating.value) {
+      return;
+    }
     const state = preview.value;
     if (!state || state.sample) {
       toast("请先用目标合同预览，再生成 PDF", true);
@@ -171,12 +224,12 @@ export function useTemplatePreviewGenerate(options: PreviewGenerateOptions) {
       return;
     }
     try {
-      const response = await generateContractRequest(
-        options.templateItem.value.id,
-        {
+      const response = await startGenerate(() =>
+        startContractGenerateJob(state.contractId, {
+          template_id: options.templateItem.value.id,
           contract_id: state.contractId,
           preview_sha256: state.sha,
-        },
+        }),
       );
       result.value = {
         document: response.item,
@@ -191,6 +244,9 @@ export function useTemplatePreviewGenerate(options: PreviewGenerateOptions) {
         ?.querySelector("#tplResult")
         ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } catch (error) {
+      if (isJobCancelled(error)) {
+        return;
+      }
       labelError(error);
     }
   }
@@ -233,6 +289,7 @@ export function useTemplatePreviewGenerate(options: PreviewGenerateOptions) {
     result,
     previewOverlay,
     previewOverlayKey,
+    activeJob,
     invalidatePreview,
     previewTemplate,
     downloadGenerated,

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -71,14 +72,19 @@ type jobRegistry struct {
 	now   func() time.Time
 	ttl   time.Duration
 	max   int
+	// logger records the concrete cause of failed jobs; jobErrorBody collapses
+	// unknown errors into a generic envelope, so this is the only trail.
+	// Nil is valid (tests, read-only embeds).
+	logger *slog.Logger
 }
 
-func newJobRegistry() *jobRegistry {
+func newJobRegistry(logger *slog.Logger) *jobRegistry {
 	return &jobRegistry{
-		items: map[string]*jobEntry{},
-		now:   time.Now,
-		ttl:   jobTTL,
-		max:   jobMaxItems,
+		items:  map[string]*jobEntry{},
+		now:    time.Now,
+		ttl:    jobTTL,
+		max:    jobMaxItems,
+		logger: logger,
 	}
 }
 
@@ -104,6 +110,10 @@ func (r *jobRegistry) Start(parent context.Context, kind string, run jobRun) (st
 
 	go func() {
 		result, runErr := run(ctx, func(p service.Progress) { r.update(id, p) })
+		if runErr != nil && r.logger != nil {
+			// The snapshot only carries the sanitized envelope; log the cause.
+			r.logger.Error("后台任务失败", "job", id, "kind", kind, "error", runErr)
+		}
 		r.finish(id, result, runErr)
 	}()
 	return id, nil
@@ -247,11 +257,10 @@ func (j *jobEntry) snapshot(now time.Time) jobSnapshot {
 }
 
 // jobErrorBody converts a service error into the same error envelope the
-// synchronous endpoints write. Unknown errors become a generic internal error
-// (the concrete cause is logged by the caller path).
+// synchronous endpoints write. Unknown errors become a generic internal error;
+// the concrete cause is logged when the job finishes (see Start).
 func jobErrorBody(err error) map[string]any {
-	status, body := describeServiceError(err)
-	_ = status
+	_, body := describeServiceError(err)
 	if body == nil {
 		return map[string]any{"code": "internal", "message": "internal server error"}
 	}

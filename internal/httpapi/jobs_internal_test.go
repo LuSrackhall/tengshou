@@ -1,7 +1,11 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +28,7 @@ func waitJobStatus(t *testing.T, reg *jobRegistry, id, want string) jobSnapshot 
 }
 
 func TestJobRegistryExpiresFinishedJobs(t *testing.T) {
-	reg := newJobRegistry()
+	reg := newJobRegistry(nil)
 	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
 	reg.now = func() time.Time { return now }
 	reg.ttl = time.Minute
@@ -48,7 +52,7 @@ func TestJobRegistryExpiresFinishedJobs(t *testing.T) {
 }
 
 func TestJobRegistryCapsRunningJobsAndCancelsEvicted(t *testing.T) {
-	reg := newJobRegistry()
+	reg := newJobRegistry(nil)
 	reg.max = 2
 	reg.ttl = time.Hour
 
@@ -93,7 +97,7 @@ func TestJobRegistryCapsRunningJobsAndCancelsEvicted(t *testing.T) {
 }
 
 func TestJobRegistryCancelAllMarksFailed(t *testing.T) {
-	reg := newJobRegistry()
+	reg := newJobRegistry(nil)
 	started := make(chan struct{})
 	id, err := reg.Start(context.Background(), "test", func(ctx context.Context, report service.ProgressFunc) (any, error) {
 		close(started)
@@ -111,5 +115,29 @@ func TestJobRegistryCancelAllMarksFailed(t *testing.T) {
 	}
 	if snap.Error["code"] != "cancelled" {
 		t.Fatalf("error = %+v", snap.Error)
+	}
+}
+
+// A failed job must keep the concrete cause in the server log: the snapshot
+// only carries the sanitized envelope, so without this the error is swallowed.
+func TestJobRegistryLogsFailedRunCause(t *testing.T) {
+	var buf bytes.Buffer
+	reg := newJobRegistry(slog.New(slog.NewTextHandler(&buf, nil)))
+	cause := errors.New("模板文件写入失败：磁盘只读")
+	id, err := reg.Start(context.Background(), "template_import", func(ctx context.Context, report service.ProgressFunc) (any, error) {
+		return nil, cause
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := waitJobStatus(t, reg, id, jobStatusFailed)
+	if snap.Error["code"] != "internal" {
+		t.Fatalf("error envelope = %+v", snap.Error)
+	}
+	log := buf.String()
+	for _, want := range []string{"后台任务失败", id, "template_import", cause.Error()} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("log %q missing %q", log, want)
+		}
 	}
 }

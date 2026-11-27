@@ -604,8 +604,10 @@ func (s *Service) preflightRenderContext(rc *templateRenderContext) (*generation
 		}
 		// Archive reuse (v0.2 D3=B) is intentionally not bound to one contract
 		// content version: it stamps as-is, so a later content edit must not
-		// invalidate it. Only on-site (lan_qr) captures keep the B5 gate.
+		// invalidate it. The archive signature stamp (签名章) behaves the same.
+		// Only on-site (lan_qr) captures keep the B5 gate.
 		if sig.Source != model.SignatureSourceArchive &&
+			sig.Source != model.SignatureSourceArchiveSeal &&
 			sig.ContentSHA256 != "" && sig.ContentSHA256 != content && !seenStale[sig.ID] {
 			seenStale[sig.ID] = true
 			pf.stale = append(pf.stale, sig)

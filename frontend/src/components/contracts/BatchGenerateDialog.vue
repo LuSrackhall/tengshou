@@ -16,6 +16,7 @@ import {
   batchGenerateContracts,
   batchPreviewGeneration,
   downloadDocumentFile,
+  getArchiveReuseSettings,
   listTemplates,
 } from "../../api/endpoints";
 import type {
@@ -93,6 +94,7 @@ const chips = ref<Record<string, ChipState>>({});
 const issues = ref<{ id: string; text: string }[]>([]);
 const preflighting = ref(false);
 const generating = ref(false);
+const archiveNotify = ref(false); // 档案复用告知开关（Q6 修正）：预检提示随之显隐。
 /* 一次生成尝试后按钮保持禁用（与迁移前的 finally 行为一致），
    重新预检或切换勾选 / 模板时恢复。 */
 const generateLocked = ref(false);
@@ -432,6 +434,10 @@ function onKeydown(event: KeyboardEvent): void {
 onMounted(() => {
   document.addEventListener("keydown", onKeydown);
   void loadTemplateOptions();
+  // 读取失败按「不告知」处理：预检照常进行，只是不展示来源提示。
+  getArchiveReuseSettings()
+    .then((settings) => (archiveNotify.value = settings.notify))
+    .catch(() => (archiveNotify.value = false));
 });
 
 onBeforeUnmount(() => {
@@ -486,6 +492,9 @@ onBeforeUnmount(() => {
           </div>
           <div class="hint">
             勾选要生成的合同。预检会逐份检查必填字段、相对方档案、签名（现场手写核对内容版本，档案复用直接套印）与公章，再开始生成。
+          </div>
+          <div v-if="archiveNotify" id="batchArchiveReuseNotice" class="hint">
+            档案复用告知：已复用档案签名/公章的合同会直接套印（来源：档案）；未复用档案资产的合同不受影响。如对方不同意，请先到合同表单取消复用，改为现场扫码手写。
           </div>
           <div id="batchContractList" class="batch-contract-list">
             <label v-for="contract in contracts" :key="contract.id" class="batch-contract-row">

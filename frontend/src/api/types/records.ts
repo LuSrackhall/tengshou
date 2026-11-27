@@ -32,6 +32,14 @@ export interface Party {
   id_back_sha256?: string;
   /** 档案级签名资产 id；一次采集后可直接套印到后续合同（档案复用）。 */
   signature_id?: string;
+  /** 档案级公章（企业公章）资产 id（seal_assets）；合同模板按档案取用。 */
+  seal_asset_id?: string;
+  /** 档案公章来源：lan_enroll / app_upload。 */
+  seal_source?: string;
+  /** 档案级签名章（私章）图片资产 id（signature_assets），可替代手写签名。 */
+  signature_seal_id?: string;
+  /** 档案签名章来源：lan_enroll / app_upload。 */
+  signature_seal_source?: string;
   created_at: ISODateTime;
   updated_at: ISODateTime;
 }

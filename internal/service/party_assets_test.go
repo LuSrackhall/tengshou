@@ -395,3 +395,112 @@ func TestEnrollPartyValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestPartyArchiveSealRoundTripAndReuse(t *testing.T) {
+	svc, _, _ := openService(t)
+	svc.SetDataDir(t.TempDir())
+	ctx := context.Background()
+	party := mustParty(t, svc, "企业租户")
+	contract := mustContract(t, svc, service.ContractInput{
+		Title: "档案公章复用合同", PartyBID: party.ID, Status: model.ContractDraft,
+	})
+
+	rawSeal := testPNG(t, 140, 120)
+	updated, record, err := svc.SavePartySealImage(ctx, party.ID, rawSeal, model.PartyAssetSourceAppUpload)
+	if err != nil {
+		t.Fatalf("save party seal: %v", err)
+	}
+	if updated.SealAssetID == "" || updated.SealSource != model.PartyAssetSourceAppUpload {
+		t.Fatalf("party seal not recorded: %+v", updated)
+	}
+	if record.PartyID != "" {
+		t.Fatalf("archive seal must not claim seal_assets.party_id: %q", record.PartyID)
+	}
+	got, err := svc.PartySealImage(ctx, party.ID)
+	if err != nil || len(got) == 0 {
+		t.Fatalf("read party seal: %v", err)
+	}
+	// The archive seal only participates through an explicit contract link:
+	// unchecking "使用档案公章" in the form must keep it off the PDF.
+	all, _, err := svc.SealsForContract(ctx, contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range all {
+		if item.ID == record.ID {
+			t.Fatalf("archive seal %s must not apply before being attached: %+v", record.ID, all)
+		}
+	}
+	if _, err := svc.AttachSealToContracts(ctx, record.ID, []string{contract.ID}); err != nil {
+		t.Fatalf("attach archive seal: %v", err)
+	}
+	all, attached, err := svc.SealsForContract(ctx, contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, linked := false, false
+	for _, item := range all {
+		if item.ID == record.ID {
+			found = true
+		}
+	}
+	for _, item := range attached {
+		if item.ID == record.ID {
+			linked = true
+		}
+	}
+	if !found || !linked {
+		t.Fatalf("attached archive seal %s missing from SealsForContract: all=%+v attached=%+v", record.ID, all, attached)
+	}
+
+	cleared, err := svc.ClearPartySeal(ctx, party.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.SealAssetID != "" || cleared.SealSource != "" {
+		t.Fatalf("clear did not disable the archive seal: %+v", cleared)
+	}
+	if _, err := svc.PartySealImage(ctx, party.ID); err == nil {
+		t.Fatal("disabled seal should not be readable through the archive surface")
+	}
+}
+
+func TestPartySignatureSealReuse(t *testing.T) {
+	svc, _, _ := openService(t)
+	svc.SetDataDir(t.TempDir())
+	ctx := context.Background()
+	party := mustParty(t, svc, "私章租户")
+	contract := mustContract(t, svc, service.ContractInput{
+		Title: "签名章复用合同", PartyBID: party.ID, Status: model.ContractDraft,
+	})
+	raw := testPNG(t, 120, 100)
+	updated, err := svc.SavePartySignatureSeal(ctx, party.ID, raw, model.PartyAssetSourceLANEnroll)
+	if err != nil {
+		t.Fatalf("save signature seal: %v", err)
+	}
+	if updated.SignatureSealID == "" || updated.SignatureSealSource != model.PartyAssetSourceLANEnroll {
+		t.Fatalf("signature seal not recorded: %+v", updated)
+	}
+	if _, err := svc.PartySignatureSealImage(ctx, party.ID); err != nil {
+		t.Fatalf("read signature seal: %v", err)
+	}
+	reused, err := svc.ReusePartyArchiveSignature(ctx, contract.ID, party.ID, model.SignatureSourceArchiveSeal)
+	if err != nil {
+		t.Fatalf("reuse signature seal: %v", err)
+	}
+	if reused.Source != model.SignatureSourceArchiveSeal || reused.ContentSHA256 != "" {
+		t.Fatalf("reused signature = %+v", reused)
+	}
+	again, err := svc.ReusePartyArchiveSignature(ctx, contract.ID, party.ID, model.SignatureSourceArchiveSeal)
+	if err != nil || again.ID != reused.ID {
+		t.Fatalf("reuse should be idempotent: %v %v", again.ID, err)
+	}
+	// Clearing the archive signature stamp disables future reuse but keeps
+	// the already-reused contract row.
+	if _, err := svc.ClearPartySignatureSeal(ctx, party.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReusePartyArchiveSignature(ctx, contract.ID, party.ID, model.SignatureSourceArchiveSeal); err == nil {
+		t.Fatal("reuse after disable should fail")
+	}
+}

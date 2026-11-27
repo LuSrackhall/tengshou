@@ -125,15 +125,38 @@ type Onboarding struct {
 
 // Config is the application configuration persisted as config.json.
 type Config struct {
-	Version    int        `json:"version"`
-	HTTP       HTTP       `json:"http"`
-	PDF        PDF        `json:"pdf"`
-	Log        Log        `json:"log"`
-	Signature  Signature  `json:"signature"`
-	MCP        MCP        `json:"mcp"`
-	Onboarding Onboarding `json:"onboarding"`
+	Version      int          `json:"version"`
+	HTTP         HTTP         `json:"http"`
+	PDF          PDF          `json:"pdf"`
+	Log          Log          `json:"log"`
+	Signature    Signature    `json:"signature"`
+	MCP          MCP          `json:"mcp"`
+	Onboarding   Onboarding   `json:"onboarding"`
+	ArchiveReuse ArchiveReuse `json:"archive_reuse"`
+	EnrollEntry  EnrollEntry  `json:"enroll_entry"`
 	// Operator is the name recorded in the change log. Empty means the OS user.
 	Operator string `json:"operator,omitempty"`
+}
+
+// ArchiveReuse is the settings-page notice switch for archive signature,
+// signature stamp (私章) and official seal reuse (Q6 修正). Reuse itself is
+// always available; Notify only controls whether the contract form shows the
+// "will reuse archive assets (source: archive)" notice and the fallback hint.
+// Notify defaults to true when the key is absent, so existing installations
+// get the informing behaviour without a migration; the settings page always
+// shows the legal-risk notice next to the switch.
+type ArchiveReuse struct {
+	// Notify is a pointer so "unset" (older config.json) can mean true while
+	// an explicit false from the settings page stays false after restart.
+	Notify *bool `json:"notify,omitempty"`
+}
+
+// EnrollEntry is the long-lived self-enrollment entry printed on the wall
+// poster (Q1). The token is reused by every tenant until the landlord rotates
+// or disables it; Disabled makes an already-printed poster stop working.
+type EnrollEntry struct {
+	Token    string `json:"token,omitempty"`
+	Disabled bool   `json:"disabled,omitempty"`
 }
 
 // ResolvePaths returns the data directory layout for dir. An empty dir means

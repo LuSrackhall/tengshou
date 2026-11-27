@@ -6,8 +6,13 @@
 // 外部 agent 写入经 tengshou:change / tengshou:data-changed 到达本页时重取。
 
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { getMCPStatus, updateMCPSettings } from "../../api/endpoints";
-import type { MCPStatus } from "../../api/types";
+import {
+  getArchiveReuseSettings,
+  getMCPStatus,
+  updateArchiveReuseSettings,
+  updateMCPSettings,
+} from "../../api/endpoints";
+import type { ArchiveReuseSettings, MCPStatus } from "../../api/types";
 import {
   errorMessage,
   subscribeChange,
@@ -26,6 +31,8 @@ import MCPAccessPanel from "./MCPAccessPanel.vue";
 const status = ref<MCPStatus | null>(null);
 const errorText = ref("");
 const toggling = ref(false);
+const archiveReuse = ref<ArchiveReuseSettings | null>(null);
+const archiveReuseSaving = ref(false);
 
 let unsubTabs: (() => void) | null = null;
 let unsubData: (() => void) | null = null;
@@ -38,6 +45,43 @@ async function load(): Promise<void> {
   } catch (error) {
     status.value = null;
     errorText.value = errorMessage(error);
+  }
+}
+
+async function loadArchiveReuse(): Promise<void> {
+  try {
+    archiveReuse.value = await getArchiveReuseSettings();
+  } catch {
+    archiveReuse.value = null;
+  }
+}
+
+async function onArchiveReuseToggle(event: Event): Promise<void> {
+  const toggle = event.target as HTMLInputElement;
+  const notify = toggle.checked;
+  if (
+    !notify &&
+    !window.confirm(
+      "关闭后，建合同时不再展示「将复用档案签名/公章（来源：档案）」与回退提示；" +
+        "复用功能仍然可用，会按档案静默复用，法律风险由使用者自行承担。确定关闭告知？",
+    )
+  ) {
+    toggle.checked = true;
+    return;
+  }
+  if (archiveReuseSaving.value) {
+    return;
+  }
+  archiveReuseSaving.value = true;
+  try {
+    await updateArchiveReuseSettings({ notify });
+    toast(notify ? "已开启档案复用告知（即时生效）" : "已关闭档案复用告知（仍可静默复用）");
+    await loadArchiveReuse();
+  } catch (error) {
+    toggle.checked = !notify;
+    toast(errorMessage(error), true);
+  } finally {
+    archiveReuseSaving.value = false;
   }
 }
 
@@ -77,15 +121,18 @@ function onAgentActivityToggle(event: Event): void {
 onMounted(() => {
   if (currentTab.value === "settings") {
     void load();
+    void loadArchiveReuse();
   }
   unsubTabs = subscribeTabChanged((tab) => {
     if (tab === "settings") {
       void load();
+      void loadArchiveReuse();
     }
   });
   unsubData = subscribeDataChanged((detail) => {
     if (currentTab.value === "settings" && detail.entities.includes("settings")) {
       void load();
+      void loadArchiveReuse();
     }
   });
   unsubChanges = subscribeChange((notice) => {
@@ -188,6 +235,31 @@ onBeforeUnmount(() => {
           </label>
         </div>
         <p class="hint">开启后，MCP agent 写入时界面会切到对应页面，并用模拟光标、点击波纹与目标行高亮回放这次操作；关闭后只保留顶部「agent 操作」徽标。本开关只影响本机界面的展示，不改变 agent 的读写权限。</p>
+      </div>
+      <div class="mcp-card">
+        <h3>档案签名 / 公章复用告知</h3>
+        <div class="switch-row">
+          <label class="switch">
+            <input
+              id="archiveReuseToggle"
+              type="checkbox"
+              :checked="archiveReuse?.notify ?? false"
+              :disabled="archiveReuse === null || archiveReuseSaving"
+              @change="onArchiveReuseToggle"
+            >
+            <span>建合同时展示档案复用告知提示（{{ archiveReuse?.notify ? "已开启" : "已关闭" }}）</span>
+          </label>
+        </div>
+        <p class="hint warning-list">
+          风险提示：复用功能始终可用，本开关只控制是否展示告知提示。关闭后合同表单不再显示来源与回退提示，但仍会按档案静默复用签名、签名章与公章。复用档案签名、签名章与公章的法律风险由使用者自行承担，请确认已获得租户/单位授权。
+        </p>
+        <p class="hint">
+          开启：选好租户档案后，合同表单显示「将复用档案签名/公章（来源：档案）」与「如对方不同意，请取消勾选并改用现场扫码手写」；关闭：不显示上述提示，但仍默认勾选并按档案复用，可在合同表单取消勾选改用现场扫码手写。
+        </p>
+        <p class="hint">
+          {{ archiveReuse?.risk_notice || "设置读取失败时，合同表单按不告知处理；复用功能仍可用。" }}
+        </p>
+        <p class="hint">改动即时生效并写入 config.json；档案图片仍只保存在本机数据目录，变更记录仅本机内部可见。</p>
       </div>
     </div>
   </div>

@@ -22,10 +22,13 @@ interface SummaryItem {
   source: string;
 }
 
-/** 签名来源：档案复用 / 现场手写；旧记录（无 source）不展示。 */
+/** 签名来源：档案复用 / 档案签名章复用 / 现场手写；旧记录（无 source）不展示。 */
 function sourceLabel(source: string | undefined): string {
   if (source === "archive") {
     return "档案复用";
+  }
+  if (source === "archive_seal") {
+    return "档案签名章复用";
   }
   if (source === "lan_qr") {
     return "现场手写";

@@ -62,6 +62,36 @@ export interface SignatureSessionCancelResponse {
   cancelled: boolean;
 }
 
+// ---------- 档案签名/签名章复用（te-48hkl） ----------
+
+/**
+ * 复用档案签名的来源：archive=档案手写签名，archive_seal=档案签名章（私章）。
+ * 对应 Go model.SignatureSourceArchive / SignatureSourceArchiveSeal。
+ */
+export type ArchiveSignatureKind = "archive" | "archive_seal";
+
+/** POST /contracts/{id}/signature-reuse 的请求体。 */
+export interface ReusePartySignatureInput {
+  party_id: string;
+  /** 省略或 "archive" 表示手写签名；"archive_seal" 表示签名章。 */
+  kind?: ArchiveSignatureKind;
+}
+
+// ---------- 固定自助录入入口（可打印海报，te-48hkl） ----------
+
+/** GET/POST /enroll-entry 的返回：长期有效、可打印的录入入口。 */
+export interface EnrollEntry {
+  issued: boolean;
+  enabled: boolean;
+  /** 入口码；未生成时缺失。 */
+  token?: string;
+  urls: string[];
+  /** urls 的第一个地址（urls 非空时才有）。 */
+  url?: string;
+  /** 二维码 PNG 的相对地址。 */
+  qr_url: string;
+}
+
 /**
  * v0.2 局域网自助建档会话（enrollSessionView）。手机端在 /enroll/{token}
  * 填写姓名、证件号、证件照正反面与手写签名，提交即建档。

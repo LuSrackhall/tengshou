@@ -58,38 +58,94 @@ export async function addPlacement(
   return id;
 }
 
-/** 把标定框拖动到锚点：字段框覆盖填空位置，签名/公章框放在标签右侧留白处。 */
+/** 把标定框拖动到锚点：字段框覆盖填空位置，签名/公章框放在标签右侧留白处。
+ *
+ * 编辑器在新增/选中位置后会做平滑滚动；滚动未稳时测得的坐标可能瞬间过期，
+ * 鼠标按下会落空（macOS 上表现为「框的 x 未到位」偶发）。因此每次拖动前
+ * 等滚动稳定，并用 elementFromPoint 确认起点确实命中本框；未命中或拖动后
+ * 坐标未到位时重新测量重试，最多 3 次。
+ */
 export async function dragPlacementToAnchor(
   page: Page,
   placementId: string,
   spec: PlacementSpec,
 ): Promise<void> {
   const target = targetFor(spec);
-  await scrollTemplatePageToTop(page, spec.anchor.page);
-  const pageBox = await page
-    .locator(`.tpl-page[data-page="${spec.anchor.page}"]`)
-    .boundingBox();
   const box = page.locator(`.tpl-box[data-id="${placementId}"]`);
-  const boxBox = await box.boundingBox();
-  expect(pageBox, `第 ${spec.anchor.page} 页未渲染`).not.toBeNull();
-  expect(boxBox, `标定框 ${placementId} 未渲染`).not.toBeNull();
-  const startX = boxBox!.x + boxBox!.width / 2;
-  const startY = boxBox!.y + boxBox!.height / 2;
-  const endX = pageBox!.x + target.x + boxBox!.width / 2;
-  const endY = pageBox!.y + target.y + boxBox!.height / 2;
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.mouse.move(endX, endY, { steps: 12 });
-  await page.mouse.up();
-  const style = await box.evaluate((element) => {
-    const html = element as HTMLElement;
-    return {
-      left: Number.parseFloat(html.style.left),
-      top: Number.parseFloat(html.style.top),
-    };
+  let last = { left: Number.NaN, top: Number.NaN };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await scrollTemplatePageToTop(page, spec.anchor.page);
+    await waitForScrollSettled(page);
+    const pageBox = await page
+      .locator(`.tpl-page[data-page="${spec.anchor.page}"]`)
+      .boundingBox();
+    const boxBox = await box.boundingBox();
+    expect(pageBox, `第 ${spec.anchor.page} 页未渲染`).not.toBeNull();
+    expect(boxBox, `标定框 ${placementId} 未渲染`).not.toBeNull();
+    const startX = boxBox!.x + boxBox!.width / 2;
+    const startY = boxBox!.y + boxBox!.height / 2;
+    const endX = pageBox!.x + target.x + boxBox!.width / 2;
+    const endY = pageBox!.y + target.y + boxBox!.height / 2;
+    const hitId = await page.evaluate(
+      ({ x, y }) =>
+        (document.elementFromPoint(x, y)?.closest(".tpl-box") as HTMLElement | null)
+          ?.dataset.id ?? "",
+      { x: startX, y: startY },
+    );
+    if (hitId !== placementId) {
+      continue;
+    }
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(endX, endY, { steps: 12 });
+    await page.mouse.up();
+    // 等待 Vue 把拖动结果写回样式后再读坐标。
+    await box.evaluate(async () => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+    });
+    last = await box.evaluate((element) => {
+      const html = element as HTMLElement;
+      return {
+        left: Number.parseFloat(html.style.left),
+        top: Number.parseFloat(html.style.top),
+      };
+    });
+    if (
+      Math.abs(last.left - target.x) <= 2 &&
+      Math.abs(last.top - target.y) <= 2
+    ) {
+      return;
+    }
+  }
+  throw new Error(
+    `框 ${placementId} 拖动未到位：目标 (${target.x}, ${target.y})，` +
+      `实际 (${last.left}, ${last.top})`,
+  );
+}
+
+/** 等编辑器滚动稳定（连续 3 帧 scrollTop 不变），避免测到动画中途的位置。 */
+async function waitForScrollSettled(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const scroller = document.querySelector("#tplPages");
+    if (!(scroller instanceof HTMLElement)) {
+      return;
+    }
+    let last = scroller.scrollTop;
+    let stable = 0;
+    for (let frame = 0; frame < 90 && stable < 3; frame += 1) {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      if (Math.abs(scroller.scrollTop - last) < 0.5) {
+        stable += 1;
+        continue;
+      }
+      stable = 0;
+      last = scroller.scrollTop;
+    }
   });
-  expect(Math.abs(style.left - target.x), `框 ${placementId} 的 x 未到位`).toBeLessThanOrEqual(2);
-  expect(Math.abs(style.top - target.y), `框 ${placementId} 的 y 未到位`).toBeLessThanOrEqual(2);
 }
 
 /** 编辑区滚动到指定页顶部，保证默认框与目标位置都在可视区内（100% 缩放）。 */

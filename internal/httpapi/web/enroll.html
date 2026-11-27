@@ -69,7 +69,7 @@
   {{if .Active}}
   <section class="card" id="enrollCard">
     <h2>填写您的档案</h2>
-    <p class="help">请如实填写姓名与证件号，并拍摄证件照正反面、手写签名。提交后由出租方电脑保存，不会上传互联网。</p>
+    <p class="help">请如实填写姓名与证件号，并拍摄证件照正反面；签名方式为手写签名或上传签名章（私章）图片二选一。企业租户可加传公章图片。提交后由出租方电脑保存，不会上传互联网。</p>
     <div class="field">
       <label for="enrollName">姓名<span class="req">*</span></label>
       <input id="enrollName" type="text" autocomplete="name" maxlength="120" placeholder="请输入姓名">
@@ -101,7 +101,23 @@
       </div>
     </div>
     <div class="field">
-      <label>手写签名<span class="req">*</span></label>
+      <div class="photo-row">
+        <div class="photo-box">
+          <div class="title">企业公章（选填）</div>
+          <input id="enrollSeal" type="file" accept="image/*" capture="environment">
+          <img id="enrollSealPreview" alt="企业公章预览">
+          <p class="help">单位租户可上传公章照片，签订合同时可直接复用。</p>
+        </div>
+        <div class="photo-box">
+          <div class="title">签名章图片（选填）</div>
+          <input id="enrollSignatureSeal" type="file" accept="image/*" capture="environment">
+          <img id="enrollSignatureSealPreview" alt="签名章预览">
+          <p class="help">上传后可不手写签名，签名章将作为您的签名方式。</p>
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label>手写签名<span class="req">*</span>（与签名章图片二选一）</label>
       <div class="pad-wrap">
         <canvas id="enrollPad" width="1200" height="420" aria-label="手写签名区"></canvas>
         <div id="enrollPadHint" class="pad-hint">请在此处手写签名</div>
@@ -112,7 +128,11 @@
       </div>
     </div>
     <p id="enrollMessage" class="message" role="status" aria-live="polite"></p>
+    {{if .Fixed}}
+    <p class="expiry">本入口是出租方张贴的长期入口，同一位租户只需填写一次；提交后请把手机交还出租方。</p>
+    {{else}}
     <p class="expiry">链接一次性使用，有效期至 <time id="enrollExpiresAt" datetime="{{.ExpiresAt}}">{{.ExpiresAt}}</time>。</p>
+    {{end}}
   </section>
   {{else if .Completed}}
   <section class="card result done">
@@ -141,15 +161,20 @@
   var backInput = document.getElementById("enrollIdBack");
   var frontPreview = document.getElementById("enrollIdFrontPreview");
   var backPreview = document.getElementById("enrollIdBackPreview");
+  var sealInput = document.getElementById("enrollSeal");
+  var sealPreview = document.getElementById("enrollSealPreview");
+  var sigSealInput = document.getElementById("enrollSignatureSeal");
+  var sigSealPreview = document.getElementById("enrollSignatureSealPreview");
   var canvas = document.getElementById("enrollPad");
   var hint = document.getElementById("enrollPadHint");
   var clearBtn = document.getElementById("enrollClearBtn");
   var submitBtn = document.getElementById("enrollSubmitBtn");
   var message = document.getElementById("enrollMessage");
   var card = document.getElementById("enrollCard");
+  var fixedEntry = {{if .Fixed}}true{{else}}false{{end}};
   var ctx = canvas.getContext("2d");
   var drawing = false, dirty = false, last = null, lastMid = null, busy = false, expired = false;
-  var frontData = "", backData = "";
+  var frontData = "", backData = "", sealData = "", sigSealData = "";
   var MAX_PHOTO_BYTES = 15 * 1024 * 1024;
 
   ctx.lineWidth = 5;
@@ -170,7 +195,7 @@
     message.className = "message" + (cls ? " " + cls : "");
   }
   function refreshSubmit() {
-    submitBtn.disabled = !(dirty && frontData && backData && !busy && !expired);
+    submitBtn.disabled = !((dirty || sigSealData) && frontData && backData && !busy && !expired);
   }
   function setDirty(value) {
     dirty = value;
@@ -258,8 +283,13 @@
   }
   readPhoto(frontInput, frontPreview, function (value) { frontData = value; });
   readPhoto(backInput, backPreview, function (value) { backData = value; });
+  readPhoto(sealInput, sealPreview, function (value) { sealData = value; });
+  readPhoto(sigSealInput, sigSealPreview, function (value) {
+    sigSealData = value;
+    refreshSubmit();
+  });
 
-  function showTerminal(title, text, cls) {
+  function showTerminal(title, text, cls, allowAgain) {
     card.className = "card result " + cls;
     card.innerHTML = "";
     var icon = document.createElement("div");
@@ -272,6 +302,18 @@
     card.appendChild(icon);
     card.appendChild(h);
     card.appendChild(p);
+    if (allowAgain) {
+      var row = document.createElement("div");
+      row.className = "row";
+      var again = document.createElement("button");
+      again.type = "button";
+      again.id = "enrollAgainBtn";
+      again.className = "primary";
+      again.textContent = "为下一位租户填写";
+      again.addEventListener("click", function () { location.reload(); });
+      row.appendChild(again);
+      card.appendChild(row);
+    }
   }
 
   function markExpired() {
@@ -301,7 +343,7 @@
     if (!name) { setMessage("请填写姓名。", "error"); return; }
     if (!idNumber) { setMessage("请填写证件号。", "error"); return; }
     if (!frontData || !backData) { setMessage("请上传证件照正反面。", "error"); return; }
-    if (!dirty) { setMessage("请手写签名。", "error"); return; }
+    if (!dirty && !sigSealData) { setMessage("请手写签名或上传签名章图片。", "error"); return; }
     busy = true;
     refreshSubmit();
     clearBtn.disabled = true;
@@ -318,7 +360,9 @@
           address: addressEl.value.trim(),
           id_front: frontData,
           id_back: backData,
-          signature: canvas.toDataURL("image/png")
+          signature: dirty ? canvas.toDataURL("image/png") : "",
+          signature_seal: sigSealData,
+          seal: sealData
         })
       });
       var data = null;
@@ -328,7 +372,9 @@
         ? data.error.message
         : "提交失败，请稍后再试。";
       if (res.ok) {
-        showTerminal("档案已提交", "档案已保存到出租方的电脑上，请回到电脑继续办理合同。", "done");
+        showTerminal("档案已提交", fixedEntry
+          ? "档案已保存到出租方的电脑上。请把手机交还出租方，或者点下面的按钮为下一位租户填写。"
+          : "档案已保存到出租方的电脑上，请回到电脑继续办理合同。", "done", fixedEntry);
         return;
       }
       if (code === "enroll_consumed" || code === "enroll_expired" || res.status === 410) {

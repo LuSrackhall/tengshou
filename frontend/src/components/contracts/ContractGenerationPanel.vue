@@ -13,6 +13,7 @@ import { ApiError } from "../../api/client";
 import {
   downloadDocumentFile,
   generateContract,
+  getArchiveReuseSettings,
   getContract,
   listTemplates,
   previewTemplate,
@@ -104,6 +105,38 @@ const documents = ref<OutputDocument[]>(props.detail.documents ?? []);
 const overlay = ref<OverlayRequest | null>(null);
 const previewing = ref(false);
 const generating = ref(false);
+/* 档案复用告知（Q6 修正）：与合同表单/批量预检同口径，只控制提示显隐；
+   预览与生成本身始终按已关联的档案资产套印。 */
+const archiveNotify = ref(false);
+
+const archiveReuseNotice = computed(() => {
+  if (!archiveNotify.value) {
+    return "";
+  }
+  const parts: string[] = [];
+  const hasArchiveSignature = (props.detail.signatures ?? []).some(
+    (signature) =>
+      signature.source === "archive" || signature.source === "archive_seal",
+  );
+  if (hasArchiveSignature) {
+    parts.push("档案签名（来源：档案）");
+  }
+  const archiveSealIDs = new Set(
+    [props.detail.party_a?.seal_asset_id, props.detail.party_b?.seal_asset_id].filter(
+      (id): id is string => Boolean(id),
+    ),
+  );
+  if ((props.detail.seals ?? []).some((seal) => archiveSealIDs.has(seal.id))) {
+    parts.push("档案公章（来源：档案）");
+  }
+  if (!parts.length) {
+    return "";
+  }
+  return (
+    `预览与生成会直接套印${parts.join("与")}。` +
+    "如对方不同意，请返回合同表单取消勾选复用，改用现场扫码手写。"
+  );
+});
 
 let overlaySeq = 0;
 let historySeq = 0;
@@ -318,6 +351,10 @@ function onDataChanged(changed: DataChangedDetail): void {
 onMounted(() => {
   void loadTemplates();
   unsubscribeData = subscribeDataChanged(onDataChanged);
+  // 读取失败按「不告知」处理：预览/生成照常，只是不展示来源与回退提示。
+  getArchiveReuseSettings()
+    .then((settings) => (archiveNotify.value = settings.notify))
+    .catch(() => (archiveNotify.value = false));
 });
 
 // 首次模板列表渲染完成后再通知父组件：DOM 已更新，行内「生成 PDF」
@@ -349,6 +386,9 @@ onBeforeUnmount(() => {
       </template>
       <template v-else>
         <h3>合同 PDF 生成</h3>
+        <div v-if="archiveReuseNotice" id="genArchiveReuseNotice" class="hint">
+          {{ archiveReuseNotice }}
+        </div>
         <div class="gen-row">
           <div class="field">
             <label for="genTemplate">模板版本</label>

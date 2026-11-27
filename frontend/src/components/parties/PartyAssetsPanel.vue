@@ -6,9 +6,15 @@
 // 一次采集长期复用。所有资产只保存在本机数据目录，图片读取时服务端校验摘要。
 import { computed, ref } from "vue";
 import {
+  clearPartySeal,
+  clearPartySignatureSeal,
   partyIDPhotoUrl,
+  partySealImageUrl,
   partySignatureImageUrl,
+  partySignatureSealImageUrl,
   uploadPartyIDPhoto,
+  uploadPartySeal,
+  uploadPartySignatureSeal,
 } from "../../api/endpoints";
 import type { Party, PartyPhotoSide } from "../../api/types";
 import { errorMessage, refreshAfterWrite, toast } from "../../bridge/app";
@@ -21,10 +27,15 @@ const item = ref<Party>({ ...props.party });
 // 同一路径的图片会被浏览器缓存；上传/采集后用各自的版本号强制重载。
 const photoVer = ref(0);
 const signatureVer = ref(0);
+const sealVer = ref(0);
+const sigSealVer = ref(0);
 const busySide = ref<PartyPhotoSide | "">("");
+const busyImage = ref<"" | "seal" | "signature-seal">("");
 const showSignature = ref(false);
 const frontInput = ref<HTMLInputElement | null>(null);
 const backInput = ref<HTMLInputElement | null>(null);
+const sealInput = ref<HTMLInputElement | null>(null);
+const sigSealInput = ref<HTMLInputElement | null>(null);
 
 const frontUrl = computed(() =>
   item.value.id_front_path ? partyIDPhotoUrl(item.value.id, "front") : "",
@@ -38,6 +49,29 @@ const signatureUrl = computed(() =>
 const signatureSrc = computed(() =>
   signatureUrl.value ? `${signatureUrl.value}?v=${signatureVer.value}` : "",
 );
+const sealUrl = computed(() =>
+  item.value.seal_asset_id ? partySealImageUrl(item.value.id) : "",
+);
+const sealSrc = computed(() =>
+  sealUrl.value ? `${sealUrl.value}?v=${sealVer.value}` : "",
+);
+const sigSealUrl = computed(() =>
+  item.value.signature_seal_id ? partySignatureSealImageUrl(item.value.id) : "",
+);
+const sigSealSrc = computed(() =>
+  sigSealUrl.value ? `${sigSealUrl.value}?v=${sigSealVer.value}` : "",
+);
+
+/** 图片来源（lan_enroll = 手机自助录入，app_upload = 桌面导入）。 */
+function sourceLabel(source: string | undefined): string {
+  if (source === "lan_enroll") {
+    return "手机自助录入";
+  }
+  if (source === "app_upload") {
+    return "桌面导入";
+  }
+  return "";
+}
 
 function photoSrc(side: PartyPhotoSide): string {
   const base = side === "front" ? frontUrl.value : backUrl.value;
@@ -94,13 +128,80 @@ function onSignatureDone(signatureId: string): void {
   toast("档案签名已保存");
   refreshAfterWrite().catch((error: unknown) => toast(errorMessage(error), true));
 }
+
+function pickSeal(): void {
+  sealInput.value?.click();
+}
+
+function pickSigSeal(): void {
+  sigSealInput.value?.click();
+}
+
+async function onArchiveImage(
+  kind: "seal" | "signature-seal",
+  event: Event,
+): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file || busyImage.value) {
+    return;
+  }
+  busyImage.value = kind;
+  try {
+    const dataUrl = await readAsDataUrl(file);
+    const result =
+      kind === "seal"
+        ? await uploadPartySeal(item.value.id, dataUrl)
+        : await uploadPartySignatureSeal(item.value.id, dataUrl);
+    item.value = result.item;
+    if (kind === "seal") {
+      sealVer.value += 1;
+      toast("档案公章已保存");
+    } else {
+      sigSealVer.value += 1;
+      toast("档案签名章已保存");
+    }
+    emit("updated", result.item);
+    await refreshAfterWrite();
+  } catch (error) {
+    toast(errorMessage(error), true);
+  } finally {
+    busyImage.value = "";
+  }
+}
+
+async function disableArchiveImage(kind: "seal" | "signature-seal"): Promise<void> {
+  const label = kind === "seal" ? "档案公章" : "档案签名章";
+  if (!window.confirm(`确定停用${label}吗？停用后新建合同不再默认复用，图片资产仍保留。`)) {
+    return;
+  }
+  if (busyImage.value) {
+    return;
+  }
+  busyImage.value = kind;
+  try {
+    const result =
+      kind === "seal"
+        ? await clearPartySeal(item.value.id)
+        : await clearPartySignatureSeal(item.value.id);
+    item.value = result.item;
+    emit("updated", result.item);
+    toast(`${label}已停用`);
+    await refreshAfterWrite();
+  } catch (error) {
+    toast(errorMessage(error), true);
+  } finally {
+    busyImage.value = "";
+  }
+}
 </script>
 
 <template>
   <section class="party-assets" aria-label="档案附件">
-    <h3>证件与签名</h3>
+    <h3>证件、签名与公章</h3>
     <p class="help">
-      证件照与签名仅保存在本机数据目录；新建档案必须填写证件号，存量档案可在此补录，补录后长期有效。
+      证件照、签名与公章仅保存在本机数据目录；新建档案必须填写证件号，存量档案可在此补录，补录后长期有效。
     </p>
     <div class="asset-grid">
       <div class="asset-card">
@@ -168,6 +269,82 @@ function onSignatureDone(signatureId: string): void {
         </button>
         <span class="help">手机与电脑需在同一局域网；二维码一次性有效。</span>
       </div>
+      <div class="asset-card">
+        <div class="asset-title">档案签名章（私章）</div>
+        <img
+          v-if="sigSealUrl"
+          :key="`sigseal-${sigSealVer}`"
+          class="asset-signature"
+          :src="sigSealSrc"
+          alt="档案签名章"
+        >
+        <div v-else class="asset-empty">尚未上传</div>
+        <div class="asset-actions">
+          <button
+            type="button"
+            class="asset-btn"
+            :disabled="busyImage !== ''"
+            @click="pickSigSeal"
+          >{{ sigSealUrl ? "更换签名章" : "上传签名章" }}</button>
+          <button
+            v-if="sigSealUrl"
+            type="button"
+            class="asset-btn danger"
+            :disabled="busyImage !== ''"
+            @click="disableArchiveImage('signature-seal')"
+          >停用</button>
+        </div>
+        <input
+          ref="sigSealInput"
+          class="asset-file"
+          type="file"
+          accept="image/*"
+          aria-label="选择签名章图片"
+          @change="onArchiveImage('signature-seal', $event)"
+        >
+        <span v-if="sourceLabel(item.signature_seal_source)" class="help">
+          来源：{{ sourceLabel(item.signature_seal_source) }}；合同可选用签名章代替手写签名。
+        </span>
+        <span v-else class="help">上传后可在合同里代替手写签名（二选一）。</span>
+      </div>
+      <div class="asset-card">
+        <div class="asset-title">档案公章（企业公章）</div>
+        <img
+          v-if="sealUrl"
+          :key="`seal-${sealVer}`"
+          class="asset-signature"
+          :src="sealSrc"
+          alt="档案公章"
+        >
+        <div v-else class="asset-empty">尚未上传</div>
+        <div class="asset-actions">
+          <button
+            type="button"
+            class="asset-btn"
+            :disabled="busyImage !== ''"
+            @click="pickSeal"
+          >{{ sealUrl ? "更换公章" : "上传公章" }}</button>
+          <button
+            v-if="sealUrl"
+            type="button"
+            class="asset-btn danger"
+            :disabled="busyImage !== ''"
+            @click="disableArchiveImage('seal')"
+          >停用</button>
+        </div>
+        <input
+          ref="sealInput"
+          class="asset-file"
+          type="file"
+          accept="image/*"
+          aria-label="选择档案公章图片"
+          @change="onArchiveImage('seal', $event)"
+        >
+        <span v-if="sourceLabel(item.seal_source)" class="help">
+          来源：{{ sourceLabel(item.seal_source) }}；启用档案复用时合同默认套印。
+        </span>
+        <span v-else class="help">企业租户的公章；启用档案复用时合同默认套印。</span>
+      </div>
     </div>
     <PartySignatureDialog
       v-if="showSignature"
@@ -230,6 +407,13 @@ function onSignatureDone(signatureId: string): void {
   margin-top: 8px;
   min-height: 36px;
   padding: 0 12px;
+}
+.asset-actions {
+  display: flex;
+  gap: 8px;
+}
+.asset-actions .danger {
+  color: var(--danger, #b4342c);
 }
 .asset-file {
   display: none;

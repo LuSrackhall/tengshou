@@ -297,8 +297,11 @@ func (s *Service) DetachSealFromContracts(ctx context.Context, sealID string, co
 }
 
 // SealsForContract returns the seals applicable to a contract: explicitly
-// linked seals first, then seals that belong to either party. Templates receive
-// the combined list through TemplateData.
+// linked seals first, then seals that belong to either party. A party's
+// archive seal (parties.seal_asset_id, te-48hkl) participates only when the
+// contract links it explicitly: the contract form's default "使用档案公章"
+// calls AttachSeal, and unchecking it must keep the archive seal off the PDF.
+// Templates receive the combined list through TemplateData.
 func (s *Service) SealsForContract(ctx context.Context, contract model.Contract) (all, attached []model.Seal, err error) {
 	attached, err = s.rd.ListSealsForContract(ctx, contract.ID)
 	if err != nil {

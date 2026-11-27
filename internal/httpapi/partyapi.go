@@ -17,9 +17,10 @@ import (
 const (
 	// maxPartyPhotoBody bounds one base64-encoded ID-card photo upload.
 	maxPartyPhotoBody = 24 << 20
-	// maxEnrollBody bounds one self-enrollment submission (two photos plus a
-	// signature, all base64-encoded).
-	maxEnrollBody = 48 << 20
+	// maxEnrollBody bounds one self-enrollment submission (two photos, a
+	// handwritten signature, an optional company seal and an optional
+	// signature stamp, all base64-encoded).
+	maxEnrollBody = 96 << 20
 )
 
 type partyPhotoInput struct {
@@ -211,10 +212,28 @@ type enrollPageData struct {
 	Active    bool
 	Completed bool
 	Expired   bool
+	Fixed     bool
 	ExpiresAt string
 }
 
-// handleEnrollPage renders the LAN self-enrollment page for the phone.
+// enrollEntryMatch reports whether token is the wall-poster entry: fixed is
+// true only while the entry is enabled; known is true for a disabled entry too
+// so the phone page can say the poster was turned off instead of "invalid".
+func (s *Server) enrollEntryMatch(token string) (fixed, known bool) {
+	entry, disabled := s.enrollEntryToken()
+	if entry == "" || entry != token {
+		return false, false
+	}
+	return !disabled, true
+}
+
+func (s *Server) isFixedEnrollToken(token string) bool {
+	fixed, _ := s.enrollEntryMatch(token)
+	return fixed
+}
+
+// handleEnrollPage renders the LAN self-enrollment page for the phone. Both
+// the one-time dialog token and the long-lived poster token are accepted.
 func (s *Server) handleEnrollPage(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	data := enrollPageData{State: sign.StateExpired, Expired: true}
@@ -233,6 +252,12 @@ func (s *Server) handleEnrollPage(w http.ResponseWriter, r *http.Request) {
 				data.Active = true
 				data.Expired = false
 			}
+		} else if s.isFixedEnrollToken(token) {
+			// The wall poster stays valid until the landlord rotates/disables it.
+			data.State = sign.StatePending
+			data.Active = true
+			data.Fixed = true
+			data.Expired = false
 		}
 	}
 	status := http.StatusOK
@@ -258,6 +283,17 @@ func (s *Server) handleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, err := s.sign.Get(token)
 	if err != nil || sess.Kind != sign.KindEnroll {
+		if fixed, known := s.enrollEntryMatch(token); known {
+			if !fixed {
+				writeError(w, http.StatusGone, "enroll_expired", "自助录入入口已停用，请联系出租方重新生成海报")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"state": sign.StatePending,
+				"fixed": true,
+			})
+			return
+		}
 		writeError(w, http.StatusNotFound, "not_found", "自助建档链接已失效，请在电脑上重新生成二维码")
 		return
 	}
@@ -275,12 +311,18 @@ type enrollSubmitInput struct {
 	IDFront   string `json:"id_front"`
 	IDBack    string `json:"id_back"`
 	Signature string `json:"signature"`
+	// SignatureSeal is a picture of a signature stamp (私章) used instead of
+	// the handwritten signature. Seal is the enterprise official seal. Both
+	// are optional.
+	SignatureSeal string `json:"signature_seal"`
+	Seal          string `json:"seal"`
 }
 
-// handleEnrollSubmit creates the archive from the phone submission. The
-// one-time token is claimed before writing, so a double tap cannot create two
-// archives. A duplicate ID number is rejected and the session stays usable so
-// the tenant can correct a typo.
+// handleEnrollSubmit creates the archive from the phone submission. A one-time
+// token is claimed before writing, so a double tap cannot create two archives;
+// the long-lived poster token is not claimed and can serve many tenants. A
+// duplicate ID number is rejected and the session stays usable so the tenant
+// can correct a typo.
 func (s *Server) handleEnrollSubmit(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	if !sign.ValidToken(token) {
@@ -293,6 +335,11 @@ func (s *Server) handleEnrollSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Header.Get("X-Tengshou-Sign") != "1" {
 		writeError(w, http.StatusForbidden, "enroll_header_required", "缺少提交请求头")
+		return
+	}
+	fixed, entryKnown := s.enrollEntryMatch(token)
+	if entryKnown && !fixed {
+		writeError(w, http.StatusGone, "enroll_expired", "自助录入入口已停用，请联系出租方重新生成海报")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxEnrollBody)
@@ -311,47 +358,76 @@ func (s *Server) handleEnrollSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_image", "证件照反面："+err.Error())
 		return
 	}
-	rawSig, err := decodeImageDataURL(in.Signature)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_image", "手写签名："+err.Error())
-		return
-	}
-	normalized, err := sign.NormalizePNG(rawSig)
-	if err != nil {
-		var imgErr *sign.ImageError
-		if errors.As(err, &imgErr) {
-			status := http.StatusUnprocessableEntity
-			if imgErr.Code == "invalid_image" || imgErr.Code == "too_large" {
-				status = http.StatusBadRequest
-			}
-			writeError(w, status, "sign_"+imgErr.Code, imgErr.Message)
+	var rawSig, rawSigSeal, rawSeal []byte
+	if strings.TrimSpace(in.Signature) != "" {
+		rawSig, err = decodeImageDataURL(in.Signature)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_image", "手写签名："+err.Error())
 			return
 		}
-		s.internalError(w, "normalize enrollment signature", err)
+	}
+	if strings.TrimSpace(in.SignatureSeal) != "" {
+		rawSigSeal, err = decodeImageDataURL(in.SignatureSeal)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_image", "签名章图片："+err.Error())
+			return
+		}
+	}
+	if strings.TrimSpace(in.Seal) != "" {
+		rawSeal, err = decodeImageDataURL(in.Seal)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_image", "公章图片："+err.Error())
+			return
+		}
+	}
+	if len(rawSig) == 0 && len(rawSigSeal) == 0 {
+		writeError(w, http.StatusUnprocessableEntity, "signature_required",
+			"请手写签名或上传签名章图片")
 		return
 	}
-	_, err = s.sign.ClaimKind(token, sign.KindEnroll)
-	switch {
-	case err == nil:
-	case errors.Is(err, sign.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "自助建档链接无效")
-		return
-	case errors.Is(err, sign.ErrExpired):
-		writeError(w, http.StatusGone, "enroll_expired", "自助建档链接已过期，请在电脑上重新生成二维码")
-		return
-	case errors.Is(err, sign.ErrConsumed):
-		writeError(w, http.StatusConflict, "enroll_consumed", "这份档案已经提交过了，请回到电脑上查看")
-		return
-	case errors.Is(err, sign.ErrBusy):
-		writeError(w, http.StatusConflict, "enroll_busy", "正在提交，请稍候")
-		return
-	default:
-		writeError(w, http.StatusGone, "enroll_expired", "自助建档链接已失效，请在电脑上重新生成二维码")
-		return
+	var normalized sign.NormalizedImage
+	if len(rawSig) > 0 {
+		normalized, err = sign.NormalizePNG(rawSig)
+		if err != nil {
+			var imgErr *sign.ImageError
+			if errors.As(err, &imgErr) {
+				status := http.StatusUnprocessableEntity
+				if imgErr.Code == "invalid_image" || imgErr.Code == "too_large" {
+					status = http.StatusBadRequest
+				}
+				writeError(w, status, "sign_"+imgErr.Code, imgErr.Message)
+				return
+			}
+			s.internalError(w, "normalize enrollment signature", err)
+			return
+		}
+	}
+	if !fixed {
+		_, err = s.sign.ClaimKind(token, sign.KindEnroll)
+		switch {
+		case err == nil:
+		case errors.Is(err, sign.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "自助建档链接无效")
+			return
+		case errors.Is(err, sign.ErrExpired):
+			writeError(w, http.StatusGone, "enroll_expired", "自助建档链接已过期，请在电脑上重新生成二维码")
+			return
+		case errors.Is(err, sign.ErrConsumed):
+			writeError(w, http.StatusConflict, "enroll_consumed", "这份档案已经提交过了，请回到电脑上查看")
+			return
+		case errors.Is(err, sign.ErrBusy):
+			writeError(w, http.StatusConflict, "enroll_busy", "正在提交，请稍候")
+			return
+		default:
+			writeError(w, http.StatusGone, "enroll_expired", "自助建档链接已失效，请在电脑上重新生成二维码")
+			return
+		}
 	}
 	svc, ok := s.appService(w)
 	if !ok {
-		s.sign.Release(token)
+		if !fixed {
+			s.sign.Release(token)
+		}
 		return
 	}
 	party, err := svc.EnrollParty(r.Context(), service.EnrollPartyInput{
@@ -365,17 +441,24 @@ func (s *Server) handleEnrollSubmit(w http.ResponseWriter, r *http.Request) {
 		SignatureSHA256: normalized.SHA256,
 		SignatureWidth:  normalized.Width,
 		SignatureHeight: normalized.Height,
+		SignatureSeal:   rawSigSeal,
+		Seal:            rawSeal,
 	})
 	if err != nil {
 		// Duplicate ID / validation problems stay recoverable: the tenant can
 		// correct the form and submit the same one-time link again.
-		s.sign.Release(token)
+		if !fixed {
+			s.sign.Release(token)
+		}
 		s.writeServiceError(w, "enroll party", err)
 		return
 	}
-	s.sign.Complete(token, party.SignatureID, "", 0, 0)
+	if !fixed {
+		s.sign.Complete(token, party.SignatureID, "", 0, 0)
+	}
 	if logger := s.opts.Logger; logger != nil {
-		logger.Info("party self-enrolled", "party", party.ID, "id_number", service.MaskIDNumber(party.IDNumber))
+		logger.Info("party self-enrolled", "party", party.ID, "id_number", service.MaskIDNumber(party.IDNumber),
+			"fixed_entry", fixed)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"state": "completed",

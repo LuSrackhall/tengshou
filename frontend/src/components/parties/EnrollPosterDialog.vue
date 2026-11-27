@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 可打印的自助录入海报（te-48hkl，Q1）：固定入口长期贴墙，任何租户扫码
 // 自助建档；换码/停用让旧海报立即失效。打印走浏览器 window.print，A4
-// 版式由 styles/poster 下的打印规则控制（app.css 的 .printing-poster）。
+// 打印规则在本组件末尾的 @media print 块。
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   disableEnrollEntry,
@@ -21,7 +21,12 @@ const qrIndex = ref(0);
 
 const urls = computed(() => entry.value?.urls ?? []);
 const currentUrl = computed(() => urls.value[qrIndex.value] ?? urls.value[0] ?? "");
-const qrSrc = computed(() => enrollEntryQrUrl(qrIndex.value));
+/** 二维码地址带当前 token 版本：换码后 <img> 的 src 变化，浏览器重新取新码。 */
+const qrSrc = computed(() => {
+  const base = enrollEntryQrUrl(qrIndex.value);
+  const token = entry.value?.token ?? "";
+  return token ? `${base}&v=${token}` : base;
+});
 const enabled = computed(() => Boolean(entry.value?.enabled));
 
 async function load(): Promise<void> {

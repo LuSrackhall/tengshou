@@ -23,20 +23,22 @@ const urls = computed(() => entry.value?.urls ?? []);
 const currentUrl = computed(() => urls.value[qrIndex.value] ?? urls.value[0] ?? "");
 /** 二维码地址带当前 token 版本：换码后 <img> 的 src 变化，浏览器重新取新码。 */
 const qrSrc = computed(() => {
-  const base = enrollEntryQrUrl(qrIndex.value);
   const token = entry.value?.token ?? "";
-  return token ? `${base}&v=${token}` : base;
+  return token ? `${enrollEntryQrUrl(qrIndex.value)}&v=${token}` : "";
 });
 const enabled = computed(() => Boolean(entry.value?.enabled));
 
 async function load(): Promise<void> {
   try {
     const result = await getEnrollEntry();
-    entry.value = result.item;
     errorText.value = "";
     if (!result.item.issued) {
+      // 未签发时 token 为空：先签发拿到 token 再渲染海报，避免 <img> 以
+      // 空 token 请求二维码接口得到 404（CI 控制台报错的来源）。
       await issue();
+      return;
     }
+    entry.value = result.item;
   } catch (error) {
     errorText.value = errorMessage(error);
   }
@@ -143,7 +145,10 @@ onBeforeUnmount(() => {
                   <li>点「提交建档」，资料会保存到出租方的电脑。</li>
                 </ol>
                 <div class="poster-qr">
-                  <img :src="qrSrc" alt="自助录入二维码" width="320" height="320">
+                  <img v-if="entry.token && enabled" :src="qrSrc" alt="自助录入二维码" width="320" height="320">
+                  <div v-else class="poster-qr-empty">
+                    {{ enabled ? "二维码生成中…" : "入口已停用，二维码已失效" }}
+                  </div>
                 </div>
                 <p class="poster-url">手机无法扫码时，请在浏览器打开：<code>{{ currentUrl }}</code></p>
                 <p class="poster-foot">仅限与出租方电脑同一局域网的手机访问；资料只保存在出租方电脑本机，不上传互联网。</p>
@@ -231,6 +236,19 @@ onBeforeUnmount(() => {
   width: 78mm;
   height: 78mm;
   max-width: 100%;
+}
+.poster-qr-empty {
+  width: 78mm;
+  height: 78mm;
+  max-width: 100%;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #5f6670;
+  border: 1px dashed #d8ddda;
+  border-radius: 6px;
 }
 .poster-url {
   font-size: 11px;

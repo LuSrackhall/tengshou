@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { expect, test } from "./support/business-fixture";
 import { appUrl } from "./support/business-api";
 import { repoRoot } from "./support/app";
+import { createParty } from "./support/business-records";
 import { shot, trackConsoleErrors } from "./support/ui";
 
 const APP_HEADERS = { "X-Tengshou-App": "1" };
@@ -162,10 +163,33 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
         timeout: 15_000,
       });
       const url = (await dialog.locator(".poster-url code").textContent())?.trim() ?? "";
-      enrollToken = url.split("/enroll/")[1] ?? "";
-      expect(enrollToken).toHaveLength(64);
-      await expect(dialog.locator("#enrollPosterSheet img")).toBeVisible();
+      const firstToken = url.split("/enroll/")[1] ?? "";
+      expect(firstToken).toHaveLength(64);
+      const qr = dialog.locator("#enrollPosterSheet img");
+      await expect(qr).toBeVisible();
+      const firstQrSrc = (await qr.getAttribute("src")) ?? "";
+      expect(firstQrSrc).toContain(firstToken);
       await shot(page, testInfo, "02-可打印海报与固定二维码");
+
+      // 换码：旧海报立即失效；二维码地址带新 token 版本，打印出来就是新码。
+      page.once("dialog", (confirm) => confirm.accept());
+      await dialog.locator("#posterRotateBtn").click();
+      await expect
+        .poll(
+          async () =>
+            (await dialog.locator(".poster-url code").textContent())?.trim() ?? "",
+        )
+        .not.toBe(url);
+      const rotatedUrl = (await dialog.locator(".poster-url code").textContent())?.trim() ?? "";
+      enrollToken = rotatedUrl.split("/enroll/")[1] ?? "";
+      expect(enrollToken).toHaveLength(64);
+      expect(enrollToken).not.toBe(firstToken);
+      await expect
+        .poll(async () => (await qr.getAttribute("src")) ?? "")
+        .toContain(enrollToken);
+      const oldPoster = await page.request.get(`${app.baseURL}/enroll/${firstToken}`);
+      expect(oldPoster.status()).toBe(410);
+      await shot(page, testInfo, "02b-换码后二维码刷新且旧海报失效");
       await dialog.locator(".modal-head button.close").click();
       await expect(dialog).toBeHidden();
     });
@@ -386,6 +410,180 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
       await signDialog.locator(".modal-foot").getByRole("button", { name: "关闭" }).click();
       await expect(signDialog).toBeHidden();
       await shot(page, testInfo, "09-取消复用后回退现场扫码");
+    });
+
+    await test.step("Q5 出租方档案默认复用；Q6 生成面板/批量预检与表单同口径", async () => {
+      // 出租方（甲方）档案：单位 + 档案公章 + 档案签名章（桌面导入）。
+      const orgName = `出租方企业 ${stamp}`;
+      const orgID = await createParty(page, {
+        kind: "单位",
+        name: orgName,
+        id_number: `91330100LANDLORD${stamp.slice(-6)}`,
+        phone: "13800004444",
+        address: "幸福村 3 组 12 号",
+      });
+      const seal = await sealPNG();
+      const sealDataUrl = `data:image/png;base64,${seal.toString("base64")}`;
+      for (const surface of ["seal", "signature-seal"]) {
+        const response = await page.request.post(
+          appUrl(page, `/app/api/v1/parties/${orgID}/${surface}`),
+          { headers: APP_HEADERS, data: { image: sealDataUrl } },
+        );
+        expect(response.ok()).toBeTruthy();
+      }
+
+      // 设置页重新开启告知（上一步已关闭）；开启不弹确认。
+      await page.locator('#tabs button[data-tab="settings"]').click();
+      const toggle = page.locator("#archiveReuseToggle");
+      await expect(toggle).not.toBeChecked();
+      await toggle.check();
+      await expect(toggle).toBeChecked();
+
+      await page.locator('#tabs button[data-tab="contracts"]').click();
+      await page.locator("#newContractBtn").click();
+      const dialog = page.getByRole("dialog").filter({
+        has: page.getByRole("heading", { name: "新建合同", exact: true }),
+      });
+      await expect(dialog).toBeVisible();
+      const title = `${contractTitle}（甲方复用）`;
+      await dialog.locator("#f_contract_title").fill(title);
+      await expect(
+        dialog.locator(`#f_contract_party_a option[value="${orgID}"]`),
+      ).toHaveCount(1, { timeout: 15_000 });
+      await dialog.locator("#f_contract_party_a").selectOption(orgID);
+      const partyB = dialog.locator('.picker-field[data-key="party_b"]');
+      await partyB.locator("#f_contract_party_b").fill(tenantName);
+      await partyB
+        .locator(`#partyBPickerList button[data-party-id="${tenantID}"]`)
+        .click();
+
+      // Q5：甲方档案复用区块默认勾选签名章与公章，并展示同口径告知。
+      const partyAReuse = dialog.locator("#contractArchiveReuseA");
+      await expect(partyAReuse).toBeVisible({ timeout: 15_000 });
+      await expect(partyAReuse).toContainText("将复用档案签名（来源：档案）");
+      await expect(partyAReuse).toContainText("与档案公章（来源：档案）");
+      const aCheckboxes = partyAReuse.locator('input[type="checkbox"]');
+      await expect(aCheckboxes).toHaveCount(2);
+      await expect(aCheckboxes.nth(0)).toBeChecked();
+      await expect(aCheckboxes.nth(1)).toBeChecked();
+      await shot(page, testInfo, "10-甲方档案默认复用与告知");
+      await dialog.getByRole("button", { name: "保存", exact: true }).click();
+      await expect(dialog).toBeHidden();
+
+      const row = page.locator(`#contractTable tr[data-id]:has-text("${title}")`).first();
+      await expect(row).toBeVisible();
+      const pairContractID = (await row.getAttribute("data-id")) ?? "";
+      expect(pairContractID).not.toBe("");
+      await expect
+        .poll(async () => {
+          const res = await page.request.get(
+            appUrl(page, `/app/api/v1/contracts/${pairContractID}`),
+          );
+          const detail = (await res.json()) as {
+            signatures?: Array<{ party_id?: string; source?: string }>;
+            seals?: Array<{ id: string }>;
+          };
+          const signatures = detail.signatures ?? [];
+          return {
+            partyA: signatures
+              .filter((item) => item.party_id === orgID)
+              .map((item) => item.source),
+            partyB: signatures
+              .filter((item) => item.party_id === tenantID)
+              .map((item) => item.source),
+            seals: (detail.seals ?? []).length,
+          };
+        })
+        .toEqual({ partyA: ["archive_seal"], partyB: ["archive_seal"], seals: 2 });
+
+      // 单份合同「生成 PDF」面板：告知开启时展示来源与回退提示。
+      await row.click();
+      const edit = page.getByRole("dialog").filter({
+        has: page.getByRole("heading", { name: /^编辑合同/ }),
+      });
+      await expect(edit).toBeVisible();
+      await expect(edit.locator("#genTemplate")).toBeVisible({ timeout: 15_000 });
+      const genNotice = edit.locator("#genArchiveReuseNotice");
+      await expect(genNotice).toBeVisible();
+      await expect(genNotice).toContainText("来源：档案");
+      await page.keyboard.press("Escape");
+      await expect(edit).toBeHidden();
+
+      // 批量预检对话框：同一告知口径。
+      await page.locator(`input[data-select="${pairContractID}"]`).check();
+      await page.locator("#batchGenerateBtn").click();
+      const batch = page.getByRole("dialog").filter({
+        has: page.getByRole("heading", { name: /批量生成/ }),
+      });
+      await expect(batch).toBeVisible();
+      await expect(batch.locator("#batchPreflight")).toBeVisible({ timeout: 15_000 });
+      await expect(batch.locator("#batchArchiveReuseNotice")).toBeVisible();
+      await expect(batch.locator("#batchArchiveReuseNotice")).toContainText("来源：档案");
+      const preflightOn = await page.request.post(
+        appUrl(page, `/app/api/v1/templates/${templateId}/preflight`),
+        { headers: APP_HEADERS, data: { contract_id: pairContractID } },
+      );
+      expect(preflightOn.ok()).toBeTruthy();
+      expect(((await preflightOn.json()) as { ready: boolean }).ready).toBe(true);
+      await page.keyboard.press("Escape");
+      await expect(batch).toBeHidden();
+
+      // 关闭告知：三处都不再显示「来源：档案」，预检/生成行为不变。
+      await page.locator('#tabs button[data-tab="settings"]').click();
+      const toggleOff = page.locator("#archiveReuseToggle");
+      page.once("dialog", (confirm) => confirm.accept());
+      await toggleOff.uncheck();
+      await expect(toggleOff).not.toBeChecked();
+
+      await page.locator('#tabs button[data-tab="contracts"]').click();
+      await page.locator(`#contractTable tr[data-id="${pairContractID}"]`).click();
+      const editOff = page.getByRole("dialog").filter({
+        has: page.getByRole("heading", { name: /^编辑合同/ }),
+      });
+      await expect(editOff).toBeVisible();
+      await expect(editOff.locator("#genTemplate")).toBeVisible({ timeout: 15_000 });
+      await expect(editOff.locator("#genArchiveReuseNotice")).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await expect(editOff).toBeHidden();
+
+      await page.locator(`input[data-select="${pairContractID}"]`).check();
+      await page.locator("#batchGenerateBtn").click();
+      const batchOff = page.getByRole("dialog").filter({
+        has: page.getByRole("heading", { name: /批量生成/ }),
+      });
+      await expect(batchOff).toBeVisible();
+      await expect(batchOff.locator("#batchPreflight")).toBeVisible({ timeout: 15_000 });
+      await expect(batchOff.locator("#batchArchiveReuseNotice")).toHaveCount(0);
+      const preflightOff = await page.request.post(
+        appUrl(page, `/app/api/v1/templates/${templateId}/preflight`),
+        { headers: APP_HEADERS, data: { contract_id: pairContractID } },
+      );
+      expect(preflightOff.ok()).toBeTruthy();
+      expect(((await preflightOff.json()) as { ready: boolean }).ready).toBe(true);
+      await page.keyboard.press("Escape");
+      await expect(batchOff).toBeHidden();
+      await shot(page, testInfo, "11-关闭告知后生成面板与批量预检隐藏提示");
+    });
+
+    await test.step("海报停用：旧链接与二维码立即失效", async () => {
+      await page.locator('#tabs button[data-tab="parties"]').click();
+      await page.locator("#enrollPosterBtn").click();
+      const dialog = page.getByRole("dialog").filter({
+        has: page.getByRole("heading", { name: "自助录入海报（可打印）" }),
+      });
+      await expect(dialog).toBeVisible();
+      page.once("dialog", (confirm) => confirm.accept());
+      await dialog.locator("#posterDisableBtn").click();
+      await expect(dialog.locator(".poster-state")).toContainText("入口已停用");
+      const gone = await page.request.get(`${app.baseURL}/enroll/${enrollToken}`);
+      expect(gone.status()).toBe(410);
+      const qrGone = await page.request.get(
+        appUrl(page, "/app/api/v1/enroll-entry/qr.png"),
+      );
+      expect(qrGone.status()).toBe(404);
+      await shot(page, testInfo, "12-停用后旧海报与二维码失效");
+      await dialog.locator(".modal-head button.close").click();
+      await expect(dialog).toBeHidden();
     });
 
     expect(

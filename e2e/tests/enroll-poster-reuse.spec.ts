@@ -80,13 +80,12 @@ async function prepareTemplate(page: import("@playwright/test").Page, name: stri
     },
   );
   expect(mappingRes.ok()).toBeTruthy();
-  // 映射保存会生成新版本；从模板表取当前版本 id。
-  await page.locator('#tabs button[data-tab="templates"]').click();
-  const row = page.locator(`#templateTable tr[data-id]:has-text("${name}")`).first();
-  await expect(row).toBeVisible();
-  const id = (await row.getAttribute("data-id")) ?? "";
-  expect(id).not.toBe("");
-  return id;
+  // 映射保存会生成新版本行（新 id）。必须用接口返回的版本 id：模板表由
+  // SSE 触发重取，界面列表可能仍是导入时那一版（无签名位），读表会拿到
+  // 旧版本 id，导致预检/生成没有签名快照（Windows 曾偶发 source undefined）。
+  const mapped = (await mappingRes.json()) as { item: { id: string } };
+  expect(mapped.item.id).not.toBe("");
+  return mapped.item.id;
 }
 
 async function generateWithTemplate(
@@ -138,17 +137,16 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
     const idNumber = `91330100ENROLL${stamp.slice(-6)}`;
     const contractTitle = `E2E 档案复用合同 ${stamp}`;
 
+    let templateId = "";
     await test.step("准备带签名位与公章位的模板", async () => {
       const response = await page.goto(`${app.baseURL}/app/`, {
         waitUntil: "domcontentloaded",
       });
       expect(response?.status()).toBe(200);
       await expect(page.locator("#tabs")).toBeVisible();
-      await prepareTemplate(page, templateName);
+      templateId = await prepareTemplate(page, templateName);
       await shot(page, testInfo, "01-模板已准备");
     });
-
-    const templateId = ((await page.locator(`#templateTable tr[data-id]:has-text("${templateName}")`).first().getAttribute("data-id")) ?? "");
 
     let enrollToken = "";
     await test.step("租户档案页打印海报：生成固定二维码", async () => {

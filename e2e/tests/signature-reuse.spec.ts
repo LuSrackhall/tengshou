@@ -51,6 +51,10 @@ test.describe("场景 E：档案签名复用与现场手写", () => {
     const tenantName = `E2E 档案签名租户 ${stamp}`;
     const onSiteName = `E2E 现场签署租户 ${stamp}`;
 
+    // 模板映射保存会生成新版本行（新 id）。直接用接口返回的版本 id 作为
+    // 后续预检/预览/生成的模板 id：模板表由 SSE 触发重取，界面列表可能仍是
+    // 导入时那一版（无签名位），读表会拿到旧版本 id（te-s9yyo.9 偶发来源）。
+    let templateId = "";
     await test.step("打开发布形态界面并准备带签名位的模板", async () => {
       const response = await page.goto(`${app.baseURL}/app/`, {
         waitUntil: "domcontentloaded",
@@ -107,17 +111,9 @@ test.describe("场景 E：档案签名复用与现场手写", () => {
       expect(mappingRes.ok()).toBeTruthy();
       const mapped = (await mappingRes.json()) as { item: { id: string } };
       expect(mapped.item.id).not.toBe("");
+      templateId = mapped.item.id;
       await shot(page, testInfo, "01-模板与签名位已准备");
     });
-
-    // 模板映射保存会生成新版本；从模板表里取当前最新版本 id。
-    const templateRow = page
-      .locator(`#templateTable tr[data-id]:has-text("${templateName}")`)
-      .first();
-    await page.locator('#tabs button[data-tab="templates"]').click();
-    await expect(templateRow).toBeVisible();
-    const templateId = (await templateRow.getAttribute("data-id")) ?? "";
-    expect(templateId).not.toBe("");
 
     let tenantID = "";
     let tenantContractID = "";

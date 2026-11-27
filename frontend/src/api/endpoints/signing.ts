@@ -19,9 +19,13 @@ import {
   type RequestOptions,
 } from "../client";
 import type {
+  ArchiveSignatureKind,
   CreateSignatureSessionInput,
+  EnrollEntry,
   EnrollSession,
   ItemResponse,
+  Party,
+  ReusePartySignatureInput,
   Signature,
   SignatureSession,
   SignatureSessionCancelResponse,
@@ -78,20 +82,21 @@ export function createPartySignatureSession(
 }
 
 /**
- * POST /contracts/{id}/signature-reuse：使用租户档案签名，直接套印到合同。
- * 服务端记入变更记录（来源：档案复用）；档案复用不绑定合同内容版本，
- * 同一合同/档案/签名资产重复调用是幂等的。
+ * POST /contracts/{id}/signature-reuse：使用租户档案签名（或签名章）直接套印
+ * 到合同。服务端记入变更记录；档案复用不绑定合同内容版本，同一合同/档案/
+ * 签名资产重复调用是幂等的。
  */
 export function reusePartySignature(
   contractId: string,
   partyId: string,
+  kind?: ArchiveSignatureKind,
   options: RequestOptions = {},
 ): Promise<ItemResponse<Signature>> {
-  return post(
-    `/contracts/${enc(contractId)}/signature-reuse`,
-    { party_id: partyId },
-    options,
-  );
+  const body: ReusePartySignatureInput = { party_id: partyId };
+  if (kind) {
+    body.kind = kind;
+  }
+  return post(`/contracts/${enc(contractId)}/signature-reuse`, body, options);
 }
 
 // ---------- v0.2 局域网自助建档 ----------
@@ -122,4 +127,78 @@ export function cancelEnrollSession(
 /** 自助建档会话二维码 PNG 地址；index 对应 urls 里的网卡地址。 */
 export function enrollSessionQrUrl(id: string, index = 0): string {
   return apiUrl(`/enroll-sessions/${enc(id)}/qr.png`, { index });
+}
+
+// ---------- 固定自助录入入口（可打印海报，te-48hkl） ----------
+
+/** GET /enroll-entry：长期入口状态与二维码地址。 */
+export function getEnrollEntry(
+  options: RequestOptions = {},
+): Promise<ItemResponse<EnrollEntry>> {
+  return get("/enroll-entry", options);
+}
+
+/** POST /enroll-entry/rotate：换码（旧海报立即失效）。 */
+export function rotateEnrollEntry(
+  options: RequestOptions = {},
+): Promise<ItemResponse<EnrollEntry>> {
+  return post("/enroll-entry/rotate", {}, options);
+}
+
+/** POST /enroll-entry/disable：停用固定入口（旧海报立即失效）。 */
+export function disableEnrollEntry(
+  options: RequestOptions = {},
+): Promise<ItemResponse<EnrollEntry>> {
+  return post("/enroll-entry/disable", {}, options);
+}
+
+/** 固定入口二维码 PNG 地址；index 对应 urls 里的网卡地址。 */
+export function enrollEntryQrUrl(index = 0): string {
+  return apiUrl("/enroll-entry/qr.png", { index });
+}
+
+// ---------- 档案公章 / 签名章图片（te-48hkl） ----------
+
+/** POST /parties/{id}/seal：上传或更换档案公章（base64 data URL）。 */
+export function uploadPartySeal(
+  partyId: string,
+  image: string,
+  options: RequestOptions = {},
+): Promise<ItemResponse<Party>> {
+  return post(`/parties/${enc(partyId)}/seal`, { image }, options);
+}
+
+/** 档案公章图片地址。 */
+export function partySealImageUrl(partyId: string): string {
+  return apiUrl(`/parties/${enc(partyId)}/seal`);
+}
+
+/** DELETE /parties/{id}/seal：停用档案公章（保留资产，不再复用）。 */
+export function clearPartySeal(
+  partyId: string,
+  options: RequestOptions = {},
+): Promise<ItemResponse<Party>> {
+  return del(`/parties/${enc(partyId)}/seal`, options);
+}
+
+/** POST /parties/{id}/signature-seal：上传或更换档案签名章（私章）图片。 */
+export function uploadPartySignatureSeal(
+  partyId: string,
+  image: string,
+  options: RequestOptions = {},
+): Promise<ItemResponse<Party>> {
+  return post(`/parties/${enc(partyId)}/signature-seal`, { image }, options);
+}
+
+/** 档案签名章图片地址。 */
+export function partySignatureSealImageUrl(partyId: string): string {
+  return apiUrl(`/parties/${enc(partyId)}/signature-seal`);
+}
+
+/** DELETE /parties/{id}/signature-seal：停用档案签名章。 */
+export function clearPartySignatureSeal(
+  partyId: string,
+  options: RequestOptions = {},
+): Promise<ItemResponse<Party>> {
+  return del(`/parties/${enc(partyId)}/signature-seal`, options);
 }

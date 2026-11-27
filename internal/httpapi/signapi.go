@@ -137,11 +137,16 @@ func (s *Server) handleAppCancelSignatureSession(w http.ResponseWriter, r *http.
 
 type reusePartySignatureInput struct {
 	PartyID string `json:"party_id"`
+	// Kind selects the archive source: empty/"signature" reuses the
+	// handwritten archive signature; "signature_seal" reuses the archive
+	// signature stamp (签名章/私章).
+	Kind string `json:"kind"`
 }
 
-// handleAppReusePartySignature links a party's archive-level signature to the
-// contract as-is (直接套印, v0.2 D3=B). The desktop UI offers it as a one-click
-// action; the change log records the archive-reuse source.
+// handleAppReusePartySignature links a party's archive-level signature (or
+// signature stamp) to the contract as-is (直接套印, v0.2 D3=B / te-48hkl). The
+// desktop UI offers it as a default-on action; the change log records which
+// archive source was used.
 func (s *Server) handleAppReusePartySignature(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.appService(w)
 	if !ok {
@@ -151,7 +156,13 @@ func (s *Server) handleAppReusePartySignature(w http.ResponseWriter, r *http.Req
 	if !s.readAppJSON(w, r, &in) {
 		return
 	}
-	sig, err := svc.ReusePartySignature(r.Context(), r.PathValue("id"), in.PartyID)
+	kind := strings.TrimSpace(in.Kind)
+	if kind != "" && kind != model.SignatureSourceArchive && kind != model.SignatureSourceArchiveSeal {
+		writeError(w, http.StatusBadRequest, "invalid_kind",
+			"签名来源只能是档案签名或档案签名章")
+		return
+	}
+	sig, err := svc.ReusePartyArchiveSignature(r.Context(), r.PathValue("id"), in.PartyID, kind)
 	if err != nil {
 		s.writeServiceError(w, "reuse party signature", err)
 		return

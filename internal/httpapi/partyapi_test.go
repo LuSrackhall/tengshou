@@ -405,10 +405,10 @@ func signRawBody(t *testing.T, f *fixture, method, path string, body io.Reader, 
 	return rec
 }
 
-// v0.2: the enrollment submission body is bounded (48 MiB); an oversized body
+// v0.2: the enrollment submission body is bounded (96 MiB); an oversized body
 // is rejected before the one-time token is claimed, so the link stays usable.
 func TestAppEnrollRejectsOversizedSubmit(t *testing.T) {
-	const enrollBodyLimit = 48 << 20 // 与 partyapi.go 的 maxEnrollBody 一致
+	const enrollBodyLimit = 96 << 20 // 与 partyapi.go 的 maxEnrollBody 一致
 	f := newFixtureWithOptions(t, fixtureOptions{allowLAN: true, lanHosts: []string{"192.168.1.50"}})
 	resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/enroll-sessions", nil, nil)
 	if resp.StatusCode != http.StatusCreated {

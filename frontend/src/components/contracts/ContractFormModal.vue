@@ -37,6 +37,7 @@ import SealSummary from "../seals/SealSummary.vue";
 import SignatureSummary from "../signatures/SignatureSummary.vue";
 import FormErrors from "../../ui/FormErrors.vue";
 import AssetPicker from "./AssetPicker.vue";
+import ContractArchiveReuse from "./ContractArchiveReuse.vue";
 import ContractAuditHistory from "./ContractAuditHistory.vue";
 import ContractFieldControl from "./ContractFieldControl.vue";
 import ContractFormSection from "./ContractFormSection.vue";
@@ -66,6 +67,7 @@ import {
 } from "./form";
 import { moneyWordsKey } from "./moneyWords";
 import { useContractTermination, useRenewalSource } from "./useContractTermination";
+import { usePartyIDBackfill } from "./usePartyIDBackfill";
 
 const props = defineProps<{
   mode: "create" | "edit";
@@ -197,6 +199,13 @@ function initialPartyBID(): string {
 
 const partyBID = ref(initialPartyBID());
 
+/** 当前选中的乙方档案：档案复用区块据此显示可复用的签名/公章。 */
+const partyBArchive = computed(
+  () => allParties.value.find((item) => item.id === partyBID.value) ?? null,
+);
+
+const archiveReuseRef = ref<{ apply: (contractId: string) => Promise<void> } | null>(null);
+
 const partyBName = computed(() => {
   const party = allParties.value.find((item) => item.id === partyBID.value);
   if (party) {
@@ -225,30 +234,10 @@ watch(
   { immediate: true },
 );
 
-// v0.2：选中（或打开）缺少证件号的存量档案时提示一次补录；补录后永久有效，
-// 同一档案在同一浏览器只提示一次，不打断合同录入。
-watch(
-  [partyBID, () => props.parties],
-  () => {
-    const match = allParties.value.find((item) => item.id === partyBID.value);
-    if (!match || (match.id_number ?? "").trim() !== "") {
-      return;
-    }
-    const key = `tengshou:party-id-backfill:${match.id}`;
-    try {
-      if (window.localStorage.getItem(key) === "1") {
-        return;
-      }
-      window.localStorage.setItem(key, "1");
-    } catch {
-      /* 隐私模式禁用 localStorage 时仍提示，但不落标记 */
-    }
-    toast(
-      `相对方「${match.name}」还没有证件号，请在「相对方档案」页补录一次，补录后长期有效`,
-      true,
-    );
-  },
-  { immediate: true },
+// v0.2：选中（或打开）缺少证件号的存量档案时提示一次补录（usePartyIDBackfill）。
+usePartyIDBackfill(
+  () => partyBID.value,
+  () => allParties.value,
 );
 
 function initialAssetID(): string {
@@ -399,16 +388,20 @@ async function submit(confirmRenewal = false): Promise<void> {
       if (warnings.length) {
         window.setTimeout(() => toast(warnings.join("；")), 350);
       }
+      await archiveReuseRef.value?.apply(result.item.id);
       await refreshAfterWrite();
       emit("created", result.item);
       return;
     }
+    // 先取到复用任务再关弹窗：弹窗关闭会卸载子组件，但已开始的 Promise 不受影响。
+    const reusePromise = archiveReuseRef.value?.apply(result.item.id) ?? Promise.resolve();
     emit("close");
     toast("合同已保存");
     const warnings = result.warnings ?? [];
     if (warnings.length) {
       window.setTimeout(() => toast(warnings.join("；")), 350);
     }
+    await reusePromise;
     await refreshAfterWrite();
   } catch (error) {
     // 续签起租日早于原合同到期日：确认后按新起租日前一天终止原合同，重新保存。
@@ -571,6 +564,12 @@ onBeforeUnmount(() => {
               v-model:note="terminationNote"
             />
           </ContractFormSection>
+
+          <ContractArchiveReuse
+            v-if="mode === 'create'"
+            ref="archiveReuseRef"
+            :party="partyBArchive"
+          />
 
           <ContractGenerationPanel
             v-if="mode === 'edit' && contract && detail"

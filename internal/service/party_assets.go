@@ -19,6 +19,7 @@ import (
 	xdraw "golang.org/x/image/draw"
 
 	"github.com/LuSrackhall/tengshou/internal/model"
+	"github.com/LuSrackhall/tengshou/internal/seal"
 )
 
 // ID-card photos are compressed to a bounded JPEG before being written under
@@ -225,8 +226,9 @@ func (s *Service) AttachPartySignature(ctx context.Context, partyID, signatureID
 
 // EnrollPartyInput is one LAN self-enrollment submission: the tenant fills the
 // archive fields, photographs both sides of the ID card and signs on a phone.
-// Images are raw uploads; the signature PNG must already be normalized by
-// internal/sign.
+// The signature may be handwritten (SignaturePNG, already normalized by
+// internal/sign) or a signature-stamp picture (SignatureSeal, raw bytes). The
+// company seal (Seal) is optional for enterprise tenants.
 type EnrollPartyInput struct {
 	Name            string
 	IDNumber        string
@@ -238,6 +240,8 @@ type EnrollPartyInput struct {
 	SignatureSHA256 string
 	SignatureWidth  int
 	SignatureHeight int
+	SignatureSeal   []byte
+	Seal            []byte
 }
 
 // EnrollParty creates a complete archive from a self-enrollment submission.
@@ -264,7 +268,10 @@ func (s *Service) EnrollParty(ctx context.Context, in EnrollPartyInput) (model.P
 	if len(in.IDBack) == 0 {
 		validation.add("id_back", "证件照反面", "请上传证件照反面")
 	}
-	if len(in.SignaturePNG) == 0 || strings.TrimSpace(in.SignatureSHA256) == "" {
+	if len(in.SignaturePNG) == 0 && len(in.SignatureSeal) == 0 {
+		validation.add("signature", "手写签名/签名章", "请手写签名或上传签名章图片")
+	}
+	if len(in.SignaturePNG) > 0 && (strings.TrimSpace(in.SignatureSHA256) == "") {
 		validation.add("signature", "手写签名", "请手写签名")
 	}
 	if err := validation.errOrNil(); err != nil {
@@ -272,6 +279,23 @@ func (s *Service) EnrollParty(ctx context.Context, in EnrollPartyInput) (model.P
 	}
 	if strings.TrimSpace(s.dataDir) == "" {
 		return model.Party{}, business("not_configured", "数据目录未配置，无法保存证件照与签名")
+	}
+	// Normalize the optional pictures before creating the archive so an
+	// unreadable upload cannot leave a half-built record behind.
+	var sealImage, sealSignature seal.NormalizedImage
+	if len(in.Seal) > 0 {
+		normalized, err := seal.Normalize(in.Seal)
+		if err != nil {
+			return model.Party{}, sealBusinessError(err, "公章")
+		}
+		sealImage = normalized
+	}
+	if len(in.SignatureSeal) > 0 {
+		normalized, err := seal.Normalize(in.SignatureSeal)
+		if err != nil {
+			return model.Party{}, sealBusinessError(err, "签名章")
+		}
+		sealSignature = normalized
 	}
 	matches, err := s.rd.FindPartiesByIDNumber(ctx, idNumber)
 	if err != nil {
@@ -310,25 +334,65 @@ func (s *Service) EnrollParty(ctx context.Context, in EnrollPartyInput) (model.P
 	if err != nil {
 		return model.Party{}, err
 	}
-	sig, err := s.SaveSignature(ctx, SignatureInput{
-		PartyID:    party.ID,
-		SignerName: party.Name,
-		Source:     model.SignatureSourceLANQR,
-		ImagePNG:   in.SignaturePNG,
-		SHA256:     in.SignatureSHA256,
-		WidthPx:    in.SignatureWidth,
-		HeightPx:   in.SignatureHeight,
-	})
-	if err != nil {
-		return model.Party{}, err
+	var sig model.Signature
+	if len(in.SignaturePNG) > 0 {
+		sig, err = s.SaveSignature(ctx, SignatureInput{
+			PartyID:    party.ID,
+			SignerName: party.Name,
+			Source:     model.SignatureSourceLANQR,
+			ImagePNG:   in.SignaturePNG,
+			SHA256:     in.SignatureSHA256,
+			WidthPx:    in.SignatureWidth,
+			HeightPx:   in.SignatureHeight,
+		})
+		if err != nil {
+			return model.Party{}, err
+		}
+		party.SignatureID = sig.ID
+	}
+	if len(in.SignatureSeal) > 0 {
+		signatureSeal, err := s.SaveSignature(ctx, SignatureInput{
+			PartyID:    party.ID,
+			SignerName: party.Name,
+			Source:     model.PartyAssetSourceLANEnroll,
+			ImagePNG:   sealSignature.PNG,
+			SHA256:     sealSignature.SHA256,
+			WidthPx:    sealSignature.Width,
+			HeightPx:   sealSignature.Height,
+		})
+		if err != nil {
+			return model.Party{}, err
+		}
+		party.SignatureSealID = signatureSeal.ID
+		party.SignatureSealSource = model.PartyAssetSourceLANEnroll
+	}
+	if len(in.Seal) > 0 {
+		record, err := s.ImportSeal(ctx, SealInput{
+			Name:  truncateRunes("档案公章 · "+party.Name, 120),
+			Image: sealImage.PNG,
+		})
+		if err != nil {
+			return model.Party{}, err
+		}
+		party.SealAssetID = record.ID
+		party.SealSource = model.PartyAssetSourceLANEnroll
 	}
 	party.IDFrontPath, party.IDFrontSHA256 = frontPath, front.SHA256
 	party.IDBackPath, party.IDBackSHA256 = backPath, back.SHA256
-	party.SignatureID = sig.ID
 	if err := s.st.PutParty(ctx, &party); err != nil {
 		return model.Party{}, err
 	}
 	return party, nil
+}
+
+// sealBusinessError turns a seal package rejection into a user-facing error
+// labelled with the field the tenant uploaded.
+func sealBusinessError(err error, label string) error {
+	var imgErr *seal.ImageError
+	if asImageError(err, &imgErr) {
+		return business(imgErr.Code, "%s：%s", label, imgErr.Message)
+	}
+	return err
 }
 
 func normalizePhotoSide(side string) (string, bool) {

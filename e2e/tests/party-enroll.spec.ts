@@ -129,7 +129,7 @@ test.describe("场景 D：局域网自助建档", () => {
         has: page.getByRole("heading", { name: `编辑相对方 · ${tenantName}` }),
       });
       await expect(archiveDialog).toBeVisible();
-      await expect(archiveDialog.getByRole("heading", { name: "证件与签名" })).toBeVisible();
+      await expect(archiveDialog.getByRole("heading", { name: "证件、签名与公章" })).toBeVisible();
       await expect(archiveDialog.locator('img[alt="证件照正面"]')).toBeVisible();
       await expect(archiveDialog.locator('img[alt="证件照反面"]')).toBeVisible();
       await expect(archiveDialog.locator('img[alt="档案签名"]')).toBeVisible();

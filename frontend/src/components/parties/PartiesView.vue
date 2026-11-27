@@ -18,6 +18,7 @@ import {
 } from "../../bridge/app";
 import PartyFormModal from "./PartyFormModal.vue";
 import EnrollSessionDialog from "./EnrollSessionDialog.vue";
+import EnrollPosterDialog from "./EnrollPosterDialog.vue";
 import { partyFieldValue } from "./format";
 
 const fields = ref<FieldDefinition[]>([]);
@@ -29,6 +30,7 @@ const loaded = ref(false);
 const formOpen = ref(false);
 const editingParty = ref<Party | null>(null);
 const enrollOpen = ref(false);
+const posterOpen = ref(false);
 
 let loadSeq = 0;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
@@ -153,6 +155,7 @@ onBeforeUnmount(() => {
     >
     <span class="spacer"></span>
     <button type="button" id="enrollQrBtn" @click="enrollOpen = true">自助建档二维码</button>
+    <button type="button" id="enrollPosterBtn" @click="posterOpen = true">自助录入海报（可打印）</button>
     <button type="button" id="newPartyBtn" class="primary" @click="openCreate">新建相对方</button>
   </div>
   <div id="partySummary" class="summary">{{ loaded ? summary : "" }}</div>
@@ -202,4 +205,5 @@ onBeforeUnmount(() => {
     @open-contract="onOpenContract"
   />
   <EnrollSessionDialog v-if="enrollOpen" @close="enrollOpen = false" />
+  <EnrollPosterDialog v-if="posterOpen" @close="posterOpen = false" />
 </template>

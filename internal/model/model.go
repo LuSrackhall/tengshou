@@ -166,9 +166,22 @@ type Party struct {
 	IDBackSHA256  string `json:"id_back_sha256,omitempty"`
 	// SignatureID points at the archive-level retained signature asset. It is
 	// captured once and can be reused by later contracts as-is (v0.2 D3=B).
-	SignatureID string    `json:"signature_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	SignatureID string `json:"signature_id,omitempty"`
+	// SealAssetID points at the archive-level official seal (企业公章). The
+	// seal row is linked through this field so "停用" only has to clear it;
+	// contracts then stop picking the seal up.
+	SealAssetID string `json:"seal_asset_id,omitempty"`
+	// SealSource records how the seal image arrived: lan_enroll (uploaded by
+	// the tenant on the phone) or app_upload (imported on the desktop).
+	SealSource string `json:"seal_source,omitempty"`
+	// SignatureSealID points at the archive-level signature stamp (签名章 /
+	// 私章) asset stored in signature_assets. It is an alternative to the
+	// handwritten SignatureID and stamps like a signature.
+	SignatureSealID string `json:"signature_seal_id,omitempty"`
+	// SignatureSealSource is lan_enroll or app_upload.
+	SignatureSealSource string    `json:"signature_seal_source,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // Asset is one rentable property record (v0.2: houses only). The minimal
@@ -323,10 +336,22 @@ type Signature struct {
 }
 
 // Signature sources. lan_qr is a one-time LAN QR capture (现场手写);
-// archive is the party archive signature reused for a contract (档案复用).
+// archive is the party archive signature reused for a contract (档案复用);
+// archive_seal is the archive signature stamp (签名章/私章) reused for a
+// contract; lan_enroll/app_upload mark archive-level images captured from the
+// phone self-enrollment page or imported on the desktop.
 const (
-	SignatureSourceLANQR   = "lan_qr"
-	SignatureSourceArchive = "archive"
+	SignatureSourceLANQR       = "lan_qr"
+	SignatureSourceArchive     = "archive"
+	SignatureSourceArchiveSeal = "archive_seal"
+	SignatureSourceLANEnroll   = "lan_enroll"
+	SignatureSourceAppUpload   = "app_upload"
+)
+
+// Party archive image sources (公章 / 签名章).
+const (
+	PartyAssetSourceLANEnroll = SignatureSourceLANEnroll
+	PartyAssetSourceAppUpload = SignatureSourceAppUpload
 )
 
 // Seal is an imported official-seal image retained as an asset file. Only the

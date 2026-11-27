@@ -125,15 +125,36 @@ type Onboarding struct {
 
 // Config is the application configuration persisted as config.json.
 type Config struct {
-	Version    int        `json:"version"`
-	HTTP       HTTP       `json:"http"`
-	PDF        PDF        `json:"pdf"`
-	Log        Log        `json:"log"`
-	Signature  Signature  `json:"signature"`
-	MCP        MCP        `json:"mcp"`
-	Onboarding Onboarding `json:"onboarding"`
+	Version      int          `json:"version"`
+	HTTP         HTTP         `json:"http"`
+	PDF          PDF          `json:"pdf"`
+	Log          Log          `json:"log"`
+	Signature    Signature    `json:"signature"`
+	MCP          MCP          `json:"mcp"`
+	Onboarding   Onboarding   `json:"onboarding"`
+	ArchiveReuse ArchiveReuse `json:"archive_reuse"`
+	EnrollEntry  EnrollEntry  `json:"enroll_entry"`
 	// Operator is the name recorded in the change log. Empty means the OS user.
 	Operator string `json:"operator,omitempty"`
+}
+
+// ArchiveReuse is the settings-page master switch for reusing archive
+// signatures, signature stamps (私章) and official seals in contracts (Q6).
+// Enabled defaults to true when the key is absent, so existing installations
+// get the new behaviour without a migration; the UI always shows the risk
+// notice next to the switch.
+type ArchiveReuse struct {
+	// Enabled is a pointer so "unset" (older config.json) can mean true while
+	// an explicit false from the settings page stays false after restart.
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// EnrollEntry is the long-lived self-enrollment entry printed on the wall
+// poster (Q1). The token is reused by every tenant until the landlord rotates
+// or disables it; Disabled makes an already-printed poster stop working.
+type EnrollEntry struct {
+	Token    string `json:"token,omitempty"`
+	Disabled bool   `json:"disabled,omitempty"`
 }
 
 // ResolvePaths returns the data directory layout for dir. An empty dir means

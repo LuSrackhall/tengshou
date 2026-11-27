@@ -44,8 +44,9 @@ func (s *Store) PutParty(ctx context.Context, p *model.Party) error {
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO parties (id, kind, name, id_number, phone, address, note, data_json,
 			id_front_path, id_front_sha256, id_back_path, id_back_sha256,
-			signature_asset_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			signature_asset_id, seal_asset_id, seal_source, signature_seal_asset_id,
+			signature_seal_source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			kind = excluded.kind, name = excluded.name, id_number = excluded.id_number,
 			phone = excluded.phone, address = excluded.address, note = excluded.note,
@@ -55,10 +56,15 @@ func (s *Store) PutParty(ctx context.Context, p *model.Party) error {
 			id_back_path = excluded.id_back_path,
 			id_back_sha256 = excluded.id_back_sha256,
 			signature_asset_id = excluded.signature_asset_id,
+			seal_asset_id = excluded.seal_asset_id,
+			seal_source = excluded.seal_source,
+			signature_seal_asset_id = excluded.signature_seal_asset_id,
+			signature_seal_source = excluded.signature_seal_source,
 			updated_at = excluded.updated_at`,
 		p.ID, p.Kind, p.Name, p.IDNumber, p.Phone, p.Address, p.Note, string(data),
 		p.IDFrontPath, p.IDFrontSHA256, p.IDBackPath, p.IDBackSHA256,
-		p.SignatureID, formatTime(p.CreatedAt), formatTime(p.UpdatedAt))
+		p.SignatureID, p.SealAssetID, p.SealSource, p.SignatureSealID,
+		p.SignatureSealSource, formatTime(p.CreatedAt), formatTime(p.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("put party: %w", err)
 	}
@@ -312,6 +318,25 @@ func (s *Store) PutSignature(ctx context.Context, sig *model.Signature) error {
 		sig.WidthPx, sig.HeightPx, formatTime(sig.CapturedAt), formatTime(sig.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("put signature: %w", err)
+	}
+	return nil
+}
+
+// DeleteSignature removes one signature link row. It is used when a contract
+// switches from the archive signature to the archive signature stamp for the
+// same party, so a signature placement never has to choose between two rows.
+// The immutable asset file is shared with the archive and is never removed.
+func (s *Store) DeleteSignature(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM signature_assets WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete signature: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

@@ -83,3 +83,88 @@ func TestCurrentMCPWriteEnabledDefaultsOnMissingFile(t *testing.T) {
 		t.Fatal("malformed config should report the enabled default")
 	}
 }
+
+func TestArchiveReuseDefaultsOnAndPersistsOff(t *testing.T) {
+	paths, err := ResolvePaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := NewSettings(paths, cfg)
+	if !settings.ArchiveReuseEnabled() {
+		t.Fatal("archive reuse should default to enabled")
+	}
+	if err := settings.SetArchiveReuseEnabled(false); err != nil {
+		t.Fatal(err)
+	}
+	if settings.ArchiveReuseEnabled() {
+		t.Fatal("in-memory switch did not flip")
+	}
+	reloaded, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if NewSettings(paths, reloaded).ArchiveReuseEnabled() {
+		t.Fatal("explicit false was not persisted")
+	}
+	if err := settings.SetArchiveReuseEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err = Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !NewSettings(paths, reloaded).ArchiveReuseEnabled() {
+		t.Fatal("re-enable was not persisted")
+	}
+}
+
+func TestEnrollEntryRotateDisablePersists(t *testing.T) {
+	paths, err := ResolvePaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := NewSettings(paths, cfg)
+	token, disabled := settings.EnrollEntryToken()
+	if token != "" || disabled {
+		t.Fatalf("fresh entry should be unissued, got token=%q disabled=%v", token, disabled)
+	}
+	first, err := settings.RotateEnrollEntry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 64 {
+		t.Fatalf("token length = %d, want 64", len(first))
+	}
+	if err := settings.DisableEnrollEntry(); err != nil {
+		t.Fatal(err)
+	}
+	if token, disabled := settings.EnrollEntryToken(); token != first || !disabled {
+		t.Fatalf("disable lost token or state: %q disabled=%v", token, disabled)
+	}
+	reloaded, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted := NewSettings(paths, reloaded)
+	if token, disabled := persisted.EnrollEntryToken(); token != first || !disabled {
+		t.Fatalf("disable was not persisted: %q disabled=%v", token, disabled)
+	}
+	second, err := persisted.RotateEnrollEntry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == first {
+		t.Fatal("rotate should issue a new token")
+	}
+	if token, disabled := persisted.EnrollEntryToken(); token != second || disabled {
+		t.Fatalf("rotate should re-enable with the new token: %q disabled=%v", token, disabled)
+	}
+}

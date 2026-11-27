@@ -14,6 +14,9 @@ import {
   type RequestOptions,
 } from "../client";
 import type {
+  ArchiveReuseSettings,
+  ArchiveReuseUpdateInput,
+  ArchiveReuseUpdateResponse,
   BackupRestoreResponse,
   BackupStatus,
   IntegrityReport,
@@ -33,6 +36,21 @@ export function updateMCPSettings(
   options: RequestOptions = {},
 ): Promise<MCPSettingsResponse> {
   return post("/settings/mcp", input, options);
+}
+
+/** GET /settings/archive-reuse：档案签名/公章复用总开关（含风险提示）。 */
+export function getArchiveReuseSettings(
+  options: RequestOptions = {},
+): Promise<ArchiveReuseSettings> {
+  return get("/settings/archive-reuse", options);
+}
+
+/** POST /settings/archive-reuse：切换档案复用总开关。 */
+export function updateArchiveReuseSettings(
+  input: ArchiveReuseUpdateInput,
+  options: RequestOptions = {},
+): Promise<ArchiveReuseUpdateResponse> {
+  return post("/settings/archive-reuse", input, options);
 }
 
 /** GET /backup/export：完整备份包的下载地址。 */

@@ -1051,20 +1051,33 @@ func (rc *templateRenderContext) sealFor(p model.Placement) (model.Seal, bool, e
 		return seal, true, nil
 	}
 	partyID := ""
+	archiveSealID := ""
 	switch p.Party {
 	case model.PlacementPartyA:
 		if rc.partyA != nil {
 			partyID = rc.partyA.ID
+			archiveSealID = rc.partyA.SealAssetID
 		}
 	case model.PlacementPartyB:
 		if rc.partyB != nil {
 			partyID = rc.partyB.ID
+			archiveSealID = rc.partyB.SealAssetID
 		}
 	}
 	if partyID != "" {
 		for _, seal := range rc.seals {
 			if seal.PartyID == partyID {
 				return seal, true, nil
+			}
+		}
+		// The archive seal (te-48hkl) is linked through the party record, not
+		// through seal_assets.party_id; match it explicitly so a party-bound
+		// seal placement uses the tenant's own archive seal.
+		if archiveSealID != "" {
+			for _, seal := range rc.seals {
+				if seal.ID == archiveSealID {
+					return seal, true, nil
+				}
 			}
 		}
 	}
@@ -1113,6 +1126,7 @@ func staleSignatureWarnings(rc *templateRenderContext) []overlay.Warning {
 		}
 		sig, ok := rc.signatureFor(p)
 		if !ok || sig.Source == model.SignatureSourceArchive ||
+			sig.Source == model.SignatureSourceArchiveSeal ||
 			sig.ContentSHA256 == "" || sig.ContentSHA256 == content {
 			continue
 		}

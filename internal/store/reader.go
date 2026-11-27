@@ -64,9 +64,11 @@ func scanParty(sc scanner) (model.Party, error) {
 	var p model.Party
 	var kind, name, idNumber, phone, address, note, dataJSON, createdAt, updatedAt string
 	var idFrontPath, idFrontSHA, idBackPath, idBackSHA, signatureID string
+	var sealAssetID, sealSource, signatureSealID, signatureSealSource string
 	if err := sc.Scan(&p.ID, &kind, &name, &idNumber, &phone, &address, &note,
 		&dataJSON, &idFrontPath, &idFrontSHA, &idBackPath, &idBackSHA,
-		&signatureID, &createdAt, &updatedAt); err != nil {
+		&signatureID, &sealAssetID, &sealSource, &signatureSealID, &signatureSealSource,
+		&createdAt, &updatedAt); err != nil {
 		return p, err
 	}
 	p.Kind, p.Name, p.IDNumber, p.Phone, p.Address, p.Note = kind, name, idNumber, phone, address, note
@@ -74,6 +76,8 @@ func scanParty(sc scanner) (model.Party, error) {
 	p.IDFrontPath, p.IDFrontSHA256 = idFrontPath, idFrontSHA
 	p.IDBackPath, p.IDBackSHA256 = idBackPath, idBackSHA
 	p.SignatureID = signatureID
+	p.SealAssetID, p.SealSource = sealAssetID, sealSource
+	p.SignatureSealID, p.SignatureSealSource = signatureSealID, signatureSealSource
 	p.CreatedAt, p.UpdatedAt = parseTime(createdAt), parseTime(updatedAt)
 	return p, nil
 }
@@ -247,7 +251,8 @@ func (r *Reader) ListParties(ctx context.Context, f model.ListFilter) (model.Lis
 
 const partyColumns = `id, kind, name, id_number, phone, address, note,
 	data_json, id_front_path, id_front_sha256, id_back_path, id_back_sha256,
-	signature_asset_id, created_at, updated_at`
+	signature_asset_id, seal_asset_id, seal_source, signature_seal_asset_id,
+	signature_seal_source, created_at, updated_at`
 
 // GetParty returns one party by id.
 func (r *Reader) GetParty(ctx context.Context, id string) (model.Party, error) {

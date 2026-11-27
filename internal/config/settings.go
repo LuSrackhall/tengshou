@@ -1,7 +1,10 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 )
@@ -89,6 +92,87 @@ func cloneOnboarding(in Onboarding) Onboarding {
 		}
 	}
 	return out
+}
+
+// ArchiveReuseEnabled reports whether contracts should reuse archive
+// signatures, signature stamps and seals by default. An absent key means the
+// recommended default (enabled) so older config.json files keep working.
+func (s *Settings) ArchiveReuseEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.cfg.ArchiveReuse.Enabled == nil {
+		return true
+	}
+	return *s.cfg.ArchiveReuse.Enabled
+}
+
+// SetArchiveReuseEnabled persists the master switch. The in-memory value only
+// changes after the atomic config write succeeds.
+func (s *Settings) SetArchiveReuseEnabled(enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value := enabled
+	if s.cfg.ArchiveReuse.Enabled != nil && *s.cfg.ArchiveReuse.Enabled == enabled {
+		return nil
+	}
+	next := s.cfg
+	next.ArchiveReuse.Enabled = &value
+	if err := Save(s.paths, next); err != nil {
+		return err
+	}
+	s.cfg = next
+	return nil
+}
+
+// EnrollEntryToken returns the long-lived self-enrollment token and whether it
+// is currently disabled. An empty token means no fixed entry has been issued.
+func (s *Settings) EnrollEntryToken() (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg.EnrollEntry.Token, s.cfg.EnrollEntry.Disabled
+}
+
+// RotateEnrollEntry issues a new long-lived enrollment token and re-enables the
+// entry. Printed posters carrying the old token stop working immediately.
+func (s *Settings) RotateEnrollEntry() (string, error) {
+	token, err := newEnrollToken()
+	if err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := s.cfg
+	next.EnrollEntry = EnrollEntry{Token: token}
+	if err := Save(s.paths, next); err != nil {
+		return "", err
+	}
+	s.cfg = next
+	return token, nil
+}
+
+// DisableEnrollEntry makes the printed poster stop accepting submissions while
+// keeping the token recorded. Rotating re-enables the entry with a new token.
+func (s *Settings) DisableEnrollEntry() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cfg.EnrollEntry.Token == "" || s.cfg.EnrollEntry.Disabled {
+		return nil
+	}
+	next := s.cfg
+	next.EnrollEntry.Disabled = true
+	if err := Save(s.paths, next); err != nil {
+		return err
+	}
+	s.cfg = next
+	return nil
+}
+
+func newEnrollToken() (string, error) {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("生成自助录入入口码: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 // MCPWriteGate returns a function that reports the current mcp.write_enabled

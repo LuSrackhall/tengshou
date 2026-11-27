@@ -140,6 +140,9 @@ const selectedParty = computed(() => {
 const archiveSignatureAvailable = computed(
   () => Boolean(selectedParty.value?.signature_id),
 );
+const archiveSignatureSealAvailable = computed(
+  () => Boolean(selectedParty.value?.signature_seal_id),
+);
 /** 乙方档案即租户档案；甲方档案同样可复用，按钮文案按角色区分。 */
 const reuseLabel = computed(() =>
   signers.find((signer) => signer.id === signerId.value)?.role === "甲方"
@@ -147,17 +150,22 @@ const reuseLabel = computed(() =>
     : "使用租户档案签名",
 );
 
-async function reuseArchiveSignature(): Promise<void> {
+async function reuseArchiveSignature(kind?: "archive_seal"): Promise<void> {
   const party = selectedParty.value;
-  if (!party?.signature_id || reusing.value) {
+  const hasSource = kind === "archive_seal"
+    ? Boolean(party?.signature_seal_id)
+    : Boolean(party?.signature_id);
+  if (!party || !hasSource || reusing.value) {
     return;
   }
   reusing.value = true;
   reuseMessage.value = "";
   try {
-    await reusePartySignature(props.contract.id, party.id);
-    reuseMessage.value = "已使用档案签名（来源：档案复用，已记入变更记录），可以直接生成合同。";
-    toast("已使用档案签名");
+    await reusePartySignature(props.contract.id, party.id, kind);
+    reuseMessage.value = kind === "archive_seal"
+      ? "已使用档案签名章（来源：档案签名章复用，已记入变更记录），可以直接生成合同。"
+      : "已使用档案签名（来源：档案复用，已记入变更记录），可以直接生成合同。";
+    toast(kind === "archive_seal" ? "已使用档案签名章" : "已使用档案签名");
     await refreshAfterWrite();
     await refreshDetail();
   } catch (error) {
@@ -209,11 +217,26 @@ onBeforeUnmount(() => {
               </select>
               <span class="help">手机与电脑需连接同一局域网；二维码一次性有效，过期或提交后失效。手机打不开时，请确认连接的是同一 Wi-Fi（非访客网络），也可直接输入下方地址。</span>
             </div>
-            <div v-if="archiveSignatureAvailable" class="field">
+            <div v-if="archiveSignatureAvailable || archiveSignatureSealAvailable" class="field">
               <label>档案签名</label>
-              <span class="help">该档案已采集长期签名，可直接套印到本合同（来源记为「档案复用」）；签署事实由你自行确认。</span>
-              <button type="button" class="reuse-btn" :disabled="reusing" @click="reuseArchiveSignature">
+              <span class="help">该档案已有长期签名或签名章，可直接套印到本合同（来源记为「档案复用」）；签署事实由你自行确认。</span>
+              <button
+                v-if="archiveSignatureAvailable"
+                type="button"
+                class="reuse-btn"
+                :disabled="reusing"
+                @click="reuseArchiveSignature()"
+              >
                 {{ reusing ? "正在套印…" : reuseLabel }}
+              </button>
+              <button
+                v-if="archiveSignatureSealAvailable"
+                type="button"
+                class="reuse-btn"
+                :disabled="reusing"
+                @click="reuseArchiveSignature('archive_seal')"
+              >
+                {{ reusing ? "正在套印…" : "使用档案签名章（私章）" }}
               </button>
               <div v-if="reuseMessage" class="sign-state ok">{{ reuseMessage }}</div>
             </div>

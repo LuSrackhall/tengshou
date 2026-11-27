@@ -126,15 +126,27 @@ func (s *Service) SaveSignature(ctx context.Context, in SignatureInput) (model.S
 	return sig, nil
 }
 
-// ReusePartySignature links a party's archive-level signature to a contract.
-// v0.2 D3=B treats the archive signature as directly reusable: the row points
-// at the same immutable asset and deliberately carries no contract content
-// version, so editing the contract later does not invalidate it. Replacing the
-// archive signature afterwards only affects future reuse; rows already linked
-// to contracts and already generated PDFs keep their original asset.
+// ReusePartySignature links a party's archive-level handwritten signature to
+// a contract. It is the original v0.2 D3=B behaviour kept for callers that do
+// not distinguish signature kinds.
 func (s *Service) ReusePartySignature(ctx context.Context, contractID, partyID string) (model.Signature, error) {
+	return s.ReusePartyArchiveSignature(ctx, contractID, partyID, model.SignatureSourceArchive)
+}
+
+// ReusePartyArchiveSignature links either the handwritten archive signature
+// ("archive") or the archive signature stamp (签名章, "archive_seal") to a
+// contract. v0.2 D3=B treats both as directly reusable: the row points at the
+// same immutable asset and deliberately carries no contract content version,
+// so editing the contract later does not invalidate it. Replacing the archive
+// image afterwards only affects future reuse; rows already linked to contracts
+// and already generated PDFs keep their original asset.
+func (s *Service) ReusePartyArchiveSignature(ctx context.Context, contractID, partyID, kind string) (model.Signature, error) {
 	contractID = strings.TrimSpace(contractID)
 	partyID = strings.TrimSpace(partyID)
+	archiveKind := model.SignatureSourceArchive
+	if strings.TrimSpace(kind) == model.SignatureSourceArchiveSeal {
+		archiveKind = model.SignatureSourceArchiveSeal
+	}
 	contract, err := s.rd.GetContract(ctx, contractID)
 	if err != nil {
 		if isNotFound(err) {
@@ -152,25 +164,33 @@ func (s *Service) ReusePartySignature(ctx context.Context, contractID, partyID s
 		}
 		return model.Signature{}, err
 	}
-	if party.SignatureID == "" {
-		return model.Signature{}, business("missing_signature", "该档案还没有采集签名，请先扫码采集")
+	archiveID := party.SignatureID
+	label := "签名"
+	missingHint := "该档案还没有采集签名，请先扫码采集"
+	if archiveKind == model.SignatureSourceArchiveSeal {
+		archiveID = party.SignatureSealID
+		label = "签名章"
+		missingHint = "该档案还没有上传签名章图片，请先在档案页上传"
 	}
-	archive, err := s.rd.GetSignature(ctx, party.SignatureID)
+	if archiveID == "" {
+		return model.Signature{}, business("missing_signature", "%s", missingHint)
+	}
+	archive, err := s.rd.GetSignature(ctx, archiveID)
 	if err != nil {
 		if isNotFound(err) {
-			return model.Signature{}, business("missing_signature", "档案签名记录不存在，请重新采集")
+			return model.Signature{}, business("missing_signature", "%s", "档案"+label+"记录不存在，请重新上传")
 		}
 		return model.Signature{}, err
 	}
 	if archive.PartyID != "" && archive.PartyID != party.ID {
-		return model.Signature{}, business("invalid_signature", "档案签名记录不属于该相对方，请重新采集")
+		return model.Signature{}, business("invalid_signature", "%s", "档案"+label+"记录不属于该相对方，请重新上传")
 	}
 	full, err := s.assetFile(archive.AssetPath)
 	if err != nil {
 		return model.Signature{}, err
 	}
 	if _, err := os.Stat(full); err != nil {
-		return model.Signature{}, business("missing_asset", "档案签名图片文件缺失，请重新采集")
+		return model.Signature{}, business("missing_asset", "%s", "档案"+label+"图片文件缺失，请重新上传")
 	}
 	// Idempotent per (contract, party, asset): repeated clicks, including after
 	// the contract content changed, return the existing row instead of piling
@@ -180,9 +200,22 @@ func (s *Service) ReusePartySignature(ctx context.Context, contractID, partyID s
 		return model.Signature{}, err
 	}
 	for _, sig := range existing.Items {
-		if sig.PartyID == party.ID && sig.Source == model.SignatureSourceArchive &&
+		if sig.PartyID == party.ID && sig.Source == archiveKind &&
 			sig.AssetPath == archive.AssetPath {
 			return sig, nil
+		}
+	}
+	if archiveKind == model.SignatureSourceArchiveSeal {
+		// A contract has one signature row per party for a placement to show
+		// exactly one image; switching the archive source for the same party
+		// replaces the previous archive-derived row.
+		for _, sig := range existing.Items {
+			if sig.PartyID != party.ID || sig.Source != model.SignatureSourceArchive {
+				continue
+			}
+			if err := s.st.DeleteSignature(ctx, sig.ID); err != nil {
+				return model.Signature{}, err
+			}
 		}
 	}
 	id, err := model.NewID("sig")
@@ -199,7 +232,7 @@ func (s *Service) ReusePartySignature(ctx context.Context, contractID, partyID s
 		SHA256:     archive.SHA256,
 		// No ContentSHA256 on purpose: archive reuse applies as-is (直接套印)
 		// and is not tied to one contract content version (v0.2 D3=B).
-		Source:     model.SignatureSourceArchive,
+		Source:     archiveKind,
 		WidthPx:    archive.WidthPx,
 		HeightPx:   archive.HeightPx,
 		CapturedAt: now,
@@ -208,9 +241,13 @@ func (s *Service) ReusePartySignature(ctx context.Context, contractID, partyID s
 	if err := s.st.PutSignature(ctx, &sig); err != nil {
 		return model.Signature{}, err
 	}
+	sourceLabel := "档案复用"
+	if archiveKind == model.SignatureSourceArchiveSeal {
+		sourceLabel = "档案签名章复用"
+	}
 	s.logChange(ctx, model.ChangeEntityContract, contract.ID, model.ChangeActionUpdate,
-		fmt.Sprintf("复用档案签名：%s（合同 %s，来源：档案复用，直接套印）",
-			party.Name, contract.ContractNo), nil)
+		fmt.Sprintf("复用档案%s：%s（合同 %s，来源：%s，直接套印）",
+			label, party.Name, contract.ContractNo, sourceLabel), nil)
 	return sig, nil
 }
 

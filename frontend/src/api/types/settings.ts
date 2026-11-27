@@ -58,6 +58,24 @@ export interface MCPSettingsResponse {
   write_enabled: boolean;
 }
 
+// ---------- 档案签名/公章复用开关（te-48hkl，Q6） ----------
+
+/** GET /settings/archive-reuse。 */
+export interface ArchiveReuseSettings {
+  enabled: boolean;
+  /** 开关旁必须展示的风险提示。 */
+  risk_notice: string;
+}
+
+/** PUT/POST /settings/archive-reuse 的请求体与响应。 */
+export interface ArchiveReuseUpdateInput {
+  enabled: boolean;
+}
+
+export interface ArchiveReuseUpdateResponse {
+  enabled: boolean;
+}
+
 // ---------- 备份与恢复 ----------
 
 /** 已暂存、等待重启生效的恢复包（service.PendingBackup）。 */

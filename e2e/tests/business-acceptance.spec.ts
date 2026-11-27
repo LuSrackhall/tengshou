@@ -43,6 +43,8 @@ import {
   signByPhone,
   verifyFinalPdf,
 } from "./support/business-ui";
+import { runPosterEnrollStep } from "./support/business-enroll-poster";
+import { browserLabel, platformLabel } from "./support/platform-label";
 import { installClickVisuals, isTutorialMode } from "./support/tutorial-visuals";
 import { trackConsoleErrors } from "./support/ui";
 
@@ -50,31 +52,6 @@ const REQUIRE_DOCX = process.env.E2E_REQUIRE_DOCX === "1";
 const TUTORIAL = isTutorialMode();
 const OUTPUT_DIR = join(repoRoot(), "e2e", "test-results", "business-acceptance");
 const PDF_NAME = "房屋租赁合同-已签字盖章.pdf";
-
-/** 报告里用人类可读的平台名，而不是 process.platform 的 node 取值。 */
-function platformLabel(): string {
-  switch (process.platform) {
-    case "win32":
-      return "Windows";
-    case "darwin":
-      return "macOS";
-    case "linux":
-      return "Linux";
-    default:
-      return process.platform;
-  }
-}
-
-/** 浏览器项目与桌面壳引擎的对应关系（已知近似，报告如实标注）。 */
-function browserLabel(projectName: string): string {
-  if (projectName === "webkit") {
-    return "WebKit（近似桌面壳 WKWebView）";
-  }
-  if (platformLabel() === "Windows") {
-    return "Chromium（近似桌面壳 WebView2）";
-  }
-  return "Chromium";
-}
 
 /** 模板详情的 converter 字段 → 报告里的中文名称。 */
 function converterNameLabel(name: string): string {
@@ -174,6 +151,7 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
   test("Word 模板导入 → 标定字段/签名/公章 → 建合同（三方）→ 扫码签名 → 公章 → 预览 → 生成 → 下载", async ({
     app,
     page,
+    context,
   }, testInfo) => {
     if (TUTORIAL) {
       // 教程录像的点击圆点 + 波纹：注入 context 后对手机签名页同样生效。
@@ -349,6 +327,19 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
             "证件号、地址与电话写入各自档案。"
           );
         },
+      );
+
+      await report.runStep(
+        page,
+        testInfo,
+        {
+          action: "打印自助录入海报，租户手机扫码建档",
+          expected:
+            "相对方档案页生成长期有效的自助录入海报；租户用手机扫码填写企业资料、上传证件照、签名章与公章后提交，" +
+            "档案自动出现在桌面列表，图片标记来源为手机自助录入。",
+        },
+        async (frames) =>
+          await runPosterEnrollStep(page, context, frames, app.baseURL, sealPath),
       );
 
       await report.runStep(

@@ -158,18 +158,22 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
       await installClickVisuals(page.context());
     }
     const consoleErrors = trackConsoleErrors(page);
-    const report = new AcceptanceReport({
-      title: "业务验收报告 · 房屋租赁合同",
-      scenario:
-        "真实业务场景：幸福村股份经济合作社把幸福村 3 组 12 号 101 出租给王建国，" +
-        "从 Word 租赁合同模板开始，在腾手里完成字段标定、双方与房产档案、合同录入" +
-        "（三方选择 + 租期租金）、手机手写签名、公章落位，最终生成并下载可打开的合同 PDF。",
-      environment:
-        `${platformLabel()} · ${browserLabel(testInfo.project.name)} · ` +
-        "发布形态 tengshou-cli serve",
-      startedAt: new Date(),
-      appVersion: "读取中…",
-    });
+    const report = new AcceptanceReport(
+      {
+        title: "业务验收报告 · 房屋租赁合同",
+        scenario:
+          "真实业务场景：幸福村股份经济合作社把幸福村 3 组 12 号 101 出租给王建国，" +
+          "从 Word 租赁合同模板开始，在腾手里完成字段标定、双方与房产档案、合同录入" +
+          "（三方选择 + 租期租金）、手机手写签名、公章落位，最终生成并下载可打开的合同 PDF。",
+        environment:
+          `${platformLabel()} · ${browserLabel(testInfo.project.name)} · ` +
+          "发布形态 tengshou-cli serve",
+        startedAt: new Date(),
+        appVersion: "读取中…",
+      },
+      // 手机侧录像先写到报告目录再读入内嵌，临时文件随即删除。
+      OUTPUT_DIR,
+    );
     let pdfPath = "";
     const pdfDetails: string[] = [];
 

@@ -23,12 +23,22 @@ export interface ReportFrameView {
   warning?: string;
 }
 
+/** 步骤内嵌的手机侧页面录像：WebM base64 内联，离线可播放。 */
+export interface ReportVideoView {
+  /** 中文标签：这段录像是什么。 */
+  label: string;
+  webm: Buffer | null;
+  /** 采集失败原因；webm 为 null 时给出。 */
+  warning?: string;
+}
+
 export interface ReportStepView {
   action: string;
   expected: string;
   actual: string;
   verdict: Verdict;
   frames: ReportFrameView[];
+  videos: ReportVideoView[];
   cards: StepCard[];
   /** 相对报告开始（≈ 视频起点）的秒数，用于跳转。 */
   startedAtSeconds: number;
@@ -108,6 +118,31 @@ function renderFrames(step: ReportStepView): string {
   return `<div class="frames">${figures}</div>`;
 }
 
+function renderVideos(step: ReportStepView): string {
+  if (step.videos.length === 0) {
+    return "";
+  }
+  const blocks = step.videos
+    .map((video) => {
+      if (!video.webm) {
+        return (
+          `<div class="step-video missing">` +
+          `<p class="video-label">${escapeHtml(video.label)}</p>` +
+          `<p class="frame-warning">手机侧录像缺失：${escapeHtml(video.warning ?? "未知原因")}</p>` +
+          `</div>`
+        );
+      }
+      return (
+        `<figure class="step-video">` +
+        `<video controls preload="metadata" ` +
+        `src="data:video/webm;base64,${video.webm.toString("base64")}"></video>` +
+        `<figcaption>${escapeHtml(video.label)}</figcaption></figure>`
+      );
+    })
+    .join("");
+  return `<div class="step-videos">${blocks}</div>`;
+}
+
 function renderCards(step: ReportStepView): string {
   return step.cards
     .map(
@@ -133,6 +168,7 @@ function renderStep(step: ReportStepView, index: number): string {
     `<dl><dt>预期结果</dt><dd>${escapeHtml(step.expected)}</dd>` +
     `<dt>实际结果</dt><dd>${escapeHtml(step.actual)}</dd></dl>` +
     renderFrames(step) +
+    renderVideos(step) +
     renderCards(step) +
     `</section>`
   );
@@ -202,12 +238,17 @@ export function renderReportHtml(model: ReportModel): string {
   .status-card.pass { background: #eef7f1; border-color: #cfe6d8; }
   .status-card ul { font-size: 14.5px; }
   .frames { display: grid; gap: 14px; margin: 10px 0 14px; }
+  .step-videos { display: grid; gap: 14px; margin: 10px 0 14px; }
+  figure.step-video { margin: 0; }
+  figure.step-video video { width: 100%; max-height: 70vh; border: 1px solid #e2e7e4; border-radius: 10px; background: #000; display: block; }
   figure.frame { margin: 0; }
   figure.frame img { width: 100%; height: auto; border: 1px solid #e2e7e4; border-radius: 8px; display: block; cursor: zoom-in; background: #fff; }
   figure.pdf img { max-width: 760px; margin: 0 auto; border-color: #c6d3cb; }
   figure.zoom img { max-width: 680px; margin: 0 auto; border-color: #e8bfbc; }
   figcaption { color: #46504b; font-size: 14.5px; padding: 6px 2px 0; }
   .frame.missing { background: #fff5f4; border: 1px dashed #e8bfbc; border-radius: 8px; padding: 10px 14px; }
+  .step-video.missing { background: #fff5f4; border: 1px dashed #e8bfbc; border-radius: 8px; padding: 10px 14px; }
+  .step-video.missing .video-label { margin: 0 0 4px; color: #46504b; font-size: 14.5px; font-weight: 600; }
   .frame-warning { color: #b4342c; font-size: 13.5px; }
   .artifact { background: #fff; border-radius: 14px; padding: 18px 20px; box-shadow: 0 8px 24px rgba(22,34,28,.08); margin-bottom: 18px; }
   .artifact a { color: #1f6f4a; font-weight: 700; }

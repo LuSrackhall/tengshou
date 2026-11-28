@@ -11,11 +11,13 @@ import {
   FrameRecorder,
   type FrameRecord,
   type StepCard,
+  type VideoRecord,
 } from "./business-frames";
 import {
   renderReportHtml,
   type ReportFrameView,
   type ReportStepView,
+  type ReportVideoView,
   type Verdict,
 } from "./business-report-html";
 import {
@@ -65,6 +67,7 @@ interface StepRecord {
   verdict: Verdict;
   frames: FrameRecord[];
   cards: StepCard[];
+  videos: VideoRecord[];
   /** 相对报告开始的时间（秒）；视频起点约等于报告开始。 */
   startedAtSeconds: number;
   allowEmptyFrames: boolean;
@@ -90,7 +93,14 @@ export class AcceptanceReport {
   private readonly steps: StepRecord[] = [];
   private readonly clockStart = Date.now();
 
-  constructor(private readonly meta: ReportMeta) {}
+  constructor(
+    private readonly meta: ReportMeta,
+    /**
+     * 报告输出目录：手机侧录像先 saveAs 到这里、读入 Buffer 内嵌后即删除。
+     * 缺省时手机侧录像记为「缺失」，报告标注原因，不影响业务判定。
+     */
+    private readonly outputDir = "",
+  ) {}
 
   /** 应用版本在界面试跑后才读到（/api/v1/health），报告生成前补写。 */
   setAppVersion(version: string): void {
@@ -108,7 +118,7 @@ export class AcceptanceReport {
     spec: StepSpec,
     action: (frames: FrameRecorder) => Promise<string>,
   ): Promise<void> {
-    const recorder = new FrameRecorder(page);
+    const recorder = new FrameRecorder(page, this.outputDir);
     const tutorial = tutorialCopyFor(spec.action);
     const startedAtSeconds = (Date.now() - this.clockStart) / 1000;
     if (tutorial && isTutorialMode()) {
@@ -141,6 +151,7 @@ export class AcceptanceReport {
       verdict: failure ? "不符合预期" : "符合预期",
       frames: recorder.frames,
       cards: recorder.cards,
+      videos: recorder.videos,
       startedAtSeconds,
       allowEmptyFrames: spec.allowEmptyFrames === true,
       requirePdfPages: spec.requirePdfPages === true,
@@ -256,6 +267,14 @@ export class AcceptanceReport {
     return tutorialPath;
   }
 
+  private videoViews(videos: VideoRecord[]): ReportVideoView[] {
+    return videos.map((video) => ({
+      label: video.label,
+      webm: video.webm,
+      warning: video.warning,
+    }));
+  }
+
   private tutorialStepViews(): TutorialStepView[] {
     let number = 0;
     return this.steps
@@ -276,6 +295,7 @@ export class AcceptanceReport {
               warning: frame.warning,
             }),
           ),
+          videos: this.videoViews(step.videos),
           startedAtSeconds: step.startedAtSeconds,
         };
       });
@@ -295,6 +315,7 @@ export class AcceptanceReport {
           warning: frame.warning,
         }),
       ),
+      videos: this.videoViews(step.videos),
       cards: step.cards,
       startedAtSeconds: step.startedAtSeconds,
     }));

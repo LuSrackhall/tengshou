@@ -36,6 +36,7 @@ function minimalModel(): TutorialModel {
         see: ["自检面板显示 Word 转换「可用」。"],
         note: ["macOS 请用 LibreOffice。"],
         frames: [],
+        videos: [],
         startedAtSeconds: 0,
       },
       {
@@ -49,6 +50,12 @@ function minimalModel(): TutorialModel {
             caption: "① 模板列表出现 v1",
             png: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
             kind: "screenshot",
+          },
+        ],
+        videos: [
+          {
+            label: "手机侧实录：租户扫码后选择类型、填写档案并提交",
+            webm: Buffer.from([0x1a, 0x45, 0xdf, 0xa3]),
           },
         ],
         startedAtSeconds: 12.3,
@@ -96,6 +103,26 @@ test("教程 HTML：三段式、目录、章节跳转、录像与示例 PDF 链�
   // 教程是用户读物，不能混入测试元信息；分镜图以 base64 内嵌。
   expect(html).not.toContain("检查浏览器控制台");
   expect(html).toContain('src="data:image/png;base64,');
+
+  // 手机侧录像：WebM base64 内嵌、中文标签、带播放控件（te-cfgvj）。
+  expect(html.match(/class="step-videos"/g)).toHaveLength(1);
+  expect(html).toContain('<video controls preload="metadata" src="data:video/webm;base64,');
+  expect(html).toContain("手机侧实录：租户扫码后选择类型、填写档案并提交");
+});
+
+test("教程 HTML：手机侧录像缺失时标注原因，不渲染坏播放器", () => {
+  const model = minimalModel();
+  model.steps[1]!.videos = [
+    {
+      label: "手机侧实录：手机上打开签名页、手写三笔并提交",
+      webm: null,
+      warning: "该页面未启用录像（video 为 null）",
+    },
+  ];
+  const html = renderTutorialHtml(model);
+  expect(html).toContain("手机侧录像缺失：该页面未启用录像（video 为 null）");
+  expect(html).toContain("手机侧实录：手机上打开签名页、手写三笔并提交");
+  expect(html).not.toContain("data:video/webm");
 });
 
 test("业务步骤与教程文案一一对应，测试步骤不进教程", () => {

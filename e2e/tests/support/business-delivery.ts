@@ -26,6 +26,7 @@ import {
   requiredPdfValues,
 } from "./business-scenario";
 import { trackConsoleErrors } from "./ui";
+import { phonePause } from "./business-phone-pacing";
 
 function errorSummary(error: unknown): string {
   if (error instanceof Error) {
@@ -65,12 +66,16 @@ export async function signByPhone(
   const token = urlText.trim().split("/sign/")[1]?.replace(/\/+$/, "") ?? "";
   expect(token, `签名页 URL 中没有 token：${urlText}`).not.toBe("");
   const signPage = await page.context().newPage();
+  // 手机签名页从这里开始录制：画中画窗口按这个时刻换算到报告时钟。
+  const signStartedAt = Date.now();
   const signErrors = trackConsoleErrors(signPage);
   try {
     await signPage.goto(`${baseURL}/sign/${token}`, {
       waitUntil: "domcontentloaded",
     });
     await expect(signPage.locator("#pad")).toBeVisible();
+    // 报告模式给人速停顿，让画中画里的签名过程看得清；教程模式由 slowMo 放慢。
+    await phonePause(signPage, 1500);
     await frames?.capture("③ 手机上打开签名页，在画布上手写", {
       page: signPage,
       targets: [signPage.locator("#pad")],
@@ -82,6 +87,7 @@ export async function signByPhone(
       y: box!.y + box!.height * fy,
     });
     const stroke = async (points: Array<[number, number]>) => {
+      await phonePause(signPage, 700);
       const first = point(points[0]![0], points[0]![1]);
       await signPage.mouse.move(first.x, first.y);
       await signPage.mouse.down();
@@ -108,15 +114,18 @@ export async function signByPhone(
       [0.5, 0.55],
       [0.78, 0.8],
     ]);
+    await phonePause(signPage, 1000);
     await expect(signPage.locator("#submitBtn")).toBeEnabled();
     await frames?.capture("④ 三笔手写完成，点『提交签名』", {
       page: signPage,
       targets: [signPage.locator("#pad")],
     });
+    await phonePause(signPage, 1000);
     await signPage.locator("#submitBtn").click();
     await expect(signPage.locator(".result.done h1")).toHaveText("签名已提交", {
       timeout: 20_000,
     });
+    await phonePause(signPage, 1200);
     await frames?.capture("⑤ 手机页显示『签名已提交』", {
       page: signPage,
       targets: [signPage.locator(".result.done")],
@@ -129,10 +138,12 @@ export async function signByPhone(
     await signPage.close();
   }
   // 手机签名页录像在 page 关闭后才保证落盘；读入后内嵌进报告/教程，
-  // 让「手机上打开签名页、手写三笔并提交」的过程可回放。
+  // 让「手机上打开签名页、手写三笔并提交」的过程可回放，并按 start→close
+  // 的墙钟窗口合成进主录像画中画。
   await frames?.capturePageVideo(
     signPage,
     "手机侧实录：手机上打开签名页、手写三笔并提交",
+    signStartedAt,
   );
   await expect(dialog.locator("#signState")).toContainText("签名已保存", {
     timeout: 30_000,

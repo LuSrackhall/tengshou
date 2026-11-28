@@ -108,6 +108,12 @@ test("教程 HTML：三段式、目录、章节跳转、录像与示例 PDF 链�
   expect(html.match(/class="step-videos"/g)).toHaveLength(1);
   expect(html).toContain('<video controls preload="metadata" src="data:video/webm;base64,');
   expect(html).toContain("手机侧实录：租户扫码后选择类型、填写档案并提交");
+  // 播放器放在步骤头部、分镜之前：扫码后的手机过程要第一眼看到（te-fp48w）。
+  expect(html).toContain("手机侧实录（扫码后手机上的完整录入过程）");
+  const videosAt = html.indexOf('<div class="step-videos">');
+  const framesAt = html.indexOf('<div class="frames">');
+  expect(videosAt).toBeGreaterThan(-1);
+  expect(framesAt).toBeGreaterThan(videosAt);
 });
 
 test("教程 HTML：手机侧录像缺失时标注原因，不渲染坏播放器", () => {

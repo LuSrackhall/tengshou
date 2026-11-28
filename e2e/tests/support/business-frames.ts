@@ -8,6 +8,7 @@
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
+import { PIP_DIR_NAME } from "./business-video-pip";
 
 export type FrameKind = "page" | "screenshot" | "pdf-page" | "pdf-zoom" | "image";
 
@@ -28,6 +29,12 @@ export interface VideoRecord {
   webm: Buffer | null;
   /** 采集失败原因；webm 为 null 时给出。 */
   warning?: string;
+  /** 手机页创建时刻相对报告起点的秒数（主录像画中画窗口起点）。 */
+  startedAtSeconds?: number;
+  /** 手机页从创建到关闭的墙钟时长（秒，画中画窗口长度）。 */
+  durationSeconds?: number;
+  /** 手机侧录像落盘路径（报告目录 .pip 下），供报告器合成进主录像。 */
+  segmentPath?: string;
 }
 
 export interface StepCard {
@@ -65,8 +72,13 @@ export class FrameRecorder {
 
   constructor(
     private readonly page: Page,
-    /** 报告输出目录：手机侧录像先 saveAs 到这里，读入 Buffer 后立即删除。 */
+    /**
+     * 报告输出目录：手机侧录像 saveAs 到这里的隐藏 `.pip` 暂存目录，
+     * 读入 Buffer 内嵌 HTML；暂存文件留给报告器合成画中画后统一删除。
+     */
     private readonly videoDir = "",
+    /** 报告起点（与步骤 startedAtSeconds 同一时钟）。 */
+    private readonly clockStart = Date.now(),
   ) {}
 
   /** 采集一张分镜；失败时记录警告，不中断业务流程。 */
@@ -94,10 +106,18 @@ export class FrameRecorder {
    * 采集另一个页面（手机侧）的完整录像。Playwright 对 context 内每个 page
    * 各录一份，但只有 fixture 页面的录像会作为附件交给报告器；手机页录像
    * 必须在 page.close() 之后用 video().saveAs() 取回（关闭前不保证落盘）。
-   * 录像读入 Buffer 后删除临时文件，报告目录仍只含交付文件；录像不可用时
-   * 只记警告，业务步骤照常判定。
+   * 录像读入 Buffer 内嵌进报告/教程；暂存文件留在 `.pip` 下，由报告器按
+   * startedAtMs 换算的画中画窗口合成进主录像后统一删除。录像不可用时只记
+   * 警告，业务步骤照常判定。
+   *
+   * @param startedAtMs 手机页创建（开始录制）时刻；默认取调用时刻。
    */
-  async capturePageVideo(page: Page, label: string): Promise<void> {
+  async capturePageVideo(
+    page: Page,
+    label: string,
+    startedAtMs?: number,
+  ): Promise<void> {
+    const startedAt = startedAtMs ?? Date.now();
     try {
       const video = page.video();
       if (!video) {
@@ -106,17 +126,26 @@ export class FrameRecorder {
       if (!this.videoDir) {
         throw new Error("未提供报告输出目录，无法保存手机侧录像");
       }
-      await mkdir(this.videoDir, { recursive: true });
+      const pipDir = join(this.videoDir, PIP_DIR_NAME);
+      await mkdir(pipDir, { recursive: true });
       this.videoSeq += 1;
       const tempPath = join(
-        this.videoDir,
-        `.手机侧录像-${process.pid}-${this.videoSeq}.webm`,
+        pipDir,
+        `phone-${process.pid}-${this.videoSeq}.webm`,
       );
       try {
         await video.saveAs(tempPath);
-        this.videos.push({ label, webm: await readFile(tempPath) });
-      } finally {
+        const webm = await readFile(tempPath);
+        this.videos.push({
+          label,
+          webm,
+          startedAtSeconds: Math.max(0, (startedAt - this.clockStart) / 1000),
+          durationSeconds: Math.max(0, (Date.now() - startedAt) / 1000),
+          segmentPath: tempPath,
+        });
+      } catch (error) {
         await rm(tempPath, { force: true }).catch(() => undefined);
+        throw error;
       }
     } catch (error) {
       this.videos.push({ label, webm: null, warning: errorSummary(error) });

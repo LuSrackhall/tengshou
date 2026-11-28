@@ -70,13 +70,29 @@ e2e/test-results/business-acceptance/房屋租赁合同-已签字盖章.pdf
 - 全过程 WebM 由 `e2e/tests/support/report-video-reporter.ts` 在测试结束后复制
   到报告目录并补全播放器；每步标题旁有「▶ 看本步过程（约 00:xx）」，按步骤
   开始时间 seek（误差约 1–3 秒）。视频缺失时报告显示说明而不是坏掉的播放器；
-- 「打印自助录入海报，租户手机扫码建档」与「扫码手写签名」两步在分镜之后内嵌
-  **手机侧实录**：Playwright 对 context 内每个 page 各录一份，但只有 fixture
+- 「打印自助录入海报，租户手机扫码建档」与「扫码手写签名」两步在**分镜之前**
+  内嵌**手机侧实录**：Playwright 对 context 内每个 page 各录一份，但只有 fixture
   页面的录像会作为附件交给报告器，手机页录像此前从未被取用（te-cfgvj）。现在
   这两步在手机页 `close()` 后用 `video().saveAs()` 取回独立 WebM（VP9
-  1440×960），读入 Buffer 后以 `data:video/webm;base64,` 内联进报告与教程，
-  临时文件随即删除——报告目录仍只有 4 个交付文件，打包清单不变。录像不可用时
-  步骤照常判定（pass），报告在该处标注「手机侧录像缺失：原因」；
+  1440×960），读入 Buffer 后以 `data:video/webm;base64,` 内联进报告与教程；
+  播放器标题写明「手机侧实录（扫码后手机上的完整录入过程）」，放在步骤标题下方、
+  截图之前，临时文件随即删除——报告目录仍只有 4 个交付文件，打包清单不变。
+  录像不可用时步骤照常判定（pass），报告在该处标注「手机侧录像缺失：原因」；
+- **主录像画中画（te-fp48w）**：测试结束、Playwright 录像落盘后，报告器
+  （`report-video-reporter.ts`）用本机系统 ffmpeg 把两段手机侧录像合成进
+  `验收过程录像.webm`：等比缩到画面宽 1/3（480×320）、右下角、绿色细边框，
+  按手机页创建/关闭的墙钟换算到报告时钟（与步骤 `startedAtSeconds` 同一时钟），
+  只在对应时间窗内叠加；主录像时间轴不变，仍是 VP9 1440×960、无音频。用户
+  直接看录像文件或点「▶ 看本步过程」就能看到扫码之后手机上的录入过程。报告
+  模式下手机页操作按人速填写/停顿（逐字输入、选类型/上传后停顿，手机侧片段
+  ≥8 秒），教程模式不重复减速（已有 `slowMo: 500`）；
+- **ffmpeg 依赖与降级**：合成只探测 PATH 中的系统 ffmpeg（`E2E_FFMPEG` 可指定
+  路径，`E2E_FFMPEG=off` 显式禁用）；Playwright 自带的 ffmpeg 没有 overlay
+  滤镜，不能使用。ffmpeg 不可用或合成失败时跳过画中画、在报告视频区写明中文
+  原因，步骤内嵌播放器与业务判定不受影响，E2E 不会因此变红。CI 三端（以及
+  教程任务）显式安装并校验 ffmpeg 的 overlay 与 libvpx-vp9，保证发布工件里
+  一定有画中画；合成计划与手机侧暂存录像放在报告目录的隐藏 `.pip/` 下，结束
+  时整体删除，交付件仍是 4 个文件；
 - 报告顶部有「怎么看这份报告」与「报告自检」：交互步骤分镜不足、图注为空、
   PDF 页面/放大图缺失都会列出来。报告自检只影响报告呈现，不改变业务断言与
   判定——单个分镜采集失败只记录「截图采集失败：原因」。
@@ -185,6 +201,10 @@ main 已全绿」的发版前提变成机制，不重跑 E2E），再用 `gh run
     Word 不参与自动转换）。
 - 本机没有可用转换器且未设 `E2E_REQUIRE_DOCX=1` 时，用例以中文原因 `test.skip`，
   提示安装 LibreOffice 或 Windows 上的 Microsoft Word。
+- 主录像画中画合成需要 PATH 中的系统 ffmpeg（带 `overlay` 滤镜与 `libvpx-vp9`
+  编码器）；本机没有时 E2E 照常运行，报告视频区会写明「未合成手机侧画中画」
+  并保留步骤内嵌播放器。macOS 可用 `brew install ffmpeg`，Windows 可用
+  `choco install ffmpeg`；CI 三端与教程任务都会安装并校验。
 - 报告「运行环境」行写明平台与浏览器项目；转换器步骤展示 `/app/api/v1/converters`
   的真实状态，导入后以模板详情的 `converter` 字段说明**实际使用**的转换器
   （Windows 未安装 Word 时会回退 LibreOffice，报告不会声称 Word 可用）。
@@ -232,6 +252,7 @@ npm run report                    # 打开 HTML 报告
 | `E2E_KEEP_DATA` | 设为 `1` 时保留临时数据目录，便于排查 |
 | `E2E_REQUIRE_DOCX` | 设为 `1` 时，场景 C 缺少 Word→PDF 转换器必须失败（CI 三端均设） |
 | `E2E_TUTORIAL` | 设为 `1` 时进入教程录制模式（slowMo 0.5s、点击圆点 + 波纹、章节标题卡）；发版时由教程任务设置 |
+| `E2E_FFMPEG` | 画中画合成使用的 ffmpeg 路径（缺省探测 PATH）；设为 `off` 显式禁用合成（用于验证降级路径） |
 
 未设置 `PLAYWRIGHT_BASE_URL` 时，每个测试文件会自行：取空闲端口 → 在系统临时
 目录建数据目录 → 启动 `tengshou-cli serve --loopback` → 测试结束回收进程与目录。

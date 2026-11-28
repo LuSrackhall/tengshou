@@ -38,6 +38,7 @@ import {
   pauseAfterStep,
   showChapterCard,
 } from "./tutorial-visuals";
+import { writePipPlan, type PipSegment } from "./business-video-pip";
 
 export interface ReportMeta {
   title: string;
@@ -156,7 +157,7 @@ export class AcceptanceReport {
     spec: StepSpec,
     action: (frames: FrameRecorder) => Promise<string>,
   ): Promise<void> {
-    const recorder = new FrameRecorder(page, this.outputDir);
+    const recorder = new FrameRecorder(page, this.outputDir, this.clockStart);
     const tutorial = tutorialCopyFor(spec.action);
     const startedAtSeconds = (Date.now() - this.clockStart) / 1000;
     if (tutorial && isTutorialMode()) {
@@ -272,7 +273,30 @@ export class AcceptanceReport {
     const reportPath = join(outputDir, "业务验收报告.html");
     await writeFile(reportPath, html, "utf8");
     const tutorialPath = await this.writeTutorial(outputDir, artifact, artifactLink);
+    // 手机侧录像的画中画合成计划：报告器在测试结束拿到主录像后读取并执行。
+    // 即使没有可合成的段也写（空计划让报告器清理上一轮的 .pip 暂存目录）。
+    await writePipPlan(outputDir, this.pipSegments());
     return { reportPath, tutorialPath };
+  }
+
+  /** 收集各步骤手机侧录像的画中画窗口（缺录像或时间信息的段跳过）。 */
+  private pipSegments(): PipSegment[] {
+    const segments: PipSegment[] = [];
+    for (const step of this.steps) {
+      for (const video of step.videos) {
+        if (!video.webm || !video.segmentPath) {
+          continue;
+        }
+        segments.push({
+          label: video.label,
+          startedAtSeconds:
+            video.startedAtSeconds ?? step.startedAtSeconds,
+          durationSeconds: video.durationSeconds ?? 0,
+          path: video.segmentPath,
+        });
+      }
+    }
+    return segments;
   }
 
   /**

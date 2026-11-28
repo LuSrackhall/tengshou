@@ -5,6 +5,8 @@
 // 裁剪方式：先截当前视口，再在页面内用 canvas 按目标包围盒裁剪。这样不依赖
 // Playwright clip 的文档坐标语义，三端（Chromium / WebKit）行为一致；裁剪
 // 宽度按截图实际像素与 CSS 视口宽度换算，兼容 deviceScaleFactor=2。
+import { mkdir, readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 
 export type FrameKind = "page" | "screenshot" | "pdf-page" | "pdf-zoom" | "image";
@@ -15,6 +17,16 @@ export interface FrameRecord {
   png: Buffer | null;
   kind: FrameKind;
   /** 采集失败原因；png 为 null 时给出。 */
+  warning?: string;
+}
+
+/** 步骤内的页面录像（手机侧），以 WebM Buffer 内嵌进报告 HTML。 */
+export interface VideoRecord {
+  /** 中文标签：这段录像是什么、能看清什么。 */
+  label: string;
+  /** 录像内容；采集失败为 null。 */
+  webm: Buffer | null;
+  /** 采集失败原因；webm 为 null 时给出。 */
   warning?: string;
 }
 
@@ -44,12 +56,18 @@ export interface CaptureOptions {
   padding?: number;
 }
 
-/** 一步业务动作的采集器：分镜 + 状态卡。 */
+/** 一步业务动作的采集器：分镜 + 状态卡 + 手机侧页面录像。 */
 export class FrameRecorder {
   readonly frames: FrameRecord[] = [];
   readonly cards: StepCard[] = [];
+  readonly videos: VideoRecord[] = [];
+  private videoSeq = 0;
 
-  constructor(private readonly page: Page) {}
+  constructor(
+    private readonly page: Page,
+    /** 报告输出目录：手机侧录像先 saveAs 到这里，读入 Buffer 后立即删除。 */
+    private readonly videoDir = "",
+  ) {}
 
   /** 采集一张分镜；失败时记录警告，不中断业务流程。 */
   async capture(caption: string, options: CaptureOptions = {}): Promise<void> {
@@ -69,6 +87,39 @@ export class FrameRecorder {
         kind: "screenshot",
         warning: errorSummary(error),
       });
+    }
+  }
+
+  /**
+   * 采集另一个页面（手机侧）的完整录像。Playwright 对 context 内每个 page
+   * 各录一份，但只有 fixture 页面的录像会作为附件交给报告器；手机页录像
+   * 必须在 page.close() 之后用 video().saveAs() 取回（关闭前不保证落盘）。
+   * 录像读入 Buffer 后删除临时文件，报告目录仍只含交付文件；录像不可用时
+   * 只记警告，业务步骤照常判定。
+   */
+  async capturePageVideo(page: Page, label: string): Promise<void> {
+    try {
+      const video = page.video();
+      if (!video) {
+        throw new Error("该页面未启用录像（video 为 null）");
+      }
+      if (!this.videoDir) {
+        throw new Error("未提供报告输出目录，无法保存手机侧录像");
+      }
+      await mkdir(this.videoDir, { recursive: true });
+      this.videoSeq += 1;
+      const tempPath = join(
+        this.videoDir,
+        `.手机侧录像-${process.pid}-${this.videoSeq}.webm`,
+      );
+      try {
+        await video.saveAs(tempPath);
+        this.videos.push({ label, webm: await readFile(tempPath) });
+      } finally {
+        await rm(tempPath, { force: true }).catch(() => undefined);
+      }
+    } catch (error) {
+      this.videos.push({ label, webm: null, warning: errorSummary(error) });
     }
   }
 

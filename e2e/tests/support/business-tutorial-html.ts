@@ -8,7 +8,7 @@
 // 视频章节跳转）→ 结尾（可打开示例最终 PDF）。
 // 教程不渲染测试元信息：控制台检查步骤没有教程文案，报告自检与转换器
 // API 状态卡也不进入教程。
-import type { ReportFrameView } from "./business-report-html";
+import type { ReportFrameView, ReportVideoView } from "./business-report-html";
 import { escapeHtml, formatClock } from "./business-report-html";
 
 /** 与 report-video-reporter.ts 默认输出同名：同目录相对引用。 */
@@ -22,6 +22,8 @@ export interface TutorialStepView {
   see: string[];
   note: string[];
   frames: ReportFrameView[];
+  /** 手机侧页面录像（自助建档 / 扫码签名），WebM 内嵌。 */
+  videos: ReportVideoView[];
   /** 相对录像起点的秒数，用于章节跳转。 */
   startedAtSeconds: number;
 }
@@ -77,6 +79,31 @@ function renderFrames(step: TutorialStepView): string {
   return `<div class="frames">${figures}</div>`;
 }
 
+function renderVideos(step: TutorialStepView): string {
+  if (step.videos.length === 0) {
+    return "";
+  }
+  const blocks = step.videos
+    .map((video) => {
+      if (!video.webm) {
+        return (
+          `<div class="step-video missing">` +
+          `<p class="video-label">${escapeHtml(video.label)}</p>` +
+          `<p class="frame-warning">手机侧录像缺失：${escapeHtml(video.warning ?? "未知原因")}</p>` +
+          `</div>`
+        );
+      }
+      return (
+        `<figure class="step-video">` +
+        `<video controls preload="metadata" ` +
+        `src="data:video/webm;base64,${video.webm.toString("base64")}"></video>` +
+        `<figcaption>${escapeHtml(video.label)}</figcaption></figure>`
+      );
+    })
+    .join("");
+  return `<div class="step-videos">${blocks}</div>`;
+}
+
 function renderTri(step: TutorialStepView): string {
   const items = (lines: string[], tag: "ol" | "ul") =>
     lines.length === 0
@@ -103,6 +130,7 @@ function renderStep(step: TutorialStepView, index: number): string {
     `<h2>${escapeHtml(step.title)}</h2>${seek}</header>` +
     renderTri(step) +
     renderFrames(step) +
+    renderVideos(step) +
     `</section>`
   );
 }
@@ -174,6 +202,10 @@ export function renderTutorialHtml(model: TutorialModel): string {
   .tri-col.note { background: #fdf6ec; }
   .tri-col.note h3 { color: #8a5a00; }
   .frames { display: grid; gap: 14px; margin: 10px 0 14px; }
+  .step-videos { display: grid; gap: 14px; margin: 10px 0 14px; }
+  figure.step-video { margin: 0; }
+  figure.step-video video { width: 100%; max-height: 70vh; border: 1px solid #e2e7e4;
+    border-radius: 10px; background: #000; display: block; }
   figure.frame { margin: 0; }
   figure.frame img { width: 100%; height: auto; border: 1px solid #e2e7e4; border-radius: 8px;
     display: block; cursor: zoom-in; background: #fff; }
@@ -181,6 +213,8 @@ export function renderTutorialHtml(model: TutorialModel): string {
   figure.zoom img { max-width: 680px; margin: 0 auto; border-color: #e8bfbc; }
   figcaption { color: #46504b; font-size: 14.5px; padding: 6px 2px 0; }
   .frame.missing { background: #fff5f4; border: 1px dashed #e8bfbc; border-radius: 8px; padding: 10px 14px; }
+  .step-video.missing { background: #fff5f4; border: 1px dashed #e8bfbc; border-radius: 8px; padding: 10px 14px; }
+  .step-video.missing .video-label { margin: 0 0 4px; color: #46504b; font-size: 14.5px; font-weight: 600; }
   .frame-warning { color: #b4342c; font-size: 13.5px; }
   .tut-end { border-top-color: #cfd6d1; }
   .pdf-link { color: #1f6f4a; font-weight: 700; }

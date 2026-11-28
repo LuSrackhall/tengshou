@@ -128,6 +128,12 @@ export async function signByPhone(
   } finally {
     await signPage.close();
   }
+  // 手机签名页录像在 page 关闭后才保证落盘；读入后内嵌进报告/教程，
+  // 让「手机上打开签名页、手写三笔并提交」的过程可回放。
+  await frames?.capturePageVideo(
+    signPage,
+    "手机侧实录：手机上打开签名页、手写三笔并提交",
+  );
   await expect(dialog.locator("#signState")).toContainText("签名已保存", {
     timeout: 30_000,
   });

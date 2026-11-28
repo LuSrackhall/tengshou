@@ -83,6 +83,12 @@ export async function runPosterEnrollStep(
     page: phone,
   });
   await phone.close();
+  // 手机页是 context 内独立 page：录像在 page 关闭后才保证落盘，取回后内嵌
+  // 进报告/教程（Playwright 只把 fixture 页面的录像作为附件，不会带手机页）。
+  await frames.capturePageVideo(
+    phone,
+    "手机侧实录：租户扫码后选择类型、填写档案并提交",
+  );
 
   await poster.locator(".modal-head button.close").click();
   await expect(poster).toBeHidden();

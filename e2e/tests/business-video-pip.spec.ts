@@ -12,6 +12,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { nextPhoneVideoPath } from "./support/business-frames";
 import {
   PIP_DIR_NAME,
   PIP_PLAN_NAME,
@@ -112,6 +113,16 @@ test("合成计划：读写往返，清理 .pip 暂存目录", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("手机侧暂存录像：跨步骤（不同 FrameRecorder）文件名不冲突", () => {
+  // runStep 每个业务步骤新建一个 FrameRecorder；两段手机录像必须写到
+  // 不同文件，否则第二段的 saveAs 会覆盖第一段，画中画两段都指向同一段。
+  const a = nextPhoneVideoPath("/tmp/report/.pip");
+  const b = nextPhoneVideoPath("/tmp/report/.pip");
+  expect(a).not.toBe(b);
+  expect(a.endsWith(".webm")).toBe(true);
+  expect(b.endsWith(".webm")).toBe(true);
 });
 
 test("合成计划：缺失或损坏时按「无需合成」处理", async () => {

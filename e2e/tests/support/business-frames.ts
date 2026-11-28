@@ -63,12 +63,20 @@ export interface CaptureOptions {
   padding?: number;
 }
 
+/** `.pip` 下手机侧录像的模块级序号：跨 FrameRecorder 实例递增，避免同名覆盖。 */
+let phoneVideoSeq = 0;
+
+/** 下一段手机侧录像的暂存路径（模块级序号，跨 FrameRecorder 实例唯一）。 */
+export function nextPhoneVideoPath(pipDir: string): string {
+  phoneVideoSeq += 1;
+  return join(pipDir, `phone-${process.pid}-${phoneVideoSeq}.webm`);
+}
+
 /** 一步业务动作的采集器：分镜 + 状态卡 + 手机侧页面录像。 */
 export class FrameRecorder {
   readonly frames: FrameRecord[] = [];
   readonly cards: StepCard[] = [];
   readonly videos: VideoRecord[] = [];
-  private videoSeq = 0;
 
   constructor(
     private readonly page: Page,
@@ -128,11 +136,10 @@ export class FrameRecorder {
       }
       const pipDir = join(this.videoDir, PIP_DIR_NAME);
       await mkdir(pipDir, { recursive: true });
-      this.videoSeq += 1;
-      const tempPath = join(
-        pipDir,
-        `phone-${process.pid}-${this.videoSeq}.webm`,
-      );
+      // 每个业务步骤各用一个 FrameRecorder（runStep 新建），序号必须是
+      // 模块级才能保证两段手机录像不互相覆盖：第二步的 saveAs 若同名会把
+      // 第一步的暂存文件覆盖，画中画两段就都指向最后一段的录像。
+      const tempPath = nextPhoneVideoPath(pipDir);
       try {
         await video.saveAs(tempPath);
         const webm = await readFile(tempPath);

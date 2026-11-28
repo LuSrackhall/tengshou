@@ -200,6 +200,9 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
       });
       expect(response?.status()).toBe(200);
       await expect(phone.locator("#enrollCard")).toBeVisible();
+      // 单位租户选择「单位」类型：名称标签切换为「单位名称」，提交 kind=organization。
+      await phone.locator("#enrollKind").selectOption("organization");
+      await expect(phone.locator("#enrollNameLabel")).toHaveText("单位名称");
       await phone.locator("#enrollName").fill(tenantName);
       await phone.locator("#enrollIDNumber").fill(idNumber);
       await phone.locator("#enrollPhone").fill("13800003333");
@@ -233,17 +236,21 @@ test.describe("场景 F：自助录入海报与档案复用", () => {
     await test.step("桌面收到档案，签名章与公章来源为手机自助录入", async () => {
       const row = page.locator(`#partyTable tr[data-id]:has-text("${tenantName}")`);
       await expect(row).toBeVisible({ timeout: 20_000 });
+      // 「类型」列显示「单位」，不再默认显示「个人」。
+      await expect(row).toContainText("单位");
       tenantID = (await row.getAttribute("data-id")) ?? "";
       expect(tenantID).not.toBe("");
       const detail = (await (
         await page.request.get(appUrl(page, `/app/api/v1/parties/${tenantID}`))
       ).json()) as {
+        kind?: string;
         signature_id?: string;
         signature_seal_id?: string;
         signature_seal_source?: string;
         seal_asset_id?: string;
         seal_source?: string;
       };
+      expect(detail.kind).toBe("organization");
       expect(detail.signature_id ?? "").toBe("");
       expect(detail.signature_seal_id ?? "").not.toBe("");
       expect(detail.seal_asset_id ?? "").not.toBe("");

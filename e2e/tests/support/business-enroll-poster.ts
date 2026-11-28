@@ -48,6 +48,9 @@ export async function runPosterEnrollStep(
   });
   expect(response?.status()).toBe(200);
   await expect(phone.locator("#enrollCard")).toBeVisible();
+  // 企业租户选择「单位」类型（te-i11we）：名称标签切换为「单位名称」。
+  await phone.locator("#enrollKind").selectOption("organization");
+  await expect(phone.locator("#enrollNameLabel")).toHaveText("单位名称");
   await phone.locator("#enrollName").fill(selfName);
   await phone.locator("#enrollIDNumber").fill(selfID);
   await phone.locator("#enrollPhone").fill("13800009999");
@@ -83,16 +86,19 @@ export async function runPosterEnrollStep(
   await expect(poster).toBeHidden();
   const row = page.locator(`#partyTable tr[data-id]:has-text("${selfName}")`);
   await expect(row).toBeVisible({ timeout: 20_000 });
+  await expect(row).toContainText("单位");
   const partyId = (await row.getAttribute("data-id")) ?? "";
   expect(partyId).not.toBe("");
   const detail = (await (
     await page.request.get(`${baseURL}/app/api/v1/parties/${partyId}`)
   ).json()) as {
+    kind?: string;
     signature_seal_id?: string;
     signature_seal_source?: string;
     seal_asset_id?: string;
     seal_source?: string;
   };
+  expect(detail.kind).toBe("organization");
   expect(detail.signature_seal_id ?? "").not.toBe("");
   expect(detail.seal_asset_id ?? "").not.toBe("");
   expect(detail.signature_seal_source).toBe("lan_enroll");
@@ -102,7 +108,8 @@ export async function runPosterEnrollStep(
     targets: [row],
   });
   return (
-    `海报入口为长期有效二维码（可打印贴墙）；租户「${selfName}」用手机扫码上传证件照、` +
-    "签名章与公章后提交，档案自动出现在桌面列表；两张图片的来源均记录为 lan_enroll（手机自助录入）。"
+    `海报入口为长期有效二维码（可打印贴墙）；租户「${selfName}」用手机扫码选择「单位」类型，` +
+    "上传证件照、签名章与公章后提交，档案以单位类型自动出现在桌面列表；" +
+    "两张图片的来源均记录为 lan_enroll（手机自助录入）。"
   );
 }

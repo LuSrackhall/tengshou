@@ -212,6 +212,9 @@ func TestAppEnrollSelfServiceFlow(t *testing.T) {
 	if matches[0].IDFrontPath == "" || matches[0].IDBackPath == "" || matches[0].SignatureID == "" {
 		t.Fatalf("enrolled assets missing: %+v", matches[0])
 	}
+	if matches[0].Kind != model.PartyPerson {
+		t.Fatalf("default enrolled kind = %q, want person", matches[0].Kind)
+	}
 
 	// The one-time token cannot be replayed.
 	if replay := submit("自助租户", "330102198001010011"); replay.Code != http.StatusConflict {
@@ -267,6 +270,53 @@ func TestAppEnrollRejectsDuplicateIDThenAcceptsCorrection(t *testing.T) {
 	}
 	if stored[0].Kind != model.PartyPerson {
 		t.Fatalf("enrolled kind = %q", stored[0].Kind)
+	}
+}
+
+// te-i11we: the phone page lets the tenant choose person/organization. A unit
+// tenant must be stored as an organization (previously every self-enrolled
+// archive showed “个人”), Chinese labels are accepted, and an unknown value is
+// a field validation error that leaves the one-time link usable.
+func TestAppEnrollSubmitKindOrganization(t *testing.T) {
+	f := newFixtureWithOptions(t, fixtureOptions{allowLAN: true, lanHosts: []string{"192.168.1.50"}})
+	resp, body := f.appRequest(t, http.MethodPost, "/app/api/v1/enroll-sessions", nil, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create enroll session: %d %s", resp.StatusCode, body)
+	}
+	session := decodeAppItem(t, body)
+	token := tokenForPath(t, session, "/enroll/")
+
+	submit := func(kind, name, idNumber string) *httptest.ResponseRecorder {
+		payload, err := json.Marshal(map[string]any{
+			"kind":      kind,
+			"name":      name,
+			"id_number": idNumber,
+			"id_front":  photoDataURL(t, 30, 20),
+			"id_back":   photoDataURL(t, 30, 20),
+			"signature": signatureDataURL(t, false),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return signRaw(t, f, http.MethodPost, "/enroll/"+token+"/submit", payload, "192.168.1.23:5000",
+			map[string]string{"Content-Type": "application/json", "X-Tengshou-Sign": "1"})
+	}
+
+	invalid := submit("company", "单位租户", "91330100MA2ENROLL02")
+	if invalid.Code != http.StatusUnprocessableEntity || errorCode(t, invalid) != "validation" {
+		t.Fatalf("invalid kind = %d %s", invalid.Code, invalid.Body.String())
+	}
+	// The one-time link stays usable after a field validation error.
+	rec := submit("单位", "单位租户", "91330100MA2ENROLL02")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("organization submit = %d %s", rec.Code, rec.Body.String())
+	}
+	stored, err := f.reader.FindPartiesByIDNumber(context.Background(), "91330100MA2ENROLL02")
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("enrolled party = %v err=%v", stored, err)
+	}
+	if stored[0].Kind != model.PartyOrganization {
+		t.Fatalf("enrolled kind = %q, want organization", stored[0].Kind)
 	}
 }
 

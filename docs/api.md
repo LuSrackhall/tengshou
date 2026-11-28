@@ -158,7 +158,8 @@ v0.2 租户档案升级新增（同样仅限回环的应用写入面）：
 
 新建档案（`POST /app/api/v1/parties`）必须提供 `id_number`；存量档案允许为空，
 在档案页补录后长期有效。自助建档的手机页是 `/enroll/<token>`，与 `/sign/<token>`
-同样是 LAN only、一次性令牌；提交内容为姓名、证件号、证件照正反面与手写签名，
+同样是 LAN only、一次性令牌；提交内容为类型 `kind`（`person` / `organization`，
+缺省 `person`）、姓名、证件号、证件照正反面与手写签名，
 证件号已存在时返回 `duplicate_id_number`（409）并提示联系出租方。
 
 ## 稳定性

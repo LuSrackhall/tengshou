@@ -192,6 +192,10 @@ func TestEnrollPartyCreatesArchiveWithAssets(t *testing.T) {
 	if party.IDFrontPath == "" || party.IDBackPath == "" || party.SignatureID == "" {
 		t.Fatalf("enrollment assets missing: %+v", party)
 	}
+	// An omitted kind keeps the historical default: natural person.
+	if party.Kind != model.PartyPerson {
+		t.Fatalf("default enrolled kind = %q, want person", party.Kind)
+	}
 	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(party.IDFrontPath))); err != nil {
 		t.Fatalf("front photo file: %v", err)
 	}
@@ -212,6 +216,38 @@ func TestEnrollPartyCreatesArchiveWithAssets(t *testing.T) {
 	})
 	if code := businessCode(t, err); code != "duplicate_id_number" {
 		t.Fatalf("duplicate code = %q, want duplicate_id_number", code)
+	}
+}
+
+func TestEnrollPartyKindOrganization(t *testing.T) {
+	svc, rd, _ := openService(t)
+	svc.SetDataDir(t.TempDir())
+	ctx := context.Background()
+	sigPNG := testPNG(t, 12, 6)
+	sum := sha256.Sum256(sigPNG)
+	party, err := svc.EnrollParty(ctx, service.EnrollPartyInput{
+		Kind:            "单位",
+		Name:            "自助单位租户",
+		IDNumber:        "91330100MA2ENROLL01",
+		IDFront:         testPNG(t, 20, 12),
+		IDBack:          testPNG(t, 20, 12),
+		SignaturePNG:    sigPNG,
+		SignatureSHA256: hex.EncodeToString(sum[:]),
+		SignatureWidth:  12,
+		SignatureHeight: 6,
+	})
+	if err != nil {
+		t.Fatalf("enroll organization: %v", err)
+	}
+	if party.Kind != model.PartyOrganization {
+		t.Fatalf("enrolled kind = %q, want organization", party.Kind)
+	}
+	stored, err := rd.GetParty(ctx, party.ID)
+	if err != nil {
+		t.Fatalf("read enrolled party: %v", err)
+	}
+	if stored.Kind != model.PartyOrganization {
+		t.Fatalf("stored kind = %q, want organization", stored.Kind)
 	}
 }
 
@@ -383,6 +419,7 @@ func TestEnrollPartyValidation(t *testing.T) {
 		{"证件照正面缺失", "证件照正面", func(in *service.EnrollPartyInput) { in.IDFront = nil }},
 		{"证件照反面缺失", "证件照反面", func(in *service.EnrollPartyInput) { in.IDBack = nil }},
 		{"手写签名缺失", "手写签名", func(in *service.EnrollPartyInput) { in.SignaturePNG = nil }},
+		{"类型非法", "类型", func(in *service.EnrollPartyInput) { in.Kind = "company" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

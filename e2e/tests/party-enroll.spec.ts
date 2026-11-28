@@ -117,6 +117,8 @@ test.describe("场景 D：局域网自助建档", () => {
       );
       await expect(row).toBeVisible({ timeout: 20_000 });
       await expect(row).toContainText(idNumber);
+      // 手机页未选择类型时默认「个人」——列表「类型」列保留既有默认。
+      await expect(row).toContainText("个人");
       await shot(page, testInfo, "04-自助建档已进入档案列表");
     });
 

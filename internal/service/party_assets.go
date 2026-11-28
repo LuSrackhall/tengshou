@@ -230,6 +230,10 @@ func (s *Service) AttachPartySignature(ctx context.Context, partyID, signatureID
 // internal/sign) or a signature-stamp picture (SignatureSeal, raw bytes). The
 // company seal (Seal) is optional for enterprise tenants.
 type EnrollPartyInput struct {
+	// Kind selects the archive type. Empty means a natural person, which keeps
+	// the historical behavior of the phone page; organization tenants pass
+	// person/organization values or the Chinese labels (normalizeKind).
+	Kind            string
 	Name            string
 	IDNumber        string
 	Phone           string
@@ -256,6 +260,10 @@ func (s *Service) EnrollParty(ctx context.Context, in EnrollPartyInput) (model.P
 	name := truncateRunes(strings.TrimSpace(in.Name), 120)
 	idNumber := truncateRunes(strings.TrimSpace(in.IDNumber), 120)
 	validation := &ValidationErrors{}
+	kind, kindOK := normalizeKind(in.Kind)
+	if !kindOK {
+		validation.add(model.FieldPartyKind, "类型", "只能是 个人 / 单位")
+	}
 	if name == "" {
 		validation.add(model.FieldPartyName, "姓名", "不能为空")
 	}
@@ -315,7 +323,7 @@ func (s *Service) EnrollParty(ctx context.Context, in EnrollPartyInput) (model.P
 	}
 
 	party, _, err := s.SaveParty(ctx, PartyInput{
-		Kind:            model.PartyPerson,
+		Kind:            kind,
 		Name:            name,
 		IDNumber:        idNumber,
 		Phone:           in.Phone,

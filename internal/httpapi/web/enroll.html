@@ -24,7 +24,7 @@
   .field { margin: 0 0 14px; }
   .field > label { display: block; margin: 0 0 6px; font-weight: 600; font-size: 14.5px; }
   .field .req { color: #b4342c; margin-left: 3px; }
-  input[type="text"], input[type="tel"] {
+  input[type="text"], input[type="tel"], select {
     width: 100%; min-height: 48px; border: 1px solid #d8ddda; border-radius: 11px;
     background: #fff; color: #1f2328; font: inherit; padding: 10px 12px;
   }
@@ -69,9 +69,16 @@
   {{if .Active}}
   <section class="card" id="enrollCard">
     <h2>填写您的档案</h2>
-    <p class="help">请如实填写姓名与证件号，并拍摄证件照正反面；签名方式为手写签名或上传签名章（私章）图片二选一。企业租户可加传公章图片。提交后由出租方电脑保存，不会上传互联网。</p>
+    <p class="help">请先选择个人或单位类型，再如实填写姓名（单位填单位名称）与证件号，并拍摄证件照正反面；签名方式为手写签名或上传签名章（私章）图片二选一。企业租户可加传公章图片。提交后由出租方电脑保存，不会上传互联网。</p>
     <div class="field">
-      <label for="enrollName">姓名<span class="req">*</span></label>
+      <label for="enrollKind">类型<span class="req">*</span></label>
+      <select id="enrollKind">
+        <option value="person" selected>个人</option>
+        <option value="organization">单位</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="enrollName"><span id="enrollNameLabel">姓名</span><span class="req">*</span></label>
       <input id="enrollName" type="text" autocomplete="name" maxlength="120" placeholder="请输入姓名">
     </div>
     <div class="field">
@@ -153,6 +160,8 @@
 <script>
 (function () {
   "use strict";
+  var kindEl = document.getElementById("enrollKind");
+  var nameLabelEl = document.getElementById("enrollNameLabel");
   var nameEl = document.getElementById("enrollName");
   var idNumberEl = document.getElementById("enrollIDNumber");
   var phoneEl = document.getElementById("enrollPhone");
@@ -336,11 +345,22 @@
     }
   }
 
+  function refreshKind() {
+    var organization = kindEl.value === "organization";
+    nameLabelEl.textContent = organization ? "单位名称" : "姓名";
+    nameEl.placeholder = organization ? "请输入单位名称" : "请输入姓名";
+  }
+  kindEl.addEventListener("change", refreshKind);
+  refreshKind();
+
   submitBtn.addEventListener("click", async function () {
     if (busy || expired) return;
     var name = nameEl.value.trim();
     var idNumber = idNumberEl.value.trim();
-    if (!name) { setMessage("请填写姓名。", "error"); return; }
+    if (!name) {
+      setMessage(kindEl.value === "organization" ? "请填写单位名称。" : "请填写姓名。", "error");
+      return;
+    }
     if (!idNumber) { setMessage("请填写证件号。", "error"); return; }
     if (!frontData || !backData) { setMessage("请上传证件照正反面。", "error"); return; }
     if (!dirty && !sigSealData) { setMessage("请手写签名或上传签名章图片。", "error"); return; }
@@ -354,6 +374,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Tengshou-Sign": "1" },
         body: JSON.stringify({
+          kind: kindEl.value,
           name: name,
           id_number: idNumber,
           phone: phoneEl.value.trim(),

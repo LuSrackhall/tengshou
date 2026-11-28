@@ -997,9 +997,13 @@ func (rc *templateRenderContext) signatureImage(p model.Placement) (image.Image,
 	return img, true, nil
 }
 
-// signatureFor picks the newest signature for the placement party. There is
-// no cross-party fallback: a missing signature must be visible as such. A
-// sample preview has no party IDs to match, so it uses the newest signature.
+// signatureFor picks the signature for the placement party. The same party can
+// carry both a legacy archive row (no contract link) and a row linked to this
+// contract; the linked row wins regardless of newest-first order so a snapshot
+// never falls back to the archive-era record. Only when the party has no
+// linked row does the legacy row apply. There is no cross-party fallback: a
+// missing signature must be visible as such. A sample preview has no party IDs
+// to match, so it uses the newest signature.
 func (rc *templateRenderContext) signatureFor(p model.Placement) (model.Signature, bool) {
 	if rc.sample {
 		if len(rc.signatures) > 0 {
@@ -1018,10 +1022,21 @@ func (rc *templateRenderContext) signatureFor(p model.Placement) (model.Signatur
 			partyID = rc.partyB.ID
 		}
 	}
+	var fallback model.Signature
+	hasFallback := false
 	for _, sig := range rc.signatures {
-		if partyID == "" || sig.PartyID == partyID {
+		if partyID != "" && sig.PartyID != partyID {
+			continue
+		}
+		if sig.ContractID != "" && sig.ContractID == rc.contract.ID {
 			return sig, true
 		}
+		if !hasFallback {
+			fallback, hasFallback = sig, true
+		}
+	}
+	if hasFallback {
+		return fallback, true
 	}
 	return model.Signature{}, false
 }

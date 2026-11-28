@@ -486,7 +486,10 @@ func (r *Reader) GetContractDetail(ctx context.Context, id string) (model.Contra
 
 // listSignaturesForContract returns signatures explicitly linked to the
 // contract plus legacy party signatures that predate contract linking (B1/B2
-// rows have no contract_id).
+// rows have no contract_id). A legacy row is only a fallback: once the same
+// party has a signature linked to this contract, the linked row is
+// authoritative and the legacy row is dropped, so newest-first ordering can
+// never surface the archive-era duplicate instead of the contract link.
 func (r *Reader) listSignaturesForContract(ctx context.Context, contractID string, partyIDs ...string) ([]model.Signature, error) {
 	ids := []string{}
 	for _, id := range partyIDs {
@@ -515,14 +518,31 @@ func (r *Reader) listSignaturesForContract(ctx context.Context, contractID strin
 	}
 	defer rows.Close()
 	out := []model.Signature{}
+	covered := map[string]bool{}
 	for rows.Next() {
 		sig, err := scanSignature(rows)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, sig)
+		if contractID != "" && sig.ContractID == contractID && sig.PartyID != "" {
+			covered[sig.PartyID] = true
+		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(covered) == 0 {
+		return out, nil
+	}
+	kept := out[:0]
+	for _, sig := range out {
+		if sig.ContractID == "" && sig.Source == "" && covered[sig.PartyID] {
+			continue
+		}
+		kept = append(kept, sig)
+	}
+	return kept, nil
 }
 
 func (r *Reader) listDocumentsForContract(ctx context.Context, contractID string) ([]model.OutputDocument, error) {

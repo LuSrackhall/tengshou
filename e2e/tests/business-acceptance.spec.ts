@@ -17,7 +17,10 @@ import { expect, test } from "./support/business-fixture";
 import { repoRoot } from "./support/app";
 import type { FrameRecorder } from "./support/business-frames";
 import type { PlacementBox } from "./support/business-pdf";
-import { AcceptanceReport } from "./support/business-report";
+import {
+  AcceptanceReport,
+  assertEmbeddedPhoneVideos,
+} from "./support/business-report";
 import {
   ASSET_NAME,
   CONTRACT_TITLE,
@@ -566,6 +569,12 @@ test.describe("场景 C：真实业务场景验收（Word 合同 → 签字盖�
         ? { path: pdfPath, name: PDF_NAME, details: pdfDetails }
         : undefined;
       const written = await report.write(OUTPUT_DIR, artifact);
+      // 常驻断言（软断言）：真实生成的报告/教程必须各内嵌两段手机侧录像，
+      // 采集链路回归时测试变红，而不是在报告里静默降级为「手机侧录像缺失」。
+      await assertEmbeddedPhoneVideos(written.reportPath, "业务验收报告");
+      if (written.tutorialPath) {
+        await assertEmbeddedPhoneVideos(written.tutorialPath, "使用教程");
+      }
       await testInfo.attach("业务验收报告.html", {
         path: written.reportPath,
         contentType: "text/html",

@@ -4,9 +4,14 @@
 //
 // 失败也会写入报告：失败步骤标红、写明实际结果与分镜，随后把异常继续抛给
 // Playwright，保证测试仍按失败处理。分镜采集失败只记警告、不改变业务判定。
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { test as baseTest, type Page, type TestInfo } from "@playwright/test";
+import {
+  expect,
+  test as baseTest,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 import {
   FrameRecorder,
   type FrameRecord,
@@ -80,6 +85,39 @@ interface StepRecord {
 export interface ReportOutput {
   reportPath: string;
   tutorialPath?: string;
+}
+
+/** 真实报告/教程 HTML 中必须内嵌的手机侧录像标签（te-cfgvj 采集点）。 */
+const PHONE_VIDEO_LABELS = [
+  "手机侧实录：租户扫码后选择类型、填写档案并提交",
+  "手机侧实录：手机上打开签名页、手写三笔并提交",
+] as const;
+
+/**
+ * 常驻断言：真实生成的报告/教程 HTML 各内嵌两段手机侧录像、标签齐全，
+ * 且没有「手机侧录像缺失」降级。capturePageVideo 按设计把采集失败降级为
+ * warning（不中断业务），没有这条断言时采集链路回归只能靠人工抽帧发现。
+ *
+ * 调用点在 spec 的 finally 块：用软断言，录像缺失让测试变红，同时不顶掉
+ * 场景主体已经抛出的原始异常。
+ */
+export async function assertEmbeddedPhoneVideos(
+  htmlPath: string,
+  kind: string,
+): Promise<void> {
+  const html = await readFile(htmlPath, "utf8");
+  const embedded = html.match(/data:video\/webm;base64,/g) ?? [];
+  expect
+    .soft(embedded.length, `${kind}应内嵌 2 段手机侧录像：${htmlPath}`)
+    .toBe(2);
+  for (const label of PHONE_VIDEO_LABELS) {
+    expect
+      .soft(html, `${kind}缺少手机侧录像标签「${label}」：${htmlPath}`)
+      .toContain(label);
+  }
+  expect
+    .soft(html, `${kind}出现「手机侧录像缺失」：${htmlPath}`)
+    .not.toContain("手机侧录像缺失");
 }
 
 function errorSummary(error: unknown): string {

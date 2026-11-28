@@ -304,6 +304,9 @@ func (s *Server) handleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 type enrollSubmitInput struct {
+	// Kind is person/organization (Chinese labels also accepted); empty means
+	// person so older phone pages keep working.
+	Kind      string `json:"kind"`
 	Name      string `json:"name"`
 	IDNumber  string `json:"id_number"`
 	Phone     string `json:"phone"`
@@ -431,6 +434,7 @@ func (s *Server) handleEnrollSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	party, err := svc.EnrollParty(r.Context(), service.EnrollPartyInput{
+		Kind:            in.Kind,
 		Name:            in.Name,
 		IDNumber:        in.IDNumber,
 		Phone:           in.Phone,

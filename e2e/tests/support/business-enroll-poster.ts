@@ -71,6 +71,7 @@ export async function runPosterEnrollStep(
   await expect(phone.locator("#enrollSealPreview")).toBeVisible();
   await frames.capture("② 手机侧自助建档页：证件照、签名章与公章都可上传", {
     region: phone.locator("#enrollCard"),
+    page: phone,
   });
   await expect(phone.locator("#enrollSubmitBtn")).toBeEnabled();
   await phone.locator("#enrollSubmitBtn").click();
@@ -79,6 +80,7 @@ export async function runPosterEnrollStep(
   });
   await frames.capture("③ 手机侧提交成功：档案已保存到出租方电脑本机", {
     region: phone.locator("#enrollCard"),
+    page: phone,
   });
   await phone.close();
 

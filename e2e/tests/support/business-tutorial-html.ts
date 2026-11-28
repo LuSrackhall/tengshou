@@ -101,7 +101,13 @@ function renderVideos(step: TutorialStepView): string {
       );
     })
     .join("");
-  return `<div class="step-videos">${blocks}</div>`;
+  // 放在分镜之前、贴近步骤标题：扫码之后手机上发生的过程要第一眼能看到。
+  return (
+    `<div class="step-videos">` +
+    `<h3 class="step-videos-title">手机侧实录（扫码后手机上的完整录入过程）</h3>` +
+    blocks +
+    `</div>`
+  );
 }
 
 function renderTri(step: TutorialStepView): string {
@@ -129,8 +135,8 @@ function renderStep(step: TutorialStepView, index: number): string {
     `<header><span class="seq">${escapeHtml(step.seq)}</span>` +
     `<h2>${escapeHtml(step.title)}</h2>${seek}</header>` +
     renderTri(step) +
-    renderFrames(step) +
     renderVideos(step) +
+    renderFrames(step) +
     `</section>`
   );
 }
@@ -203,6 +209,7 @@ export function renderTutorialHtml(model: TutorialModel): string {
   .tri-col.note h3 { color: #8a5a00; }
   .frames { display: grid; gap: 14px; margin: 10px 0 14px; }
   .step-videos { display: grid; gap: 14px; margin: 10px 0 14px; }
+  .step-videos-title { margin: 2px 0 0; font-size: 15.5px; color: #1f2328; }
   figure.step-video { margin: 0; }
   figure.step-video video { width: 100%; max-height: 70vh; border: 1px solid #e2e7e4;
     border-radius: 10px; background: #000; display: block; }

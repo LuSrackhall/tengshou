@@ -140,7 +140,14 @@ function renderVideos(step: ReportStepView): string {
       );
     })
     .join("");
-  return `<div class="step-videos">${blocks}</div>`;
+  // 放在步骤头部、分镜之前：用户点「▶ 看本步过程」跳主录像时间点，或直接
+  // 看这里的内嵌录像，都能看到扫码之后手机上发生的完整录入过程。
+  return (
+    `<div class="step-videos">` +
+    `<h3 class="step-videos-title">手机侧实录（扫码后手机上的完整录入过程）</h3>` +
+    blocks +
+    `</div>`
+  );
 }
 
 function renderCards(step: ReportStepView): string {
@@ -167,8 +174,8 @@ function renderStep(step: ReportStepView, index: number): string {
     `<span class="badge ${badge}">${escapeHtml(step.verdict)}</span></header>` +
     `<dl><dt>预期结果</dt><dd>${escapeHtml(step.expected)}</dd>` +
     `<dt>实际结果</dt><dd>${escapeHtml(step.actual)}</dd></dl>` +
-    renderFrames(step) +
     renderVideos(step) +
+    renderFrames(step) +
     renderCards(step) +
     `</section>`
   );
@@ -239,6 +246,7 @@ export function renderReportHtml(model: ReportModel): string {
   .status-card ul { font-size: 14.5px; }
   .frames { display: grid; gap: 14px; margin: 10px 0 14px; }
   .step-videos { display: grid; gap: 14px; margin: 10px 0 14px; }
+  .step-videos-title { margin: 2px 0 0; font-size: 15.5px; color: #1f2328; }
   figure.step-video { margin: 0; }
   figure.step-video video { width: 100%; max-height: 70vh; border: 1px solid #e2e7e4; border-radius: 10px; background: #000; display: block; }
   figure.frame { margin: 0; }
@@ -270,9 +278,10 @@ export function renderReportHtml(model: ReportModel): string {
   <section class="panel howto">
     <h2>怎么看这份报告</h2>
     <ul>
-      <li>每一步按顺序展示：业务动作 → 预期结果 → 实际结果 → 过程分镜 → 判定。</li>
+      <li>每一步按顺序展示：业务动作 → 预期结果 → 实际结果 → 手机侧实录（如有）→ 过程分镜 → 判定。</li>
       <li>过程分镜按真实发生顺序编号（①②③…），每张图下的文字说明「做了什么、界面发生了什么、看图重点」。</li>
       <li>分镜里的<strong style="color:#b4342c">红框</strong>是这一步的重点元素；图片已裁剪到相关区域，点击图片可放大到原始分辨率。</li>
+      <li>「手机侧实录（扫码后手机上的完整录入过程）」是手机页本身的完整录像；若本次运行合成了画中画，主录像在对应时间段右下角也会同步显示手机画面。</li>
       <li>若本次运行录制了过程视频，每步标题旁的「▶ 看本步过程」会跳到视频中该步开始的位置。</li>
       <li>最后一步把最终合同 PDF 逐页渲染进报告，并在关键值、签名与公章处画红框。</li>
     </ul>

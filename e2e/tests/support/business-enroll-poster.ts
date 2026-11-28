@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import type { BrowserContext, Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import type { FrameRecorder } from "./business-frames";
+import { phonePause, phoneType } from "./business-phone-pacing";
 
 const ONE_PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
@@ -43,6 +44,8 @@ export async function runPosterEnrollStep(
   });
 
   const phone = await context.newPage();
+  // 手机页从这里开始录制：画中画窗口按这个时刻换算到报告时钟。
+  const phoneStartedAt = Date.now();
   const response = await phone.goto(`${baseURL}/enroll/${token}`, {
     waitUntil: "domcontentloaded",
   });
@@ -51,43 +54,56 @@ export async function runPosterEnrollStep(
   // 企业租户选择「单位」类型（te-i11we）：名称标签切换为「单位名称」。
   await phone.locator("#enrollKind").selectOption("organization");
   await expect(phone.locator("#enrollNameLabel")).toHaveText("单位名称");
-  await phone.locator("#enrollName").fill(selfName);
-  await phone.locator("#enrollIDNumber").fill(selfID);
-  await phone.locator("#enrollPhone").fill("13800009999");
+  // 报告模式按人速填写（逐字 + 停顿），让画中画里能看清；教程模式由 slowMo 放慢。
+  await phonePause(phone, 800);
+  await phoneType(phone.locator("#enrollName"), selfName);
+  await phonePause(phone, 300);
+  await phoneType(phone.locator("#enrollIDNumber"), selfID);
+  await phonePause(phone, 300);
+  await phoneType(phone.locator("#enrollPhone"), "13800009999");
   await phone.locator("#enrollIdFront").setInputFiles({
     name: "front.png", mimeType: "image/png", buffer: ONE_PIXEL_PNG,
   });
+  await phonePause(phone, 600);
   await phone.locator("#enrollIdBack").setInputFiles({
     name: "back.png", mimeType: "image/png", buffer: ONE_PIXEL_PNG,
   });
+  await phonePause(phone, 600);
   const sealImage = await readFile(sealPath);
   await phone.locator("#enrollSignatureSeal").setInputFiles({
     name: "signature-seal.png", mimeType: "image/png", buffer: sealImage,
   });
+  await phonePause(phone, 900);
   await phone.locator("#enrollSeal").setInputFiles({
     name: "seal.png", mimeType: "image/png", buffer: sealImage,
   });
+  await phonePause(phone, 900);
   await expect(phone.locator("#enrollSignatureSealPreview")).toBeVisible();
   await expect(phone.locator("#enrollSealPreview")).toBeVisible();
+  await phonePause(phone, 600);
   await frames.capture("② 手机侧自助建档页：证件照、签名章与公章都可上传", {
     region: phone.locator("#enrollCard"),
     page: phone,
   });
   await expect(phone.locator("#enrollSubmitBtn")).toBeEnabled();
+  await phonePause(phone, 800);
   await phone.locator("#enrollSubmitBtn").click();
   await expect(phone.getByRole("heading", { name: "档案已提交" })).toBeVisible({
     timeout: 20_000,
   });
+  await phonePause(phone, 1000);
   await frames.capture("③ 手机侧提交成功：档案已保存到出租方电脑本机", {
     region: phone.locator("#enrollCard"),
     page: phone,
   });
   await phone.close();
   // 手机页是 context 内独立 page：录像在 page 关闭后才保证落盘，取回后内嵌
-  // 进报告/教程（Playwright 只把 fixture 页面的录像作为附件，不会带手机页）。
+  // 进报告/教程（Playwright 只把 fixture 页面的录像作为附件，不会带手机页），
+  // 同时留下画中画合成窗口（从新页到关闭的墙钟时间）。
   await frames.capturePageVideo(
     phone,
     "手机侧实录：租户扫码后选择类型、填写档案并提交",
+    phoneStartedAt,
   );
 
   await poster.locator(".modal-head button.close").click();

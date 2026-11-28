@@ -28,7 +28,13 @@ function minimalModel(): ReportModel {
         expected: "手机扫码后完成自助建档，桌面收到档案。",
         actual: "操作完成",
         verdict: "符合预期",
-        frames: [],
+        frames: [
+          {
+            caption: "① 红框处是长期有效的二维码",
+            png: WEBM_BYTES,
+            kind: "screenshot",
+          },
+        ],
         videos: [
           {
             label: "手机侧实录：租户扫码后选择类型、填写档案并提交",
@@ -57,6 +63,12 @@ test("验收报告 HTML：手机侧录像以 WebM base64 内嵌并带中文标�
     `src="data:video/webm;base64,${WEBM_BYTES.toString("base64")}"></video>`,
   );
   expect(html).toContain("手机侧实录：租户扫码后选择类型、填写档案并提交");
+  expect(html).toContain("手机侧实录（扫码后手机上的完整录入过程）");
+  // 播放器放在步骤头部、分镜之前：扫码后的手机过程要第一眼看到（te-fp48w）。
+  const videosAt = html.indexOf('<div class="step-videos">');
+  const framesAt = html.indexOf('<div class="frames">');
+  expect(videosAt).toBeGreaterThan(-1);
+  expect(framesAt).toBeGreaterThan(videosAt);
   expect(html).not.toContain("手机侧录像缺失");
 });
 

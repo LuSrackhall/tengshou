@@ -11,8 +11,9 @@
 //
 // 视频在测试结束（testInfo 结果确定）后才落盘，因此报告正文先写占位注释，
 // 由本报告器在 onTestEnd 里补全；找不到视频时保留「未录制到视频」说明，
-// 不会出现坏掉的播放器。
-import { copyFile, readFile, writeFile } from "node:fs/promises";
+// 不会出现坏掉的播放器。钩子全程同步：Playwright 不会等待异步报告器钩子，
+// 异步实现时进程会在 ffmpeg 合成完成前退出（te-fp48w 实测）。
+import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type {
   FullConfig,
@@ -89,12 +90,12 @@ function errorSummary(error: unknown): string {
 }
 
 /** 按测试留下的计划把手机侧录像合成进主录像；任何问题都只返回面板提示。 */
-async function composePhonePip(
+function composePhonePip(
   videoPath: string,
   outputDir: string,
-): Promise<PanelNotes> {
+): PanelNotes {
   try {
-    const plan = await readPipPlan(outputDir);
+    const plan = readPipPlan(outputDir);
     if (!plan || plan.segments.length === 0) {
       return {};
     }
@@ -106,7 +107,7 @@ async function composePhonePip(
           "步骤内的「手机侧实录」视频仍可正常播放，业务判定不受影响。",
       };
     }
-    const result = await compositePip(
+    const result = compositePip(
       ffmpeg.path,
       videoPath,
       plan.segments,
@@ -144,7 +145,11 @@ export default class ProcessVideoReporter implements Reporter {
       : config.rootDir;
   }
 
-  async onTestEnd(test: TestCase, result: TestResult): Promise<void> {
+  // 注意：这里必须保持同步。Playwright 不会等待报告器钩子返回的 Promise——
+  // 异步实现时测试进程在 ffmpeg 合成完成前就退出了：临时文件留在 .pip、
+  // 主录像没有画中画（te-fp48w 实测）。同步阻塞能保证复制、合成、补全 HTML
+  // 与清理都在进程退出前完成。
+  onTestEnd(test: TestCase, result: TestResult): void {
     if (!test.location.file.includes("business-acceptance.spec")) {
       return;
     }
@@ -159,7 +164,7 @@ export default class ProcessVideoReporter implements Reporter {
     try {
       let html: string;
       try {
-        html = await readFile(reportPath, "utf8");
+        html = readFileSync(reportPath, "utf8");
       } catch {
         return; // 用例未运行（收集阶段跳过）或报告尚未生成
       }
@@ -176,9 +181,9 @@ export default class ProcessVideoReporter implements Reporter {
         const videoName = this.options.videoName ?? TUTORIAL_VIDEO_NAME;
         const videoPath = join(outputDir, videoName);
         try {
-          await copyFile(video.path, videoPath);
+          copyFileSync(video.path, videoPath);
           // 复制完成后原位合成：失败时 compositePip 不碰主录像。
-          const notes = await composePhonePip(videoPath, outputDir);
+          const notes = composePhonePip(videoPath, outputDir);
           block = playerBlock(videoName, notes);
           html = html.replace('data-video="0"', 'data-video="1"');
         } catch (error) {
@@ -189,12 +194,16 @@ export default class ProcessVideoReporter implements Reporter {
         }
       }
       html = replaceBetween(html, VIDEO_START, VIDEO_END, block);
-      await writeFile(reportPath, html, "utf8");
+      writeFileSync(reportPath, html, "utf8");
     } catch (error) {
       // 报告器异常不能顶掉测试结论：只记录警告。
       console.warn(`业务验收报告视频区补全失败：${errorSummary(error)}`);
     } finally {
-      await cleanupPipDir(outputDir).catch(() => undefined);
+      try {
+        cleanupPipDir(outputDir);
+      } catch (error) {
+        console.warn(`清理 .pip 暂存目录失败：${errorSummary(error)}`);
+      }
     }
   }
 }

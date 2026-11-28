@@ -10,10 +10,19 @@
 // 滤镜）。ffmpeg 不可用或合成失败时跳过画中画并在报告视频区给出提示，步骤内嵌
 // 手机侧录像不受影响，E2E 结论不变。可用 E2E_FFMPEG 指定路径；E2E_FFMPEG=off
 // 显式禁用（用于本地验证降级路径）。
-import { spawnSync } from "node:child_process";
-import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+//
+// 合成/计划读取/清理都是同步函数：报告器钩子（report-video-reporter.ts）必须
+// 在测试进程退出前完成合成，而 Playwright 不会等待异步报告器钩子。
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /** 报告目录下的隐藏暂存目录：合成完成后由报告器整体删除，交付件仍只有 4 个。 */
@@ -180,43 +189,29 @@ export function buildFfmpegArgs(
   return args;
 }
 
-function run(
-  command: string,
-  args: string[],
-  timeoutMs: number,
-): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolvePromise, reject) => {
-    execFile(
-      command,
-      args,
-      { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        if (error) {
-          const detail = (stderr || stdout || error.message)
-            .trim()
-            .split("\n")
-            .slice(-3)
-            .join(" ");
-          reject(new Error(`${command} 执行失败：${detail || error.message}`));
-          return;
-        }
-        resolvePromise({ stdout, stderr });
-      },
-    );
-  });
+function errorSummary(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message.split("\n")[0] ?? error.message;
+  }
+  return String(error);
 }
 
 /**
  * 把手机侧录像合成进主录像文件（原地替换）。任何失败都只返回 warning，由调用方
  * 决定是否写入报告提示；绝不抛出（报告器里出错会顶掉测试结论）。
+ *
+ * 同步实现是必须的：Playwright 的报告器钩子不会被 await——它在钩子返回的
+ * Promise 完成前就结束了进程。ffmpeg 合成要跑几十秒，用异步实现时进程先退出，
+ * 临时文件留在 `.pip`、主录像永远合不上（te-fp48w 实测）。同步阻塞钩子能保证
+ * 合成、替换和清理都在测试进程退出前完成。
  */
-export async function compositePip(
+export function compositePip(
   ffmpegPath: string,
   mainVideoPath: string,
   segments: PipSegment[],
   workDir: string,
   timeoutMs = 20 * 60_000,
-): Promise<PipCompositeResult> {
+): PipCompositeResult {
   const plan = buildPipFilterPlan(segments);
   if (!plan) {
     return { applied: 0, warning: "没有可合成的手机侧录像（窗口或文件无效）" };
@@ -227,18 +222,30 @@ export async function compositePip(
     `composite-${process.pid}-${Date.now()}.webm`,
   );
   try {
-    await mkdir(pipDir, { recursive: true });
-    await run(
-      ffmpegPath,
-      buildFfmpegArgs(mainVideoPath, plan, tempPath),
-      timeoutMs,
-    );
-    const info = await stat(tempPath);
+    mkdirSync(pipDir, { recursive: true });
+    try {
+      execFileSync(
+        ffmpegPath,
+        buildFfmpegArgs(mainVideoPath, plan, tempPath),
+        { timeout: timeoutMs, stdio: "pipe", maxBuffer: 16 * 1024 * 1024 },
+      );
+    } catch (error) {
+      const execError = error as { stderr?: Buffer | string };
+      const stderr = String(execError.stderr ?? "")
+        .trim()
+        .split("\n")
+        .slice(-3)
+        .join(" ");
+      throw new Error(
+        `${ffmpegPath} 执行失败：${stderr || errorSummary(error)}`,
+      );
+    }
+    const info = statSync(tempPath);
     if (info.size <= 0) {
       throw new Error("ffmpeg 输出为空文件");
     }
-    // 先复制成功产物再删原文件：copyFile 覆盖已存在文件在 Windows 上也安全。
-    await copyFile(tempPath, mainVideoPath);
+    // 先复制成功产物再删原文件：copyFileSync 覆盖 Windows 上的已存在文件也安全。
+    copyFileSync(tempPath, mainVideoPath);
     return { applied: plan.segments.length };
   } catch (error) {
     return {
@@ -246,7 +253,11 @@ export async function compositePip(
       warning: `手机侧画中画合成失败（主录像保持原样）：${errorSummary(error)}`,
     };
   } finally {
-    await rm(tempPath, { force: true }).catch(() => undefined);
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      // 清理失败不影响合成结果。
+    }
   }
 }
 
@@ -265,9 +276,12 @@ export async function writePipPlan(
 }
 
 /** 读取报告器要用的合成计划；缺失/损坏都返回 null（视为没有需要合成的段）。 */
-export async function readPipPlan(outputDir: string): Promise<PipPlan | null> {
+export function readPipPlan(outputDir: string): PipPlan | null {
   try {
-    const raw = await readFile(join(outputDir, PIP_DIR_NAME, PIP_PLAN_NAME), "utf8");
+    const raw = readFileSync(
+      join(outputDir, PIP_DIR_NAME, PIP_PLAN_NAME),
+      "utf8",
+    );
     const parsed = JSON.parse(raw) as Partial<PipPlan>;
     if (parsed.schema !== PIP_PLAN_SCHEMA || !Array.isArray(parsed.segments)) {
       return null;
@@ -279,16 +293,9 @@ export async function readPipPlan(outputDir: string): Promise<PipPlan | null> {
 }
 
 /** 删除 .pip 暂存目录：无论合成成功与否，报告目录都只留交付文件。 */
-export async function cleanupPipDir(outputDir: string): Promise<void> {
-  await rm(join(outputDir, PIP_DIR_NAME), {
+export function cleanupPipDir(outputDir: string): void {
+  rmSync(join(outputDir, PIP_DIR_NAME), {
     recursive: true,
     force: true,
   });
-}
-
-function errorSummary(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message.split("\n")[0] ?? error.message;
-  }
-  return String(error);
 }
